@@ -1,0 +1,109 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Azure Arc Demo — Estate Overview\n\n*Story-first dashboard modelled on the persona-led flow. Tiles below open the conversation from exec down to ops.*"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Heartbeat\n| where TimeGenerated > ago(15m)\n| summarize LastSeen = max(TimeGenerated) by Computer, OSType\n| extend Status = iff(LastSeen > ago(10m), 'Connected', 'Stale')\n| summarize Hosts = count() by Status, OSType\n| order by OSType asc",
+        "size": 3,
+        "title": "Estate connectivity (last 15m)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Heartbeat\n| where TimeGenerated > ago(24h)\n| summarize HostsBeating = dcount(Computer) by bin(TimeGenerated, 15m)\n| order by TimeGenerated asc",
+        "size": 0,
+        "title": "Hosts beating over time (24h)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "timechart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Perf\n| where TimeGenerated > ago(24h) and CounterName has 'Processor Time' and InstanceName == '_Total'\n| summarize AvgCPU = avg(CounterValue), MaxCPU = max(CounterValue), P95 = percentile(CounterValue, 95) by Computer\n| order by AvgCPU desc",
+        "size": 0,
+        "title": "Per-host CPU utilisation (24h)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationChange\n| where TimeGenerated > ago(24h)\n| summarize Changes = count() by Computer, ConfigChangeType\n| order by Changes desc",
+        "size": 0,
+        "title": "Configuration changes (24h)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| where SoftwareType == 'Application'\n| summarize Installed = dcount(Computer) by SoftwareName\n| top 25 by Installed desc",
+        "size": 0,
+        "title": "Top 25 applications across the estate",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend hasOwner = tobool(tags.owner != ''), hasCostCenter = tobool(tags.costcenter != '')\n| summarize Total=count(), Tagged=countif(hasOwner and hasCostCenter)",
+        "size": 0,
+        "title": "Tagging hygiene (Arc machines)",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Event\n| where TimeGenerated > ago(24h) and EventLevel <= 2\n| summarize Critical = countif(EventLevel == 1), Errors = countif(EventLevel == 2) by Computer, EventLog\n| order by Critical desc, Errors desc",
+        "size": 0,
+        "title": "Critical & Error events (Windows, 24h)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Syslog\n| where TimeGenerated > ago(24h) and SeverityLevel in ('err','crit','alert','emerg')\n| summarize Events = count() by Computer, Facility, SeverityLevel\n| order by Events desc",
+        "size": 0,
+        "title": "Linux syslog errors (24h)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table"
+      }
+    }
+  ],
+  "styleSettings": {},
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

@@ -1,0 +1,26 @@
+# Logs
+logs/
+*.log
+
+# Local config / credentials
+*.local.json
+*.local.psd1
+.env
+.env.*
+secrets/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/launch.json
+
+# Bicep build artifacts
+*.json
+!workbooks/*.json
+!.github/**/*.json
+!bicep/**/parameters*.json
+
+# PowerShell test output
+TestResults.xml
+coverage.xml
