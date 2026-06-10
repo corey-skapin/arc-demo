@@ -1,0 +1,419 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# 🏥 Hospital Asset & License Management Dashboard\n\n**Executive Procurement Intelligence for IT Asset Optimization**\n\nThis dashboard provides comprehensive visibility into your hybrid infrastructure assets, software licensing footprint, and procurement governance compliance. Designed for procurement executives and IT finance leaders to make data-driven decisions about license optimization, cost allocation, and vendor negotiations.\n\n**Strategic Value:**\n- **Asset Inventory**: Real-time visibility into all Arc-enabled servers across hospital environments\n- **License Optimization**: SQL Server edition analysis for enterprise agreement planning and cost reduction\n- **Financial Governance**: Tag compliance tracking for accurate cost allocation and chargeback\n- **Vendor Management**: Software consolidation opportunities and license reclamation insights\n- **Compliance**: Audit-ready reporting for license compliance and asset management\n\n**Sections:** Executive Overview · Server Estate · SQL Licensing · Database Assets · Financial Tags · Operational Health · Software Assets"
+      }
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "p_subs",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_subs",
+            "type": 6,
+            "label": "Subscriptions",
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "defaultValue": "value::all"
+          },
+          {
+            "id": "p_time",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_time",
+            "type": 4,
+            "label": "Time range (for Log Analytics tabs)",
+            "value": { "durationMs": 604800000 }
+          },
+          {
+            "id": "p_ws",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_ws",
+            "type": 5,
+            "label": "Select Log Analytics Workspace",
+            "isRequired": false,
+            "query": "where type =~ 'microsoft.operationalinsights/workspaces'",
+            "crossComponentResources": [
+              "{p_subs}"
+            ],
+            "typeSettings": {
+              "resourceTypeFilter": {
+                "microsoft.operationalinsights/workspaces": true
+              },
+              "showDefault": true
+            },
+            "defaultValue": "/subscriptions/7e949884-b256-4bf7-9638-030195178e14/resourceGroups/arcdemo-01/providers/Microsoft.OperationalInsights/workspaces/LAWArcDemo",
+            "value": "/subscriptions/7e949884-b256-4bf7-9638-030195178e14/resourceGroups/arcdemo-01/providers/Microsoft.OperationalInsights/workspaces/LAWArcDemo",
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          },
+          {
+            "id": "p_cc",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_cc",
+            "type": 1,
+            "label": "Tag filter: CostCentre (optional)",
+            "value": ""
+          },
+          {
+            "id": "p_owner",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_owner",
+            "type": 1,
+            "label": "Tag filter: Owner (optional)",
+            "value": ""
+          },
+          {
+            "id": "p_env",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_env",
+            "type": 1,
+            "label": "Tag filter: Environment (optional)",
+            "value": ""
+          }
+        ],
+        "style": "pills"
+      }
+    },
+    {
+      "type": 1,
+      "content": { "json": "## 📊 Executive Overview\n\n**At-a-Glance Asset & Compliance Summary**\n\nThis section provides instant visibility into your most critical procurement metrics. Use these key performance indicators to:\n\n**What You're Looking At:**\n- **Total Server Assets**: Your complete hybrid infrastructure inventory under management\n- **Platform Mix**: Windows vs Linux distribution affecting license costs and vendor relationships\n- **Operational Status**: Offline servers indicating potential license waste or operational issues\n- **Financial Governance**: Tag compliance percentages showing cost allocation accuracy\n\n**Why This Matters:**\n- **Budget Planning**: Total asset count drives infrastructure budget and license costs\n- **License Strategy**: OS distribution impacts Microsoft licensing and support agreements\n- **Risk Management**: Offline servers may indicate wasted spend or operational gaps\n- **Cost Allocation**: Tag compliance enables accurate departmental chargebacks and budget accountability\n\n**Action Thresholds:**\n- 🟢 Tag Compliance >90%: Excellent financial governance\n- 🟡 Tag Compliance 75-90%: Good but needs improvement\n- 🔴 Tag Compliance <75%: Critical - prevents accurate cost allocation\n- ⚠️ Offline >5%: Investigate potential license waste\n\n---\n\n### 📋 **How To Read The Tiles Below:**\n\n**What Each Tile Means (in order shown):**\n1. **Total Assets** = Total number of servers you're paying to manage\n2. **Offline Servers** = Disconnected servers that may be wasting license fees (⚠️ High count is bad)\n3. **Windows Servers** = Servers requiring Microsoft Windows licenses\n4. **Linux Servers** = Servers using free/open-source OS (lower licensing costs)\n5. **CostCentre Tag %** = Percentage of servers with cost center tags (🔴 0% = critical, cannot bill departments)\n6. **Owner Tag %** = Percentage of servers with assigned owners (🔴 0% = no accountability)\n7. **Environment Tag %** = Percentage of servers classified as Prod/Dev/Test (🔴 0% = poor governance)\n\n**Quick Action:** If any tag percentage is 0% or very low, you have servers that cannot be properly billed to departments. This means IT is absorbing costs that should be charged back." }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "size": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend CostCentre=tostring(tags.CostCentre), Owner=tostring(tags.Owner), Environment=tostring(tags.Environment)\n| summarize total=count(), windows=countif(tostring(properties.osName) =~ 'Windows'), linux=countif(tostring(properties.osName) !~ 'Windows'), offline=countif(tostring(properties.status) != 'Connected'), missingCC=countif(isempty(CostCentre) or CostCentre == ''), missingOwner=countif(isempty(Owner) or Owner == ''), missingEnv=countif(isempty(Environment) or Environment == '')\n| project total, windows, linux, offline, CostCentrePct=round(100.0 * (total - missingCC) / total, 1), OwnerPct=round(100.0 * (total - missingOwner) / total, 1), EnvironmentPct=round(100.0 * (total - missingEnv) / total, 1)\n| project data = pack_array(\n    pack('Metric', 'Total Assets', 'Value', total, 'Type', 'count'),\n    pack('Metric', 'Windows Servers', 'Value', windows, 'Type', 'count'),\n    pack('Metric', 'Linux Servers', 'Value', linux, 'Type', 'count'),\n    pack('Metric', 'Offline Servers', 'Value', offline, 'Type', 'count'),\n    pack('Metric', 'CostCentre Tag %', 'Value', CostCentrePct, 'Type', 'percent'),\n    pack('Metric', 'Owner Tag %', 'Value', OwnerPct, 'Type', 'percent'),\n    pack('Metric', 'Environment Tag %', 'Value', EnvironmentPct, 'Type', 'percent')\n  )\n| mv-expand data\n| project Metric=tostring(data['Metric']), Value=data['Value'], Type=tostring(data['Type'])",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Metric",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "none"
+            },
+            "numberFormat": {
+              "unit": 0,
+              "options": {
+                "style": "decimal",
+                "useGrouping": false
+              }
+            }
+          },
+          "showBorder": true
+        }
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend CostCentre=tostring(tags.CostCentre), Owner=tostring(tags.Owner), Environment=tostring(tags.Environment)\n| where isempty('{p_cc}') or CostCentre =~ '{p_cc}'\n| where isempty('{p_owner}') or Owner =~ '{p_owner}'\n| where isempty('{p_env}') or Environment =~ '{p_env}'\n| extend OS = case(\n    tostring(properties.osName) =~ 'Windows', 'Windows',\n    tostring(properties.osName) contains 'Linux', 'Linux',\n    'Other'\n  )\n| summarize ['Server Count'] = count() by OS\n| order by ['Server Count'] desc",
+        "visualization": "barchart",
+        "title": "Operating System Distribution - License Planning",
+        "chartSettings": {
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Windows",
+              "color": "blue"
+            },
+            {
+              "seriesName": "Linux",
+              "color": "green"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 1,
+      "content": { "json": "## 🖥️ Complete Server Asset Inventory\n\n**Comprehensive Asset Register for Procurement & Financial Management**\n\n**What You're Looking At:**\nA complete, searchable inventory of every server under Arc management across your hospital environment. Each row represents a billable asset with its associated cost allocation tags and operational status.\n\n**Business Value:**\n- **Asset Verification**: Validate server counts for vendor negotiations and license true-ups\n- **Cost Allocation**: Ensure every asset has proper cost center tags for accurate departmental billing\n- **Compliance Auditing**: Demonstrate asset inventory completeness to auditors and regulators\n- **Lifecycle Planning**: Identify assets by location and ownership for refresh planning\n- **Contract Management**: Cross-reference with vendor contracts to verify coverage and identify gaps\n\n**How To Use This Data:**\n- **Filter by Cost Centre**: Use the filters above to view specific department assets for chargeback validation\n- **Offline Assets**: Sort by status to find disconnected servers that may be decommission candidates\n- **Missing Tags**: Identify untagged assets that prevent accurate cost allocation\n- **Geographic Distribution**: Group by location to optimize regional licensing or support contracts\n\n**Procurement Actions:**\n- Export this data for vendor license compliance audits\n- Cross-reference with purchase orders to validate asset age and warranty status\n- Identify consolidation opportunities by reviewing duplicate or underutilized assets\n- Use subscription and resource group data for cloud cost optimization discussions" }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend Computer=tostring(properties.osProfile.computerName), rawOS=tostring(properties.osName), Status=tostring(properties.status), CostCentre=tostring(tags.CostCentre), Owner=tostring(tags.Owner), Environment=tostring(tags.Environment)\n| extend OS=iff(rawOS =~ 'Windows', '🪟 Windows', iff(rawOS =~ 'Linux', '🐧 Linux', rawOS))\n| extend DisplayStatus=iff(Status =~ 'Connected', '✅ Connected', strcat('❌ ', Status))\n| where isempty('{p_cc}') or CostCentre =~ '{p_cc}'\n| where isempty('{p_owner}') or Owner =~ '{p_owner}'\n| where isempty('{p_env}') or Environment =~ '{p_env}'\n| project Computer, OS, DisplayStatus, subscriptionId, resourceGroup, location, CostCentre, Owner, Environment, id\n| order by tolower(Computer) asc",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 1,
+      "content": { "json": "## 💰 SQL Server Licensing Footprint\n\n**Strategic License Optimization & Enterprise Agreement Planning**\n\n**What You're Looking At:**\nYour complete SQL Server licensing landscape across all Arc-enabled infrastructure. This inventory drives millions of dollars in licensing decisions and vendor negotiations.\n\n**Critical Business Impact:**\n- **License Cost Management**: Enterprise Edition can cost $15,000+ per core - identifying downgrade opportunities saves significant budget\n- **EA Renewal Planning**: Total instance counts drive Enterprise Agreement pricing and commitment levels\n- **Compliance Risk**: Unlicensed or mis-licensed SQL deployments expose organization to audit penalties\n- **Optimization Opportunities**: Developer/Express editions may be unnecessarily upgraded to Standard/Enterprise\n- **Vendor Negotiations**: Accurate counts provide leverage in Microsoft SQL Server licensing discussions\n\n**Financial Impact Analysis:**\n- **Enterprise Edition**: Highest cost - validate business requirement for each instance\n- **Standard Edition**: Mid-tier licensing - assess if workloads could use Developer/Express\n- **Developer Edition**: Free for non-production - ensure not running production workloads\n- **Express Edition**: Free but limited - identify upsell candidates legitimately needing more capacity\n\n**Procurement Action Plan:**\n1. **Immediate**: Validate Enterprise Edition usage - each unnecessary instance wastes $15K-50K annually\n2. **Quarterly**: Review Standard Edition for downgrade candidates to reduce license costs\n3. **Annually**: Use total counts for EA renewal negotiations and commitment planning\n4. **Ongoing**: Monitor for new instances to prevent license compliance gaps\n\n**Key Questions For Executives:**\n- Do all Enterprise Edition instances truly need advanced features?\n- Can development/test workloads use Developer Edition (free)?\n- Are Express Edition instances hitting limitations requiring upgrades?\n- Does our EA commitment match actual deployment counts?" }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "size": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.azurearcdata/sqlserverinstances'\n| summarize \n    total = count(),\n    enterprise = countif(tostring(properties.edition) =~ 'Enterprise'),\n    standard = countif(tostring(properties.edition) =~ 'Standard'),\n    developer = countif(tostring(properties.edition) =~ 'Developer'),\n    express = countif(tostring(properties.edition) =~ 'Express')\n| project data = pack_array(\n    pack('Metric', 'Total SQL Instances', 'Value', total),\n    pack('Metric', 'Enterprise Edition', 'Value', enterprise),\n    pack('Metric', 'Standard Edition', 'Value', standard),\n    pack('Metric', 'Developer Edition', 'Value', developer),\n    pack('Metric', 'Express Edition', 'Value', express)\n)\n| mv-expand data\n| project \n    Metric = tostring(data['Metric']),\n    Value = data['Value']",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Metric",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            },
+            "numberFormat": {
+              "unit": 17,
+              "options": {
+                "style": "decimal",
+                "useGrouping": true
+              }
+            }
+          },
+          "showBorder": true
+        }
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.azurearcdata/sqlserverinstances'\n| extend Edition = tostring(properties.edition)\n| extend CostCategory = case(\n    Edition =~ 'Enterprise', 'Enterprise (Highest Cost)',\n    Edition =~ 'Standard', 'Standard (Medium Cost)',\n    Edition =~ 'Developer', 'Developer (Free)',\n    Edition =~ 'Express', 'Express (Free)',\n    'Other'\n  )\n| summarize ['Instance Count'] = count() by CostCategory\n| order by ['Instance Count'] desc",
+        "visualization": "barchart",
+        "title": "SQL Edition Distribution - Cost Impact Analysis",
+        "chartSettings": {
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Enterprise (Highest Cost)",
+              "color": "redBright"
+            },
+            {
+              "seriesName": "Standard (Medium Cost)",
+              "color": "orange"
+            },
+            {
+              "seriesName": "Developer (Free)",
+              "color": "green"
+            },
+            {
+              "seriesName": "Express (Free)",
+              "color": "green"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 1,
+      "content": { "json": "## 📋 Database Asset Register - License Compliance Detail\n\n**Granular License Tracking & Compliance Validation**\n\n**What You're Looking At:**\nDetailed mapping of every SQL Server instance to its host server, showing version, edition, and critical license type information. This is your audit-ready documentation for SQL Server compliance.\n\n**Why This Section Is Critical:**\n- **Audit Defense**: Provides complete license type documentation required for Microsoft SAM (Software Asset Management) audits\n- **Cost Center Validation**: Maps database workloads to cost centers for accurate IT chargeback\n- **License Compliance**: Identifies PAYG (pay-as-you-go) vs BYOL (bring your own license) for cost optimization\n- **Version Management**: Tracks SQL versions for security patching and end-of-support planning\n- **Consolidation Planning**: Identifies servers running SQL for potential consolidation savings\n\n**License Type Definitions:**\n- **PAYG (Pay-As-You-Go)**: Azure-billed licensing - highest cost but most flexible\n- **LicenseOnly/Paid**: Existing on-premises licenses with Software Assurance - lower Azure costs\n- **Developer**: Free for non-production - must validate not running production workloads\n- **Express**: Free with limitations - confirm workloads don't exceed restrictions\n\n**Procurement Decision Points:**\n- Servers with PAYG should be evaluated for BYOL cost savings (requires Software Assurance)\n- Multiple instances on one server may indicate consolidation opportunities\n- Match SQL versions against your EA to ensure version rights and support coverage\n- Cross-reference with cost center tags to validate departmental license allocation\n\n**Action Items:**\n- Export filtered by cost center for department-specific license compliance reviews\n- Identify PAYG instances as candidates for license mobility (Azure Hybrid Benefit)\n- Flag any production workloads mistakenly running Developer/Express editions\n- Use version data to plan upgrades and end-of-support migrations" }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| project arcId = tolower(id), Computer = tostring(properties.osProfile.computerName), RG=resourceGroup, Sub=subscriptionId, Location=location, Tags=tags\n| join kind=inner (\n    resources\n    | where type == 'microsoft.azurearcdata/sqlserverinstances'\n    | project sqlArcContainerId = tolower(tostring(properties.containerResourceId)), SqlInstance=name, SqlVersion=tostring(properties.version), SqlEdition=tostring(properties.edition), LicenseType=tostring(properties.licenseType)\n) on $left.arcId == $right.sqlArcContainerId\n| extend CostCentre=tostring(Tags.CostCentre), Owner=tostring(Tags.Owner), Environment=tostring(Tags.Environment)\n| where isempty('{p_cc}') or CostCentre =~ '{p_cc}'\n| where isempty('{p_owner}') or Owner =~ '{p_owner}'\n| where isempty('{p_env}') or Environment =~ '{p_env}'\n| project Computer, SqlInstance, SqlVersion, SqlEdition, LicenseType, RG, Sub, Location, CostCentre, Owner, Environment\n| order by tolower(Computer) asc",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 1,
+      "content": { "json": "## 💳 Financial Governance & Cost Allocation Tags\n\n**Ensuring Accurate IT Chargeback & Budget Accountability**\n\n**What You're Looking At:**\nTag compliance metrics that directly impact your ability to accurately allocate IT costs to departments and business units. Missing tags represent millions in unallocated or mis-allocated IT spending.\n\n**Business Impact of Poor Tagging:**\n- **Lost Revenue**: Untagged assets cannot be charged back to departments, forcing IT to absorb costs\n- **Budget Inaccuracy**: Missing cost center tags prevent accurate departmental budget planning\n- **Audit Risk**: Incomplete asset ownership creates compliance and accountability gaps\n- **Procurement Waste**: Cannot identify which departments are over/under-utilizing resources\n- **Vendor Management**: Unable to allocate software licenses to proper cost centers for optimization\n\n**Tag Definitions & Requirements:**\n- **CostCentre**: Financial code for departmental chargeback (e.g., \"CC-1234\") - MANDATORY for billing\n- **Owner**: Technical contact for operational decisions and incident response - MANDATORY for accountability\n- **Environment**: Production/Development/Test classification - MANDATORY for risk management and licensing\n\n**Financial Governance Thresholds:**\n- 🟢 **>95% Coverage**: Excellent - accurate cost allocation possible\n- 🟡 **85-95% Coverage**: Good - minor gaps won't significantly impact billing\n- 🟠 **75-85% Coverage**: Concerning - material impact on chargeback accuracy\n- 🔴 **<75% Coverage**: Critical - majority of costs cannot be properly allocated\n\n**Cost Impact Example:**\nWith 1,000 servers at $200/month average cost:\n- 20% missing tags = $40,000/month in unallocated costs\n- 50% missing tags = $100,000/month lost chargeback revenue\n- 80% missing tags = $160,000/month unaccounted spending\n\n**Executive Actions Required:**\n1. **Immediate**: Mandate tagging for all new server deployments (enforce via Azure Policy)\n2. **30 Days**: Assign ownership for remediation of existing untagged assets\n3. **90 Days**: Achieve 95%+ tag compliance to enable accurate quarterly chargebacks\n4. **Ongoing**: Monthly compliance reviews and department scorecards for accountability\n\n**Use The Data Below To:**\n- Identify specific departments/teams with poor tagging practices\n- Calculate financial impact of missing tags on chargeback accuracy\n- Prioritize remediation efforts on highest-value assets first\n- Report tag compliance to finance leadership as part of IT governance KPIs" }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend CostCentre=tostring(tags.CostCentre), Owner=tostring(tags.Owner), Environment=tostring(tags.Environment)\n| summarize total=count(), missingCostCentre=countif(isempty(CostCentre) or CostCentre == ''), missingOwner=countif(isempty(Owner) or Owner == ''), missingEnv=countif(isempty(Environment) or Environment == '')\n| extend pctMissingCostCentre = round(100.0 * todouble(missingCostCentre)/todouble(total),2), pctMissingOwner = round(100.0 * todouble(missingOwner)/todouble(total),2), pctMissingEnv = round(100.0 * todouble(missingEnv)/todouble(total),2), pctCoverageCostCentre = round(100.0 * (1 - todouble(missingCostCentre)/todouble(total)),2), pctCoverageOwner = round(100.0 * (1 - todouble(missingOwner)/todouble(total)),2), pctCoverageEnv = round(100.0 * (1 - todouble(missingEnv)/todouble(total)),2)\n| project ['Total Servers']=total, ['Missing CostCentre']=missingCostCentre, ['CostCentre Missing %']=pctMissingCostCentre, ['CostCentre Coverage %']=pctCoverageCostCentre, ['Missing Owner']=missingOwner, ['Owner Missing %']=pctMissingOwner, ['Owner Coverage %']=pctCoverageOwner, ['Missing Environment']=missingEnv, ['Environment Missing %']=pctMissingEnv, ['Environment Coverage %']=pctCoverageEnv",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend CostCentre=tostring(tags.CostCentre), Owner=tostring(tags.Owner), Environment=tostring(tags.Environment)\n| summarize missingCostCentre=countif(isempty(CostCentre) or CostCentre == ''), missingOwner=countif(isempty(Owner) or Owner == ''), missingEnv=countif(isempty(Environment) or Environment == '')\n| extend tagMissingData = pack_array( pack('Tag','CostCentre','Missing',missingCostCentre), pack('Tag','Owner','Missing',missingOwner), pack('Tag','Environment','Missing',missingEnv) )\n| mv-expand tagMissingData\n| extend Tag=tostring(tagMissingData['Tag']), Missing=toint(tagMissingData['Missing'])\n| where Missing > 0\n| project Tag, Missing\n| order by Missing desc",
+        "visualization": "piechart",
+        "title": "Distribution of Missing Tags"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{p_subs}"
+        ],
+        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend CostCentre=tostring(tags.CostCentre), Owner=tostring(tags.Owner), Environment=tostring(tags.Environment)\n| where isempty(CostCentre) or isempty(Owner) or isempty(Environment) or CostCentre=='' or Owner=='' or Environment==''\n| project Computer=tostring(properties.osProfile.computerName), CostCentre, Owner, Environment, resourceGroup, subscriptionId, location\n| order by tolower(Computer) asc",
+        "visualization": "table",
+        "title": "Untagged / Partially Tagged Arc Servers"
+      }
+    },
+    {
+      "type": 1,
+      "content": { "json": "## 🏥 Operational Health & Asset Availability\n\n**Monitoring License Utilization & Identifying Waste**\n\n**What You're Looking At:**\nReal-time agent connectivity status showing which servers are actively reporting to management systems. This data helps identify wasted spending on disconnected or abandoned assets.\n\n**Why This Matters For Procurement:**\n- **License Waste Detection**: Offline servers may have unused software licenses that can be reclaimed\n- **Asset Lifecycle**: Extended offline periods indicate decommission candidates to reduce costs\n- **Management Coverage**: Servers without heartbeats aren't being monitored, patched, or compliant\n- **Cost Optimization**: Disconnected Arc agents may indicate Azure Hybrid Benefit waste\n\n**Health Status Interpretation:**\n- ✅ **<15 minutes**: Healthy - server is operational and under active management\n- ⚠️ **15-60 minutes**: Warning - possible network issues or agent problems\n- ❌ **>60 minutes**: Critical - server offline or agent failed (investigate for decommission)\n\n**Financial Impact:**\nEach disconnected server represents:\n- Arc management fees ($5-10/month) with no value delivered\n- Unused Windows Server licenses ($100-200/month)\n- SQL Server licenses potentially not in use ($200-2000+/month)\n- Support contracts on non-operational assets\n\n**Procurement Action Plan:**\n1. **Weekly**: Review servers offline >7 days as decommission candidates\n2. **Monthly**: Reclaim licenses from confirmed offline assets\n3. **Quarterly**: Calculate cost savings from decommissioned assets for budget adjustments\n4. **Annually**: Use availability metrics for infrastructure reliability assessments with vendors" }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{p_ws}"],
+        "workspace": "{p_ws}",
+        "timeContextFromParameter": "p_time",
+        "query": "Heartbeat\n| summarize lastHB = max(TimeGenerated) by Computer\n| extend minutesSinceHB = datetime_diff('minute', now(), lastHB)\n| extend FreshnessIcon = case(minutesSinceHB < 15, '✅', minutesSinceHB < 60, '⚠️', '❌')\n| project Computer, FreshnessIcon, lastHB, minutesSinceHB\n| order by minutesSinceHB desc",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 1,
+      "content": { "json": "## 📦 Software Asset Management & License Optimization\n\n**Strategic Software Spend Analysis & Vendor Consolidation**\n\n**Executive Overview:**\nThis section provides sophisticated software asset intelligence that drives procurement strategy, vendor negotiations, and license cost optimization. The insights below can save hundreds of thousands in software spending annually.\n\n**What You're Looking At:**\nComprehensive software inventory across all managed servers, analyzed for procurement optimization opportunities:\n\n### 🎯 **Key Procurement Intelligence:**\n\n**1. Top Installed Software (Deployment Analysis)**\n- **Purpose**: Identify most widely deployed applications for volume licensing negotiations\n- **Value**: High deployment counts = stronger vendor negotiation leverage\n- **Action**: Consolidate to single vendor agreements for better pricing (20-40% savings typical)\n\n**2. Vendor/Publisher Consolidation Analysis**\n- **Purpose**: Identify opportunities to reduce vendor count and negotiate master agreements\n- **Value**: Fewer vendors = reduced admin overhead + volume discounts\n- **Example**: 50 different vendors → consolidate to 10-15 strategic partners\n\n**3. Version Sprawl & Standardization Candidates**\n- **Purpose**: Find applications with multiple versions deployed (risk + cost)\n- **Value**: Standardization reduces support costs, security risk, and license complexity\n- **Target**: Reduce to 1-2 supported versions per application\n\n**4. Software Density Analysis (Bloatware Identification)**\n- **Purpose**: Identify servers with excessive software installations\n- **Value**: Remove unused software = reclaim licenses = reduce costs\n- **Red Flag**: Servers with 100+ applications likely have significant waste\n\n**5. New Software Approvals & Compliance**\n- **Purpose**: Track unauthorized software installations\n- **Value**: Enforce procurement approval processes, prevent license violations\n- **Risk**: Unapproved software may lack licenses or vendor support\n\n**6. License Reclamation Opportunities**\n- **Purpose**: Identify recently uninstalled software for license recovery\n- **Value**: Reassign reclaimed licenses instead of buying new ones\n- **Savings**: Each reclaimed license = $100-10,000+ depending on product\n\n### 💰 **Financial Impact Examples:**\n\n**Scenario 1: Vendor Consolidation**\n- Current: 50 vendors, each with separate contracts\n- Optimized: Consolidate to 15 strategic vendors with master agreements\n- Savings: 25-35% reduction in software spend + 40% reduction in procurement overhead\n\n**Scenario 2: Version Standardization**\n- Current: Adobe products across 8 different versions\n- Optimized: Standardize to single enterprise agreement\n- Savings: 40% reduction in Adobe spend + elimination of per-seat licensing complexity\n\n**Scenario 3: License Reclamation**\n- Current: 500 servers, 10 removing software per month\n- Reclaimed: 120 licenses per year (avg $500 each)\n- Savings: $60,000 annually from reclaimed licenses vs new purchases\n\n### 📊 **How To Use This Data:**\n\n**Quarterly Actions:**\n- Export top 20 software products for EA renewal planning\n- Review vendor distribution for consolidation opportunities\n- Assess version sprawl for standardization projects\n\n**Monthly Actions:**\n- Review new software installations for approval compliance\n- Identify license reclamation from uninstalls\n- Track software density trends\n\n**Annual Actions:**\n- Use deployment counts in vendor negotiations\n- Calculate ROI of software consolidation initiatives\n- Present optimization savings to executive leadership\n\n### ⚠️ **Critical Procurement Alerts:**\n- **High vendor count** (>30): Significant consolidation opportunity\n- **Version sprawl** (5+ versions of same product): Standardization needed\n- **Unauthorized installs** (>10/week): Approval process breakdown\n- **High bloat** (>20% servers with 100+ apps): Waste requiring cleanup\n\n**Use these insights to drive data-driven software procurement decisions and demonstrate measurable cost optimization to executive leadership.**" }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{p_ws}"],
+        "workspace": "{p_ws}",
+        "timeContextFromParameter": "p_time",
+        "query": "ConfigurationData\n| where ConfigDataType == \"Software\"\n| summarize HostCount=dcount(Computer) by SoftwareName, Publisher, CurrentVersion\n| top 30 by HostCount desc\n| project SoftwareName, Publisher, Version=CurrentVersion, ['Hosts Installed']=HostCount\n| order by ['Hosts Installed'] desc",
+        "visualization": "table",
+        "title": "Top Installed Software (by deployment count)"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{p_ws}"],
+        "workspace": "{p_ws}",
+        "timeContextFromParameter": "p_time",
+        "query": "ConfigurationData\n| where ConfigDataType == \"Software\"\n| summarize TotalInstalls=count(), UniqueServers=dcount(Computer) by Publisher\n| top 20 by TotalInstalls desc\n| project Publisher, ['Total Software Products']=TotalInstalls, ['Deployed on Servers']=UniqueServers\n| order by ['Total Software Products'] desc",
+        "visualization": "table",
+        "title": "Top Software Vendors/Publishers (license consolidation opportunities)"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{p_ws}"],
+        "workspace": "{p_ws}",
+        "timeContextFromParameter": "p_time",
+        "query": "ConfigurationData\n| where ConfigDataType == \"Software\"\n| summarize VersionCount=dcount(CurrentVersion), Hosts=dcount(Computer), Versions=make_set(CurrentVersion, 10) by SoftwareName\n| where VersionCount > 1\n| top 20 by VersionCount desc\n| project SoftwareName, ['Different Versions']=VersionCount, ['Total Hosts']=Hosts, ['Sample Versions']=substring(tostring(Versions), 0, 100)\n| order by ['Different Versions'] desc",
+        "visualization": "table",
+        "title": "Version Sprawl Analysis (standardization & upgrade candidates)"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{p_ws}"],
+        "workspace": "{p_ws}",
+        "timeContextFromParameter": "p_time",
+        "query": "ConfigurationData\n| where ConfigDataType == \"Software\"\n| summarize InstallCount=count() by Computer\n| summarize ServerCount=count() by InstallCount\n| extend Category=case(InstallCount < 20, '< 20 apps', InstallCount < 50, '20-50 apps', InstallCount < 100, '50-100 apps', '100+ apps (bloat)')\n| summarize Servers=sum(ServerCount) by Category\n| order by Servers desc",
+        "visualization": "piechart",
+        "title": "Software Density per Server (bloat identification)"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{p_ws}"],
+        "workspace": "{p_ws}",
+        "timeContextFromParameter": "p_time",
+        "query": "ConfigurationChange\n| where ConfigChangeType == \"Software\" and ChangeCategory == \"Added\"\n| where TimeGenerated > ago(7d)\n| project TimeGenerated, Computer, SoftwareName, Version=Current\n| order by TimeGenerated desc\n| take 50",
+        "visualization": "table",
+        "title": "New Software Added (last 7 days)"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{p_ws}"],
+        "workspace": "{p_ws}",
+        "timeContextFromParameter": "p_time",
+        "query": "ConfigurationChange\n| where ConfigChangeType == \"Software\" and ChangeCategory == \"Removed\"\n| where TimeGenerated > ago(30d)\n| project TimeGenerated, Computer, SoftwareName, ['Previous Version']=Previous\n| order by TimeGenerated desc\n| take 50",
+        "visualization": "table",
+        "title": "Software Removed (last 30 days - license reclamation)"
+      }
+    }
+  ],
+  "styleSettings": { "padding": "8px" },
+  "fromTemplateId": "community",
+  "timeContext": { "durationMs": 604800000 },
+  "isLocked": false
+}

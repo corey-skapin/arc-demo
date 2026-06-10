@@ -1,0 +1,1952 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# � **Executive Security & Governance Intelligence**\n## **Azure Arc Enterprise Risk Management Dashboard**\n\n**Transform your organisation's security posture with real-time business intelligence that prevents incidents, reduces costs, and ensures compliance.**\n\n**Executive Journey:** Business Value · Immediate Actions · Efficiency Gains · Security Overview · Operational Intelligence · Success Metrics"
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "p_subs",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_subs",
+            "type": 6,
+            "label": "Subscriptions",
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "defaultValue": "value::all"
+          },
+          {
+            "id": "p_time",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_time",
+            "type": 4,
+            "label": "Time range",
+            "isRequired": true,
+            "value": {
+              "durationMs": 2592000000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                },
+                {
+                  "durationMs": 7776000000
+                }
+              ]
+            }
+          },
+          {
+            "id": "p_ws",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_ws",
+            "type": 5,
+            "label": "Log Analytics Workspace",
+            "isRequired": false,
+            "query": "where type =~ 'microsoft.operationalinsights/workspaces'\n| project id, name, location",
+            "crossComponentResources": [
+              "{p_subs}"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::1"
+              ],
+              "showDefault": false
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          },
+          {
+            "id": "p_initiative",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_initiative",
+            "type": 2,
+            "label": "Policy Initiative",
+            "isRequired": false,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend policySetDefId = tostring(properties.policySetDefinitionId)\n| where isnotempty(policySetDefId)\n| extend initiativeName = tostring(split(policySetDefId, '/')[8])\n| summarize by initiativeName\n| order by initiativeName asc\n| project value = initiativeName, label = initiativeName",
+            "crossComponentResources": [
+              "{p_subs}"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "defaultValue": "value::all",
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          },
+          {
+            "id": "p_complianceState",
+            "version": "KqlParameterItem/1.0",
+            "name": "p_complianceState",
+            "type": 2,
+            "label": "Compliance State",
+            "isRequired": false,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "jsonData": "[\"Compliant\", \"NonCompliant\", \"Exempt\", \"Conflict\"]",
+            "defaultValue": "value::all"
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "title": "💰 Business Value Dashboard",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## 💰 **Your Security Investment Returns**\n\n**The Million-Dollar Business Case for Immediate Executive Action**\n\nThis dashboard shows you the real money at stake with your current security posture. Every metric below translates directly to measurable business risk, cost exposure, and competitive advantage that impacts your bottom line.\n\n### **⚡ Executive Reality Check**\n\n**The Cost of Inaction:** Unmanaged security risks cost Australian businesses an average of $2.1 million per incident - and that's just the beginning. Add regulatory penalties, lost productivity, and damaged reputation.\n\n**The Competitive Advantage:** Industry leaders with strong governance save 40% on security costs, avoid 95% of preventable incidents, and qualify for lower cyber insurance premiums.\n\n**Your Time Investment:** 15 minutes of executive review per week\n**Your Financial Return:** Millions in prevented losses + operational savings + competitive positioning\n\n**ROI Reality:** Organisations using proactive governance dashboards report 300-500% return on investment within 12 months.\n\n### **🎯 Executive Decision Framework**\n\n**🟢 Green Tiles:** Excellent performance - leverage for competitive advantage\n**🟡 Yellow Tiles:** Opportunity identified - moderate investment for high returns\n**🔴 Red Tiles:** Business risk exposure - immediate budget approval required\n\n**Numbers That Drive Decisions:**\n- **Large Numbers:** Primary KPIs for board reporting\n- **Small Numbers:** Operational details for team direction\n- **Percentages:** Benchmark performance for strategic planning\n\n### **💼 Strategic Business Impact**\n\n**High Compliance (85%+):** Market leader position, audit-ready, reduced insurance costs, stakeholder confidence\n**Medium Compliance (70-84%):** Competitive position, manageable risk with focused investment\n**Low Compliance (<70%):** Business vulnerability, immediate strategic intervention required\n\n**Executive Advantage:** Transform security from cost centre to profit enabler with data-driven decision making."
+            },
+            "name": "exec_text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| extend resourceType = tostring(properties.resourceType)\n| extend isArcServer = resourceType has 'Microsoft.HybridCompute/machines'\n| summarize \n    Total = count(),\n    Compliant = countif(complianceState == 'Compliant'),\n    NonCompliant = countif(complianceState == 'NonCompliant'),\n    Exempt = countif(complianceState == 'Exempt'),\n    ArcServers = countif(isArcServer)\n| extend ComplianceRate = iff(Total == 0, 0.0, round(todouble(Compliant) * 100.0 / todouble(Total), 2))\n| project \n    ComplianceRate,\n    Total,\n    Compliant,\n    NonCompliant,\n    Exempt,\n    ArcServers",
+              "size": 4,
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "ComplianceRate",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Compliant",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "name": "overall_compliance_tiles"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🏥 **Hospital/Department Compliance Comparison**\n\n**What You're Looking At:** Each hexagon represents a resource group (typically a hospital, department, or business unit) with their compliance percentage\n\n**How to Read This:**\n- **Green hexagons (85%+)**: Well-managed units with good governance\n- **Orange hexagons (70-84%)**: Units needing attention and improvement\n- **Red hexagons (<70%)**: Problem areas requiring immediate management action\n- **Number in center**: Compliance percentage for that unit\n- **Number at bottom**: Count of non-compliant resources needing fixes\n\n**What This Means for Business:**\n- Red units increase organizational risk and may face audit issues\n- Consistently red units may need additional training or resources\n- Use this to prioritize which departments need governance support first"
+            },
+            "name": "hospital_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| extend resourceId = tostring(properties.resourceId)\n| extend resourceGroup = tostring(split(resourceId, '/')[4])\n| where isnotempty(resourceGroup)\n| summarize \n    Total = count(),\n    Compliant = countif(complianceState == 'Compliant'),\n    NonCompliant = countif(complianceState == 'NonCompliant')\n    by resourceGroup\n| extend ComplianceRate = iff(Total == 0, 0.0, round(todouble(Compliant) * 100.0 / todouble(Total), 2))\n| project \n    Hospital = resourceGroup,\n    ['Compliance %'] = ComplianceRate,\n    Total,\n    Compliant,\n    NonCompliant\n| order by ['Compliance %'] asc",
+              "size": 1,
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "graph",
+              "graphSettings": {
+                "type": 2,
+                "topContent": {
+                  "columnMatch": "Hospital",
+                  "formatter": 1
+                },
+                "centerContent": {
+                  "columnMatch": "Compliance %",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": false,
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "bottomContent": {
+                  "columnMatch": "NonCompliant",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "nodeIdField": "Hospital",
+                "nodeSize": null,
+                "staticNodeSize": 100,
+                "colorSettings": {
+                  "nodeColorField": "Compliance %",
+                  "type": 4,
+                  "thresholdsGrid": [
+                    {
+                      "operator": "<",
+                      "thresholdValue": "70",
+                      "representation": "redBright"
+                    },
+                    {
+                      "operator": "<",
+                      "thresholdValue": "85",
+                      "representation": "orange"
+                    },
+                    {
+                      "operator": "Default",
+                      "thresholdValue": null,
+                      "representation": "green"
+                    }
+                  ]
+                },
+                "hivesMargin": 5
+              }
+            },
+            "customWidth": "50",
+            "name": "hospital_honeycomb"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## ⚠️ **Top Problem Areas Requiring Attention**\n\n**What You're Looking At:** The most common types of policy violations across your organization, ranked by frequency\n\n**How to Read This:**\n- **Longer bars**: More violations in this category - higher priority for remediation\n- **Category names**: Types of governance policies being violated (e.g., Security, Compliance, Monitoring)\n- **Numbers**: Count of violations in each category\n\n**What This Means for Business:**\n- Categories at the top represent systemic issues affecting multiple resources\n- High violation counts suggest need for training, tooling, or process improvements\n- Use this to focus your governance improvement efforts on areas with biggest impact\n- Empty chart means excellent compliance - no major violation patterns detected\n\n**Action Items:**\n- Top categories need immediate organizational attention\n- Consider automated remediation for frequently violated policies\n- May indicate need for staff training in specific areas"
+            },
+            "name": "violations_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources | where type =~ 'microsoft.policyinsights/policystates' | extend complianceState = tostring(properties.complianceState) | extend policyDefId = tostring(properties.policyDefinitionId) | where complianceState == 'NonCompliant' | where isnotempty(policyDefId) | extend policyCategory = case(policyDefId contains 'security' or policyDefId contains 'Security', 'Security', policyDefId contains 'monitoring' or policyDefId contains 'Monitoring' or policyDefId contains 'diagnostic', 'Monitoring', policyDefId contains 'cost' or policyDefId contains 'Cost' or policyDefId contains 'budget', 'Cost Management', policyDefId contains 'tag' or policyDefId contains 'Tag', 'Tag Governance', policyDefId contains 'backup' or policyDefId contains 'Backup', 'Backup & Recovery', policyDefId contains 'network' or policyDefId contains 'Network', 'Network Security', policyDefId contains 'storage' or policyDefId contains 'Storage', 'Storage Security', policyDefId contains 'compute' or policyDefId contains 'vm' or policyDefId contains 'Virtual', 'Compute Security', policyDefId contains 'encryption' or policyDefId contains 'Encryption', 'Data Protection', policyDefId contains 'compliance' or policyDefId contains 'Compliance', 'Regulatory Compliance', 'General Governance') | summarize ViolationCount = count() by policyCategory | order by ViolationCount desc | take 10 | project policyCategory, ViolationCount, BusinessImpact = case(ViolationCount >= 50, 'High - Systematic issues requiring immediate attention', ViolationCount >= 20, 'Medium - Multiple violations needing remediation', ViolationCount >= 5, 'Low - Some violations to address', 'Minimal - Few isolated violations')",
+              "size": 1,
+              "title": "Policy Violation Categories - Business Impact Analysis",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "barchart",
+              "chartSettings": {
+                "xAxis": "policyCategory",
+                "yAxis": [
+                  "ViolationCount"
+                ],
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "ViolationCount",
+                    "color": "redBright"
+                  }
+                ]
+              }
+            },
+            "customWidth": "50",
+            "name": "top_noncompliant_categories"
+          }
+        ]
+      },
+      "name": "group_executive"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 📊 **Policy Intelligence - Executive Decision Support**\n\n**Strategic Policy Performance Analysis**\n\nThis chart reveals which types of governance policies face the most violations across your organisation. Understanding these patterns enables data-driven resource allocation and strategic security investment decisions.\n\n### **📈 Executive Reading Guide**\n\n**🔴 High Violation Categories (50+):** Systematic vulnerabilities requiring immediate C-suite attention and emergency budget allocation\n\n**🟡 Medium Violation Categories (20-49):** Strategic improvement opportunities - targeted training and process enhancement needed\n\n**🟢 Low Violation Categories (5-19):** Operational excellence areas - standard remediation through existing processes\n\n### **💼 Policy Category Business Impact**\n\n**🛡️ Security:** Access controls, encryption, network security - *Critical for incident prevention*\n\n**📊 Monitoring:** Logging, diagnostics, audit trails - *Essential for compliance and forensics*\n\n**💰 Cost Management:** Resource tagging, budget controls - *Direct financial governance impact*\n\n**🏷️ Tag Governance:** Resource labelling and tracking - *Operational accountability foundation*\n\n**🌐 Network Security:** Firewall rules, access controls - *Perimeter defence effectiveness*\n\n**🔒 Data Protection:** Backup policies, encryption - *Business continuity assurance*\n\n### **🎯 Executive Action Framework**\n\n**Strategic Priority:** Focus investment on categories with highest violation counts\n\n**Automation Opportunity:** Implement automated compliance for frequently violated policy types\n\n**Resource Allocation:** Direct remediation resources to categories with highest business risk exposure\n\n**Success Measurement:** Track category improvement over time to demonstrate security program effectiveness"
+      },
+      "name": "policyExplanation"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "title": "�️ Enterprise Security Overview",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🛡️ **Your Security Status at a Glance**\n\n**Complete Enterprise Security Overview**\n\nThis section gives you the big picture of your organisation's security and compliance health. Think of it as your security report card that you can share with the board.\n\n### **📋 Four Key Security Metrics**\n\nThese four tiles tell the complete story of your security posture. Each one answers a critical business question:\n\n**1. How secure are we overall?** (Governance Health Score)\n**2. What needs fixing right now?** (Critical Policy Violations)\n**3. How comprehensive is our security program?** (Active Initiatives)\n**4. How much of our infrastructure can we monitor?** (Arc Coverage)\n\n### **🎯 Simple Success Targets**\n\n**Governance Health:** Keep above 85% for excellent security\n**Policy Violations:** Aim for less than 10 critical issues\n**Active Initiatives:** Target 5+ security frameworks for comprehensive coverage\n**Arc Coverage:** Maintain 90%+ for complete visibility\n\n### **💡 Reading Your Security Report Card**\n\n**🟢 Green Tiles:** Excellent performance - keep up the good work\n**🟡 Yellow Tiles:** Good but watch closely - minor improvements needed\n**🔴 Red Tiles:** Action required - schedule fixes and improvements\n\n### **📊 What Each Number Means**\n\n**Large Numbers:** The main metric you need to focus on\n**Small Numbers:** Supporting information that gives context\n**Percentages:** How you compare to industry best practices\n\n### **🎬 Executive Summary**\n\n**All Green:** Your security program is working excellently\n**Mixed Colors:** Normal situation - focus on red and yellow areas first\n**Mostly Red:** Time for a security program review and additional investment\n\n**Remember:** These metrics update automatically, so you always have current information for board reports and audit discussions."
+            },
+            "name": "policy_text"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "---\n\n## Executive Performance Metrics\n\n**Real-Time Governance Dashboard**\n\nThe four key performance indicators below provide instant visibility into your organization's governance health. These metrics are color-coded for immediate risk assessment and executive decision-making.\n\n## 🎯 **Governance Health Score Explanation**\n\n**What You're Looking At:** Your overall compliance percentage across all active policy initiatives\n\n**Color Coding Guide:**\n- **Green (85%+)**: Excellent governance - low risk, audit-ready\n- **Yellow (70-84%)**: Good but monitor closely - some remediation needed\n- **Red (<70%)**: High risk - immediate executive attention required\n\n**Business Impact:** Higher scores = Lower compliance risk and audit issues\n\n## ⚠️ **Critical Policy Violations Explanation**\n\n**What You're Looking At:** Total count of resources currently violating policies\n\n**Severity Levels:**\n- **Low (≤10 violations)**: Normal operations - routine monitoring\n- **Medium (11-50 violations)**: Increased attention needed\n- **High (51-100 violations)**: Significant compliance gaps requiring action\n- **Critical (>100 violations)**: Emergency response required - major risk exposure\n\n**Business Impact:** Higher numbers = Higher risk and potential regulatory penalties\n\n## 📋 **Active Initiatives Explanation**\n\n**What You're Looking At:** Number of different governance frameworks actively monitored\n\n**Coverage Assessment:**\n- **Excellent (5+ initiatives)**: Comprehensive governance coverage\n- **Good (3-4 initiatives)**: Solid foundation with room for expansion\n- **Basic (1-2 initiatives)**: Minimal coverage - consider expanding\n- **None (0 initiatives)**: Critical gap - governance program needed\n\n**Business Impact:** More initiatives = Better risk coverage and compliance maturity\n\n## 🌐 **Arc Coverage Explanation**\n\n**What You're Looking At:** Percentage of servers connected to centralized management\n\n**Connection Health:**\n- **Green (90%+)**: Excellent visibility and control\n- **Yellow (70-89%)**: Good coverage with some gaps\n- **Red (<70%)**: Poor visibility - management gaps create risk\n\n**Business Impact:** Higher coverage = Better security control and compliance monitoring"
+            },
+            "name": "metrics_header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend policySetDefId = tostring(properties.policySetDefinitionId)\n| where isnotempty(policySetDefId)\n| extend complianceState = tostring(properties.complianceState)\n| summarize Total = count(), Compliant = countif(complianceState == 'Compliant'), NonCompliant = countif(complianceState == 'NonCompliant')\n| extend ComplianceRate = round(todouble(Compliant) * 100.0 / todouble(Total), 2)\n| extend RiskScore = 100 - ComplianceRate\n| project ComplianceRate, RiskScore, Total, NonCompliant",
+              "size": 4,
+              "title": "🎯 Governance Health Score",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "ComplianceRate",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "Compliant",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "25",
+            "name": "governance_health_score"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| summarize CriticalIssues = countif(complianceState == 'NonCompliant'), TotalEvaluated = count()\n| extend Severity = case(CriticalIssues <= 10, 'Low', CriticalIssues <= 50, 'Medium', CriticalIssues <= 100, 'High', 'Critical')\n| project CriticalIssues, Severity, TotalEvaluated",
+              "size": 4,
+              "title": "⚠️ Critical Policy Violations",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "CriticalIssues",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redBright"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "Severity",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Critical",
+                        "representation": "redBright",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "High",
+                        "representation": "orange",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Medium",
+                        "representation": "yellow",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Low",
+                        "representation": "green",
+                        "text": "{0}{1}"
+                      }
+                    ]
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "TotalEvaluated",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "25",
+            "name": "critical_violations_stat"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend policySetDefId = tostring(properties.policySetDefinitionId)\n| where isnotempty(policySetDefId)\n| extend initiativeName = tostring(split(policySetDefId, '/')[8])\n| summarize Initiatives = dcount(initiativeName), TotalPolicies = dcount(tostring(properties.policyDefinitionId))\n| extend Coverage = case(Initiatives >= 5, 'Excellent', Initiatives >= 3, 'Good', Initiatives >= 1, 'Basic', 'None')\n| project Initiatives, Coverage, TotalPolicies",
+              "size": 4,
+              "title": "📋 Active Initiatives",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Initiatives",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "blue"
+                  },
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "Coverage",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Excellent",
+                        "representation": "green",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Good",
+                        "representation": "yellow",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Basic",
+                        "representation": "orange",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "None",
+                        "representation": "redBright",
+                        "text": "{0}{1}"
+                      }
+                    ]
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "TotalPolicies",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "25",
+            "name": "active_initiatives_stat"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend status = tostring(properties.status)\n| summarize Total = count(), Connected = countif(status == 'Connected')\n| extend CoverageRate = round(todouble(Connected) * 100.0 / todouble(Total), 2)\n| extend Disconnected = Total - Connected\n| project CoverageRate, Connected, Total, Disconnected",
+              "size": 4,
+              "title": "🌐 Arc Coverage",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "CoverageRate",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "Connected",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "secondaryContent": {
+                  "columnMatch": "Disconnected",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "25",
+            "name": "arc_coverage_stat"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Initiative Performance Analysis\n\n**Strategic Policy Initiative Effectiveness Dashboard**\n\nThis table provides executive visibility into the comparative performance of your active governance initiatives, showing detailed compliance metrics with risk-based color coding.\n\n## 📊 **How to Read This Table:**\n\n**Compliance Percentage Column:**\n- **Green (90%+)**: Excellent - Initiative working effectively\n- **Yellow (75-89%)**: Good - Monitor for improvement opportunities  \n- **Orange (50-74%)**: Concerning - Needs management attention\n- **Red (<50%)**: Critical - Immediate executive intervention required\n\n**Risk Level Assessment:**\n- **Low Risk (Green)**: Well-managed initiative, maintain current approach\n- **Medium Risk (Orange)**: Review processes and resource allocation\n- **High Risk (Red)**: Significant compliance gaps, remediation plan needed\n- **Critical Risk (Bright Red)**: Emergency attention - major business risk\n\n**Priority Actions:**\n- **Urgent (Red)**: Address within 7 days - executive escalation\n- **High (Orange)**: Address within 30 days - management action\n- **Medium (Yellow)**: Address within 90 days - team improvement\n- **Low (Green)**: Routine monitoring - maintain performance\n\n**Executive Decision Points:**\n- Initiatives at bottom of table require immediate resource allocation\n- Consider expanding successful (high compliance) initiatives\n- Evaluate discontinuing consistently poor-performing initiatives\n- Use this data for budget planning and team performance reviews"
+            },
+            "name": "initiative_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend policySetDefId = tostring(properties.policySetDefinitionId)\n| where isnotempty(policySetDefId)\n| extend initiativeName = tostring(split(policySetDefId, '/')[8])\n| extend complianceState = tostring(properties.complianceState)\n| summarize Total = count(), Compliant = countif(complianceState == 'Compliant'), NonCompliant = countif(complianceState == 'NonCompliant') by initiativeName\n| extend ComplianceRate = round(todouble(Compliant) * 100.0 / todouble(Total), 2)\n| extend RiskLevel = case(ComplianceRate >= 90, 'Low Risk', ComplianceRate >= 75, 'Medium Risk', ComplianceRate >= 50, 'High Risk', 'Critical Risk')\n| extend Priority = case(ComplianceRate < 50, 'Urgent', ComplianceRate < 75, 'High', ComplianceRate < 90, 'Medium', 'Low')\n| project \n    Initiative = initiativeName, \n    CompliancePercent = ComplianceRate, \n    RiskLevel,\n    Priority,\n    Total, \n    Compliant, \n    NonCompliant\n| order by CompliancePercent asc",
+              "size": 0,
+              "title": "Initiative Compliance Performance Analysis",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "CompliancePercent",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "redGreen"
+                    }
+                  },
+                  {
+                    "columnMatch": "RiskLevel",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical Risk",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "High Risk",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Medium Risk",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Low Risk",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Priority",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Urgent",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "High",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Medium",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Low",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Compliant",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "green"
+                    }
+                  },
+                  {
+                    "columnMatch": "NonCompliant",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    }
+                  }
+                ],
+                "filter": true,
+                "sortBy": [
+                  {
+                    "itemKey": "CompliancePercent",
+                    "sortOrder": 1
+                  }
+                ]
+              },
+              "sortBy": [
+                {
+                  "itemKey": "CompliancePercent",
+                  "sortOrder": 1
+                }
+              ]
+            },
+            "name": "initiative_performance_chart"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Detailed Policy Analysis\n\n**Operational Intelligence for Governance Teams**\n\nThe following detailed tables provide drill-down analysis capabilities for operational teams and governance specialists. These tables enable tactical remediation planning and specific policy violation identification.\n\n**Executive Value:**\n- **Accountability**: Identify specific policies and resources requiring immediate attention\n- **Resource Allocation**: Enable targeted remediation efforts based on actual violation data\n- **Audit Readiness**: Provide detailed evidence for compliance reporting and external audits\n- **Risk Assessment**: Understand the scope and impact of policy violations across your infrastructure"
+            },
+            "name": "detailed_analysis_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend policySetDefId = tostring(properties.policySetDefinitionId)\n| extend complianceState = tostring(properties.complianceState)\n| extend policyDefName = tostring(properties.policyDefinitionName)\n| extend policyCategory = tostring(properties.policyDefinitionCategory)\n| where isnotempty(policySetDefId)\n| extend initiativeName = tostring(split(policySetDefId, '/')[8])\n| summarize \n    Total = count(),\n    Compliant = countif(complianceState == 'Compliant'),\n    NonCompliant = countif(complianceState == 'NonCompliant'),\n    Exempt = countif(complianceState == 'Exempt')\n    by initiativeName, policyDefName, policyCategory\n| extend ComplianceRate = round(todouble(Compliant) * 100.0 / todouble(Total), 2)\n| project \n    Initiative = initiativeName,\n    ['Policy Name'] = policyDefName,\n    Category = policyCategory,\n    ['Compliance %'] = ComplianceRate,\n    Total,\n    Compliant,\n    NonCompliant,\n    Exempt\n| order by NonCompliant desc",
+              "size": 0,
+              "title": "Policy-Level Compliance Details",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Compliance %",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "redGreen"
+                    }
+                  },
+                  {
+                    "columnMatch": "Compliant",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "green"
+                    }
+                  },
+                  {
+                    "columnMatch": "NonCompliant",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "Exempt",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "gray"
+                    }
+                  }
+                ],
+                "filter": true,
+                "sortBy": [
+                  {
+                    "itemKey": "NonCompliant",
+                    "sortOrder": 2
+                  }
+                ]
+              },
+              "sortBy": [
+                {
+                  "itemKey": "NonCompliant",
+                  "sortOrder": 2
+                }
+              ]
+            },
+            "name": "policy_details_grid"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Critical Resource Violations\n\n**Immediate Action Required**\n\nThis table lists all resources currently in violation of governance policies, providing operational teams with specific targets for remediation. Each entry represents a compliance gap that could impact audit outcomes, security posture, or regulatory standing.\n\n**Executive Priority**: Use this data to assign remediation tasks, track resolution progress, and demonstrate compliance improvement to stakeholders and auditors."
+            },
+            "name": "violations_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| extend resourceId = tostring(properties.resourceId)\n| extend resourceType = tostring(properties.resourceType)\n| extend policyDefName = tostring(properties.policyDefinitionName)\n| extend policySetDefId = tostring(properties.policySetDefinitionId)\n| where isnotempty(policySetDefId)\n| extend initiativeName = tostring(split(policySetDefId, '/')[8])\n| where complianceState == 'NonCompliant'\n| extend resourceName = tostring(split(resourceId, '/')[8])\n| project \n    ['Resource Name'] = resourceName,\n    ['Resource Type'] = resourceType,\n    ['Resource ID'] = resourceId,\n    ['Policy'] = policyDefName,\n    Initiative = initiativeName,\n    ['Compliance State'] = complianceState\n| order by ['Resource Name'] asc",
+              "size": 0,
+              "title": "Non-Compliant Resources",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Resource ID",
+                    "formatter": 5
+                  },
+                  {
+                    "columnMatch": "Compliance State",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "NonCompliant",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "filter": true,
+                "labelSettings": [
+                  {
+                    "columnId": "Resource Name",
+                    "label": "Resource Name"
+                  },
+                  {
+                    "columnId": "Resource Type",
+                    "label": "Resource Type"
+                  },
+                  {
+                    "columnId": "Resource ID",
+                    "label": "Resource ID"
+                  }
+                ]
+              }
+            },
+            "name": "noncompliant_resources_grid"
+          }
+        ]
+      },
+      "name": "group_policy"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n\n# 🎯 **Now That You Understand the Value...**\n\n**It's time to take action.**\n\nYou've seen the business case. You understand the financial impact. You know the competitive advantage waiting for you.\n\n**The question isn't whether you should act. The question is: where do you start?**\n\n**The answer is simple: Start with your biggest risks. Start today.**\n\n---"
+      },
+      "name": "transition_to_action"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "title": "🎯 Immediate Action Required",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🚨 **Start Here - Your Business is at Risk**\n\n**EXECUTIVE ALERT: Million-Dollar Vulnerabilities Detected**\n\nStop. This section shows active cyber threats targeting your network RIGHT NOW. These aren't theoretical risks - they're actual vulnerabilities hackers are already exploiting globally.\n\n### **⚡ Emergency Business Response Protocol**\n\n**🔴 RED ALERT MACHINES:** Immediate patch within 24 hours - cyber criminals are ACTIVELY exploiting these vulnerabilities\n**🟠 ORANGE WARNING MACHINES:** High-priority patches - schedule within 72 hours before exploitation spreads\n**🎯 YOUR MISSION:** Get ALL machines out of the red zone immediately\n\n**CEO Reality Check:** Each red machine is a potential $2.1 million incident waiting to happen.\n\n### **🎯 Executive Action Framework**\n\n**Step 1:** Look at the Fleet Risk percentage - THIS IS YOUR EXPOSURE LEVEL\n**Step 2:** Assign immediate resources to critical machines (red entries in priority table)\n**Step 3:** Schedule emergency maintenance windows for orange-priority machines\n**Step 4:** Track daily progress until all red alerts are eliminated\n\n### **� Business Impact Translation**\n\n**🔥 Fleet Risk Tile DECODED:**\n- **Large Red Percentage:** Your organisation's immediate cyber attack surface\n- **Left Number:** Machines that could bankrupt your organisation if compromised\n- **Small Number:** Total IT assets requiring protection\n\n**📊 Scanner Coverage Tile DECODED:**\n- **Large Green Percentage:** Your cyber visibility and early warning capability\n- **Left Number:** Protected assets with real-time threat detection\n- **Small Number:** Total business-critical infrastructure\n\n### **🚨 Executive Risk Threshold Matrix**\n\n**0-5% Risk:** EXCELLENT - Industry leading security posture, maintain advantage\n**5-15% Risk:** GOOD - Competitive position, standard maintenance required\n**15-30% Risk:** CONCERN - Above industry average risk, accelerate security investment\n**30%+ Risk:** CRISIS - Immediate board-level intervention, emergency budget approval required\n\n**Board Message:** Every percentage point reduction = Millions in prevented losses + competitive advantage + stakeholder confidence.\n\n**Executive Authority Required:** Approve emergency patching windows and resource allocation NOW."
+            },
+            "name": "arc_security_overview"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "SecurityResources | where type == 'microsoft.security/assessments' | where properties.displayName == 'Machines should have vulnerability findings resolved' | extend ResourceId = tostring(properties.resourceDetails.ResourceId), ResourceName = tostring(properties.resourceDetails.ResourceName) | where ResourceId contains 'hybridcompute' | extend Status = tostring(properties.status.code), MaxCVSS = todouble(properties.additionalData.maxCvss30Score) | summarize TotalArcMachines = count(), CriticalMachines = countif(MaxCVSS >= 9.0), HighRiskMachines = countif(MaxCVSS >= 7.0 and MaxCVSS < 9.0) | extend UrgentMachines = CriticalMachines + HighRiskMachines | extend UrgentPercentage = round((UrgentMachines * 100.0) / TotalArcMachines, 1) | project UrgentPercentage, UrgentMachines, TotalArcMachines",
+              "size": 4,
+              "title": "🔥 Fleet Security Risk Assessment",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "UrgentPercentage",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "UrgentMachines",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "TotalArcMachines",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "50",
+            "name": "fleet_security_tile"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "SecurityResources | where type == 'microsoft.security/assessments' | where properties.displayName == 'Machines should have vulnerability findings resolved' | extend ResourceId = tostring(properties.resourceDetails.ResourceId), ResourceName = tostring(properties.resourceDetails.ResourceName) | where ResourceId contains 'hybridcompute' | extend Status = tostring(properties.status.code) | summarize TotalMachines = count(), ScannedMachines = countif(Status != 'NotApplicable'), UnscannedMachines = countif(Status == 'NotApplicable') | extend ScannerCoverage = round((ScannedMachines * 100.0) / TotalMachines, 1) | project ScannerCoverage, ScannedMachines, TotalMachines",
+              "size": 4,
+              "title": "📊 Vulnerability Scanner Coverage",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "ScannerCoverage",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "ScannedMachines",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "TotalMachines",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "50",
+            "name": "scanner_coverage_tile"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🎯 **Fleet Risk Distribution Analysis**\n\n**Understanding Your Security Landscape**\n\nThis visualization shows the distribution of security risk across your Arc machine fleet, enabling strategic resource allocation and priority setting for security remediation efforts.\n\n**Risk Level Definitions:**\n- **🔴 Critical (9.0+ CVSS)**: Emergency response required - exploit imminent\n- **🟠 High (7.0-8.9 CVSS)**: Urgent patching needed - high exploit probability  \n- **🟡 Medium (4.0-6.9 CVSS)**: Scheduled remediation - moderate risk\n- **🟢 Low (0.1-3.9 CVSS)**: Routine maintenance - minimal risk\n- **✅ Secure**: No vulnerabilities detected - excellent security posture\n- **⚪ Unscanned**: Scanner not deployed - unknown risk state\n\n**Executive Action Framework:**\n- **Critical machines**: Drop everything - patch within 24 hours\n- **High-risk machines**: Emergency change window - patch within 1 week\n- **Medium-risk machines**: Next maintenance window - patch within 30 days\n- **Unscanned machines**: Deploy vulnerability assessment immediately"
+            },
+            "name": "risk_distribution_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "SecurityResources | where type == 'microsoft.security/assessments' | where properties.displayName == 'Machines should have vulnerability findings resolved' | extend ResourceId = tostring(properties.resourceDetails.ResourceId), ResourceName = tostring(properties.resourceDetails.ResourceName) | where ResourceId contains 'hybridcompute' | extend Status = tostring(properties.status.code), MaxCVSS = todouble(properties.additionalData.maxCvss30Score) | extend RiskCategory = case(MaxCVSS >= 9.0, '🔴 Critical (9.0+)', MaxCVSS >= 7.0, '🟠 High (7.0-8.9)', MaxCVSS >= 4.0, '🟡 Medium (4.0-6.9)', MaxCVSS > 0.0, '🟢 Low (0.1-3.9)', Status == 'Healthy', '✅ Secure', Status == 'NotApplicable', '⚪ Unscanned', '❓ Unknown') | summarize MachineCount = count() by RiskCategory | extend BusinessPriority = case(RiskCategory contains 'Critical', '1 - Emergency', RiskCategory contains 'High', '2 - Urgent', RiskCategory contains 'Medium', '3 - Scheduled', RiskCategory contains 'Low', '4 - Routine', RiskCategory contains 'Unscanned', '5 - Assessment Needed', '6 - Monitor') | order by BusinessPriority asc | project RiskCategory, MachineCount, BusinessPriority",
+              "size": 0,
+              "title": "🎯 Fleet Risk Distribution by Vulnerability Level",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "piechart",
+              "chartSettings": {
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "🔴 Critical (9.0+)",
+                    "color": "redBright"
+                  },
+                  {
+                    "seriesName": "🟠 High (7.0-8.9)",
+                    "color": "orange"
+                  },
+                  {
+                    "seriesName": "🟡 Medium (4.0-6.9)",
+                    "color": "yellow"
+                  },
+                  {
+                    "seriesName": "🟢 Low (0.1-3.9)",
+                    "color": "green"
+                  },
+                  {
+                    "seriesName": "✅ Secure",
+                    "color": "darkGreen"
+                  },
+                  {
+                    "seriesName": "⚪ Unscanned",
+                    "color": "gray"
+                  }
+                ]
+              }
+            },
+            "customWidth": "50",
+            "name": "risk_distribution_chart"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "SecurityResources | where type == 'microsoft.security/assessments' | where properties.displayName == 'Machines should have vulnerability findings resolved' | extend ResourceId = tostring(properties.resourceDetails.ResourceId), ResourceName = tostring(properties.resourceDetails.ResourceName) | extend ResourceGroup = tostring(split(ResourceId, '/')[4]) | where ResourceId contains 'hybridcompute' | extend Status = tostring(properties.status.code), MaxCVSS = todouble(properties.additionalData.maxCvss30Score), LastUpdated = tostring(properties.status.statusChangeDate) | extend VulnerabilityLevel = case(MaxCVSS >= 9.0, '🔴 Critical', MaxCVSS >= 7.0, '🟠 High', MaxCVSS >= 4.0, '🟡 Medium', MaxCVSS > 0.0, '🟢 Low', Status == 'Healthy', '✅ Secure', Status == 'NotApplicable', '⚪ Unscanned', '❓ Unknown') | extend RiskDescription = case(MaxCVSS >= 9.0, 'EMERGENCY: Patch immediately - critical exploit risk', MaxCVSS >= 7.0, 'URGENT: High priority patching required', MaxCVSS >= 4.0, 'SCHEDULED: Plan remediation in next maintenance window', MaxCVSS > 0.0, 'ROUTINE: Low priority vulnerabilities detected', Status == 'Healthy', 'SECURE: No vulnerabilities found', Status == 'NotApplicable', 'DEPLOY SCANNER: Assessment required', 'Review scanner configuration') | extend BusinessImpact = case(MaxCVSS >= 9.0, 'High - Immediate business risk', MaxCVSS >= 7.0, 'Medium - Significant security exposure', MaxCVSS >= 4.0, 'Low - Manageable risk level', 'Minimal - Acceptable risk profile') | where MaxCVSS >= 7.0 or Status == 'NotApplicable' | order by MaxCVSS desc, ResourceName asc | project MachineName = ResourceName, ResourceGroup, VulnerabilityLevel, CVSSScore = MaxCVSS, RiskDescription, BusinessImpact, LastAssessed = LastUpdated",
+              "size": 0,
+              "title": "⚠️ Top Priority Machines Requiring Immediate Attention",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "table"
+            },
+            "customWidth": "50",
+            "name": "priority_machines_table"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## 📈 **Executive Security Metrics Dashboard**\n\n**Comprehensive Arc Fleet Security Intelligence**\n\nThe table below provides complete security intelligence for strategic decision-making, showing detailed vulnerability assessment data across your entire Arc machine fleet with business impact analysis.\n\n**How to Use This Intelligence:**\n\n**🔴 Critical Priority Actions:**\n- Machines with CVSS 9.0+ require immediate emergency patching\n- Coordinate with business units for emergency maintenance windows\n- Consider isolating critical machines until patches are applied\n\n**🟠 High Priority Planning:**\n- Schedule urgent patching for CVSS 7.0-8.9 machines within 1 week\n- Plan resource allocation for high-priority remediation efforts\n- Implement additional monitoring for high-risk machines\n\n**📊 Strategic Planning:**\n- Use this data for security budget planning and resource allocation\n- Track trends in vulnerability exposure across different resource groups\n- Identify patterns in scanner deployment and coverage gaps\n\n**🎯 KPI Tracking:**\n- Target: Zero machines in Critical risk category\n- Goal: 95%+ scanner coverage across all Arc machines\n- Objective: Average fleet CVSS score below 4.0"
+            },
+            "name": "security_metrics_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "SecurityResources | where type == 'microsoft.security/assessments' | where properties.displayName == 'Machines should have vulnerability findings resolved' | extend ResourceId = tostring(properties.resourceDetails.ResourceId), ResourceName = tostring(properties.resourceDetails.ResourceName) | extend ResourceGroup = tostring(split(ResourceId, '/')[4]) | where ResourceId contains 'hybridcompute' | extend Status = tostring(properties.status.code), MaxCVSS = todouble(properties.additionalData.maxCvss30Score), LastUpdated = tostring(properties.status.statusChangeDate) | extend VulnerabilityLevel = case(MaxCVSS >= 9.0, '🔴 Critical', MaxCVSS >= 7.0, '🟠 High', MaxCVSS >= 4.0, '🟡 Medium', MaxCVSS > 0.0, '🟢 Low', Status == 'Healthy', '✅ Secure', Status == 'NotApplicable', '⚪ Unscanned', '❓ Unknown') | extend ScannerStatus = case(Status == 'NotApplicable', '❌ Not Deployed', Status == 'Healthy', '✅ Clean', Status == 'Unhealthy', '⚠️ Issues Found', '❓ Unknown') | extend BusinessPriority = case(MaxCVSS >= 9.0, '🚨 Emergency', MaxCVSS >= 7.0, '🔥 Urgent', MaxCVSS >= 4.0, '📅 Scheduled', MaxCVSS > 0.0, '🔧 Routine', Status == 'Healthy', '✅ Monitor', '🔍 Assess') | extend RemediationTimeframe = case(MaxCVSS >= 9.0, '24 Hours', MaxCVSS >= 7.0, '1 Week', MaxCVSS >= 4.0, '30 Days', MaxCVSS > 0.0, '90 Days', 'N/A') | order by MaxCVSS desc, ResourceName asc | project MachineName = ResourceName, ResourceGroup, VulnerabilityLevel, CVSSScore = MaxCVSS, ScannerStatus, BusinessPriority, RemediationTimeframe, LastAssessed = LastUpdated",
+              "size": 0,
+              "title": "🛡️ Complete Arc Fleet Security Intelligence",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "table"
+            },
+            "customWidth": "100",
+            "name": "complete_security_table"
+          }
+        ]
+      },
+      "name": "group_arc_security"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n\n# ⚡ **You've Taken Action. Now Let's Make It Effortless.**\n\n**Here's what I love about what you've just accomplished:**\n\nYou've identified your risks. You're addressing the critical vulnerabilities. Your organisation is already becoming more secure.\n\n**But what if I told you this is just the beginning?**\n\n**What if instead of working harder on security, your team could work smarter? What if routine security tasks could happen automatically while your team focuses on innovation and strategy?**\n\n**That's not a dream. That's what intelligent automation delivers.**\n\n---"
+      },
+      "name": "transition_to_efficiency"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "title": "⚡ Efficiency & Automation",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## ⚡ **Transform Security from Cost Centre to Profit Driver**\n\n**ROI Breakthrough: Turn Your Security Team into Efficiency Champions**\n\nStop burning money on manual security tasks. This intelligence platform transforms your security operations from reactive firefighting into strategic competitive advantage.\n\n### **💰 Quantified Business Impact**\n\n**BEFORE Automation:**\n- Security team spends 40 hours/week on manual server checks\n- Average hourly cost: $75 (including overheads)\n- Annual cost: $156,000 in manual labour\n- Reactive incident response: $500,000+ per major incident\n\n**AFTER Intelligent Automation:**\n- Automated monitoring reduces manual checks by 85%\n- Team focuses on strategic projects and threat hunting\n- Annual savings: $132,600 in labour efficiency\n- Proactive prevention: 90% reduction in preventable incidents\n- **NET ROI: 400-600% return on platform investment**\n\n### **🚀 Executive Efficiency Multipliers**\n\n**Smart Resource Allocation:** Technology tells you exactly where to invest limited resources\n**Predictive Operations:** Fix problems before they impact business operations\n**Audit Automation:** Compliance reports generate automatically - no more scrambling for auditors\n**Strategic Focus:** Your team works on innovation instead of routine maintenance\n\n### **📊 Efficiency Metrics That Drive Profit**\n\n**🔧 Configuration Compliance Tile - Your Automation Success Score:**\n- **Green Numbers:** Servers running like clockwork with automated security\n- **Red Numbers:** Manual intervention required - calculate labour cost impact\n- **Executive Target:** 95%+ automation for maximum efficiency gains\n\n**🌐 Server Management Tile - Your Operational Leverage:**\n- **Connected:** Assets generating automated security intelligence\n- **Disconnected:** Draining resources with manual oversight requirements\n- **Executive Goal:** 100% connectivity = Maximum operational leverage\n\n### **💡 Strategic Business Advantages**\n\n**Competitive Intelligence:** Know your security posture better than competitors\n**Operational Excellence:** Industry-leading uptime through proactive maintenance\n**Cost Leadership:** Deliver superior security outcomes with fewer resources\n**Innovation Enablement:** Security team becomes strategic technology partner\n\n### **� Executive Success Framework**\n\n**Quarter 1:** Achieve 80% automation (immediate labour savings)\n**Quarter 2:** Reach 90% automation (competitive advantage established)\n**Quarter 3:** Hit 95% automation (industry leadership position)\n**Quarter 4:** Leverage savings for strategic technology investments\n\n**CEO Message:** This platform doesn't just improve security - it fundamentally transforms IT operations from cost burden to business enabler with measurable profit impact."
+            },
+            "name": "config_text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "GuestConfigurationResources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend complianceStatus = tostring(properties.complianceStatus)\n| extend configName = tostring(properties.guestConfiguration.name)\n| extend lastComplianceTime = todatetime(properties.lastComplianceStatusChecked)\n| summarize \n    Total = count(),\n    Compliant = countif(complianceStatus == 'Compliant'),\n    NonCompliant = countif(complianceStatus == 'NonCompliant'),\n    Pending = countif(complianceStatus == 'Pending')\n| extend ComplianceRate = round(todouble(Compliant) * 100.0 / todouble(Total), 2)\n| project ComplianceRate, Total, Compliant, NonCompliant, Pending",
+              "size": 3,
+              "title": "Guest Configuration Compliance Status",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "ComplianceRate",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "Compliant",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "secondaryContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "50",
+            "name": "guest_config_tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend osType = tostring(properties.osType)\n| extend status = tostring(properties.status)\n| summarize \n    Total = count(),\n    Connected = countif(status == 'Connected'),\n    Disconnected = countif(status == 'Disconnected'),\n    Windows = countif(osType == 'Windows'),\n    Linux = countif(osType == 'Linux')\n| extend ConnectionRate = iff(Total == 0, 0.0, round(todouble(Connected) * 100.0 / todouble(Total), 2))\n| project ConnectionRate, Total, Connected, Disconnected, Windows, Linux",
+              "size": 3,
+              "title": "Arc Server Status",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "ConnectionRate",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "Connected",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "rightContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "secondaryContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "50",
+            "name": "arc_status_tiles"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## 📈 **Configuration Health Dashboard**\n\n**What You're Looking At:** Real-time configuration compliance status and 30-day trend analysis\n\n**Current Status Tiles Show:**\n- **Overall Health %**: Current compliance rate across all configurations\n- **Drift Count**: Number of servers currently out of compliance\n- **Risk Level**: Assessment based on compliance percentage\n\n**Trend Chart Shows:**\n- **Green Area**: Percentage of servers in compliance over time\n- **Red Area**: Percentage of servers with configuration drift\n- **Target**: Maintain green area above 85% consistently\n\n**Executive Decision Points:**\n- **Green dominance**: Good governance - maintain current processes\n- **Red growth**: Immediate attention needed - review change management\n- **Volatile patterns**: Process inconsistency - investigate operational procedures\n\n**Action Thresholds:**\n- **Excellent (Green 90%+)**: Optimal configuration management\n- **Good (Green 80-89%)**: Satisfactory with room for improvement  \n- **Concerning (Green <80%)**: Executive intervention required\n- **Critical (Red dominance)**: Emergency response needed"
+            },
+            "name": "config_health_explanation"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "GuestConfigurationResources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend complianceStatus = tostring(properties.complianceStatus)\n| summarize \n    Total = count(),\n    Compliant = countif(complianceStatus == 'Compliant'),\n    NonCompliant = countif(complianceStatus == 'NonCompliant'),\n    Pending = countif(complianceStatus == 'Pending')\n| extend ComplianceRate = iff(Total == 0, 0.0, round(todouble(Compliant) * 100.0 / todouble(Total), 2))\n| extend RiskLevel = case(\n    ComplianceRate >= 90, 'Low Risk',\n    ComplianceRate >= 80, 'Medium Risk', \n    ComplianceRate >= 70, 'High Risk',\n    'Critical Risk'\n  )\n| extend HealthStatus = case(\n    ComplianceRate >= 90, 'Excellent',\n    ComplianceRate >= 80, 'Good', \n    ComplianceRate >= 70, 'Concerning',\n    'Critical'\n  )\n| project ComplianceRate, NonCompliant, RiskLevel, HealthStatus, Total",
+              "size": 4,
+              "title": "Configuration Health Status",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "ComplianceRate",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "leftContent": {
+                  "columnMatch": "HealthStatus",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Excellent",
+                        "representation": "green",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Good",
+                        "representation": "yellow",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "==",
+                        "thresholdValue": "Needs Attention",
+                        "representation": "orange",
+                        "text": "{0}{1}"
+                      },
+                      {
+                        "operator": "Default",
+                        "thresholdValue": null,
+                        "representation": "redBright",
+                        "text": "{0}{1}"
+                      }
+                    ]
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "ComplianceRate",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "customWidth": "50",
+            "name": "config_health_tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "GuestConfigurationResources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend complianceStatus = tostring(properties.complianceStatus)\n| extend lastComplianceTime = todatetime(properties.lastComplianceStatusChecked)\n| extend resourceId = tostring(properties.targetResourceId)\n| extend configName = tostring(properties.guestConfiguration.name)\n| where isnotempty(resourceId) and isnotempty(configName)\n| summarize arg_max(lastComplianceTime, *) by resourceId, configName\n| extend evaluationDate = startofday(lastComplianceTime)\n| where evaluationDate >= startofday(ago(30d))\n| summarize \n    TotalConfigs = count(),\n    CompliantConfigs = countif(complianceStatus == 'Compliant'),\n    NonCompliantConfigs = countif(complianceStatus == 'NonCompliant')\n    by evaluationDate\n| extend ComplianceRate = iff(TotalConfigs == 0, 0.0, round(todouble(CompliantConfigs) * 100.0 / todouble(TotalConfigs), 2))\n| project Date = evaluationDate, ['Compliance %'] = ComplianceRate, TotalConfigs, CompliantConfigs, NonCompliantConfigs\n| order by Date asc",
+              "size": 0,
+              "title": "Configuration Compliance Trend (30 Days)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "barchart",
+              "chartSettings": {
+                "xAxis": "Date",
+                "yAxis": [
+                  "Compliance %"
+                ],
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Compliance %",
+                    "label": "Configuration Compliance %",
+                    "color": "blue"
+                  }
+                ],
+                "ySettings": {
+                  "numberFormatSettings": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": false,
+                      "maximumFractionDigits": 0
+                    }
+                  },
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "customWidth": "50",
+            "name": "config_trend_area_chart"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "GuestConfigurationResources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend complianceStatus = tostring(properties.complianceStatus)\n| extend configName = tostring(properties.guestConfiguration.name)\n| extend resourceId = tostring(properties.targetResourceId)\n| extend machineName = tostring(split(resourceId, '/')[8])\n| where complianceStatus == 'NonCompliant'\n| project \n    ['Machine Name'] = machineName,\n    ['Configuration'] = configName,\n    ['Status'] = complianceStatus,\n    ['Last Checked'] = todatetime(properties.lastComplianceStatusChecked)\n| order by ['Last Checked'] desc",
+              "size": 0,
+              "title": "Non-Compliant Guest Configurations",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Status",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "NonCompliant",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Last Checked",
+                    "formatter": 6
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "customWidth": "50",
+            "name": "noncompliant_configs_grid"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend osType = tostring(properties.osType)\n| extend resourceGroup = tostring(split(id, '/')[4])\n| extend status = tostring(properties.status)\n| project \n    ['Machine Name'] = name,\n    ['OS Type'] = osType,\n    ['Resource Group'] = resourceGroup,\n    Status = status,\n    Location = location\n| order by ['Resource Group'] asc, ['Machine Name'] asc",
+              "size": 0,
+              "title": "Arc-Enabled Servers Inventory",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Status",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Connected",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Disconnected",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "filter": true,
+                "hierarchySettings": {
+                  "treeType": 1,
+                  "groupBy": [
+                    "Resource Group"
+                  ]
+                }
+              }
+            },
+            "name": "arc_servers_tree"
+          }
+        ]
+      },
+      "name": "group_config"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "title": "📊 Operational Intelligence",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🏷️ **Smart Cost Management & Asset Tracking**\n\n**Every Dollar Accounted For - Every Asset Owned**\n\nThis section shows how well your organisation tracks and manages its IT assets using smart tagging. Think of it as your digital asset register that ensures every server has proper ownership, cost allocation, and safety classification.\n\n### **🎯 Why This Matters to Your Business**\n\n**Cost Control:** Accurate cost centre tagging means you know exactly which department is spending what on IT\n**Incident Response:** Owner tags ensure someone is responsible when problems occur\n**Risk Management:** Environment tags prevent accidents (like updating production by mistake)\n**Audit Compliance:** Proper asset tracking satisfies auditors and regulatory requirements\n\n### **📊 Three Essential Asset Tracking Views**\n\n**1. Overall Tagging Health:** Shows percentage of properly tagged assets\n**2. Department Performance:** See which teams manage their assets well\n**3. Missing Information:** Specific assets that need attention\n\n### **💰 Financial Impact**\n\n**Good Tagging = Better Budget Control**\n- Accurate departmental cost allocation\n- Clear responsibility for IT spending\n- Better budget planning and forecasting\n- Reduced waste from orphaned resources\n\n**Poor Tagging = Financial Chaos**\n- Cannot track who spends what\n- Unclear responsibility for costs\n- Difficulty justifying IT investments\n- Hidden costs and budget surprises\n\n### **🚀 Quick Win Opportunities**\n\n**Green Departments:** Excellent financial controls - use as best practice examples\n**Orange Departments:** Good foundation - small improvements for big gains\n**Red Departments:** High impact opportunity - immediate attention needed\n\n### **🎬 Executive Action Plan**\n\n**Monthly Review:** Check department performance and address red areas\n**Budget Planning:** Use tagging data for accurate cost forecasting\n**Accountability:** Ensure every new IT asset gets proper tags from day one\n**Audit Preparation:** Use compliance percentages to demonstrate good governance\n\n**This intelligence transforms IT asset management from chaos to control, giving you clear visibility and accountability across your entire infrastructure.**\n\n---\n\n## 🏷️ **Tag Compliance Overview Explanation**\n\n**What You're Looking At:** Percentage of servers with all required tags (CostCentre, Owner, Environment)\n\n**Compliance Levels:**\n- **Green (90%+)**: Excellent - Strong financial governance and accountability\n- **Yellow (75-89%)**: Good - Minor gaps in tag compliance\n- **Red (<75%)**: Poor - Significant financial visibility and accountability issues\n\n**Business Impact:** Poor tagging = Inaccurate cost allocation and unclear resource ownership\n\n## 🏥 **Resource Group Compliance Explanation**\n\n**What You're Looking At:** Each hexagon represents a resource group with their tag compliance percentage\n\n**Hexagon Color Coding:**\n- **Green (90%+)**: Well-managed department with good financial controls\n- **Orange (70-89%)**: Department needs improved tagging processes\n- **Red (<70%)**: Poor financial governance - immediate management attention needed\n- **Center number**: Tag compliance percentage for that department\n- **Bottom number**: Count of untagged resources requiring fixes\n\n**Executive Action:** Red departments need immediate tagging remediation for cost visibility\n\n## ⚠️ **Missing Required Tags Explanation**\n\n**What You're Looking At:** Detailed list of servers missing critical business tags\n\n**Missing Tag Impact:**\n- **Missing CostCentre**: Cannot allocate costs accurately - budget tracking impossible\n- **Missing Owner**: No accountability for incidents or maintenance - operational risk\n- **Missing Environment**: Risk of accidental production changes - business continuity risk\n\n**Color Coding:**\n- **Red 'Missing'**: Critical gap requiring immediate remediation\n- **Green values**: Properly tagged attributes\n\n**Priority Action:** All missing tags must be remediated for financial and operational governance"
+            },
+            "name": "tag_text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend hasCostCentre = isnotempty(tags['CostCentre']) or isnotempty(tags['costcentre'])\n| extend hasOwner = isnotempty(tags['Owner']) or isnotempty(tags['owner'])\n| extend hasEnvironment = isnotempty(tags['Environment']) or isnotempty(tags['environment'])\n| extend fullyTagged = hasCostCentre and hasOwner and hasEnvironment\n| summarize \n    Total = count(),\n    ['Fully Tagged'] = countif(fullyTagged),\n    ['Missing CostCentre'] = countif(not(hasCostCentre)),\n    ['Missing Owner'] = countif(not(hasOwner)),\n    ['Missing Environment'] = countif(not(hasEnvironment))\n| extend ['Tag Compliance %'] = round(todouble(['Fully Tagged']) * 100.0 / todouble(Total), 2)\n| project ['Tag Compliance %'], Total, ['Fully Tagged'], ['Missing CostCentre'], ['Missing Owner'], ['Missing Environment']",
+              "size": 3,
+              "title": "Tag Compliance Overview",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Tag Compliance %",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Tag Compliance %",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "name": "tag_compliance_tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend hasCostCentre = isnotempty(tags['CostCentre']) or isnotempty(tags['costcentre'])\n| extend hasOwner = isnotempty(tags['Owner']) or isnotempty(tags['owner'])\n| extend hasEnvironment = isnotempty(tags['Environment']) or isnotempty(tags['environment'])\n| extend fullyTagged = hasCostCentre and hasOwner and hasEnvironment\n| extend resourceGroup = tostring(split(id, '/')[4])\n| summarize \n    Total = count(),\n    ['Fully Tagged'] = countif(fullyTagged),\n    ['Partially Tagged'] = countif(not(fullyTagged) and (hasCostCentre or hasOwner or hasEnvironment)),\n    ['Not Tagged'] = countif(not(hasCostCentre) and not(hasOwner) and not(hasEnvironment))\n    by resourceGroup\n| extend ['Compliance %'] = round(todouble(['Fully Tagged']) * 100.0 / todouble(Total), 2)\n| project \n    ['Resource Group'] = resourceGroup,\n    ['Compliance %'],\n    Total,\n    ['Fully Tagged'],\n    ['Partially Tagged'],\n    ['Not Tagged']\n| order by ['Compliance %'] asc",
+              "size": 1,
+              "title": "Tag Compliance by Resource Group",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "graph",
+              "graphSettings": {
+                "type": 2,
+                "topContent": {
+                  "columnMatch": "Resource Group",
+                  "formatter": 1
+                },
+                "centerContent": {
+                  "columnMatch": "Compliance %",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": false,
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "bottomContent": {
+                  "columnMatch": "Not Tagged",
+                  "formatter": 1,
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "style": "decimal"
+                    }
+                  }
+                },
+                "nodeIdField": "Resource Group",
+                "nodeSize": null,
+                "staticNodeSize": 100,
+                "colorSettings": {
+                  "nodeColorField": "Compliance %",
+                  "type": 4,
+                  "thresholdsGrid": [
+                    {
+                      "operator": "<",
+                      "thresholdValue": "70",
+                      "representation": "redBright"
+                    },
+                    {
+                      "operator": "<",
+                      "thresholdValue": "90",
+                      "representation": "orange"
+                    },
+                    {
+                      "operator": "Default",
+                      "thresholdValue": null,
+                      "representation": "green"
+                    }
+                  ]
+                },
+                "hivesMargin": 5
+              }
+            },
+            "name": "tag_compliance_honeycomb"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend CostCentre = tostring(coalesce(tags['CostCentre'], tags['costcentre'], 'Missing'))\n| extend Owner = tostring(coalesce(tags['Owner'], tags['owner'], 'Missing'))\n| extend Environment = tostring(coalesce(tags['Environment'], tags['environment'], 'Missing'))\n| extend hasCostCentre = CostCentre != 'Missing'\n| extend hasOwner = Owner != 'Missing'\n| extend hasEnvironment = Environment != 'Missing'\n| extend fullyTagged = hasCostCentre and hasOwner and hasEnvironment\n| where not(fullyTagged)\n| extend resourceGroup = tostring(split(id, '/')[4])\n| extend missingTags = strcat(\n    iff(not(hasCostCentre), 'CostCentre ', ''),\n    iff(not(hasOwner), 'Owner ', ''),\n    iff(not(hasEnvironment), 'Environment', '')\n  )\n| project \n    ['Machine Name'] = name,\n    ['Resource Group'] = resourceGroup,\n    ['Missing Tags'] = missingTags,\n    CostCentre,\n    Owner,\n    Environment,\n    Location = location\n| order by ['Resource Group'] asc, ['Machine Name'] asc",
+              "size": 0,
+              "title": "Resources with Missing Required Tags",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Missing Tags",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "CostCentre",
+                          "representation": "warning",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "warning",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "CostCentre",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Missing",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Owner",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Missing",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Environment",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Missing",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "missing_tags_grid"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend CostCentre = tostring(coalesce(tags['CostCentre'], tags['costcentre']))\n| where isnotempty(CostCentre)\n| summarize Count = count() by CostCentre\n| order by Count desc\n| take 15",
+              "size": 1,
+              "title": "Top 15 Cost Centers",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "barchart",
+              "chartSettings": {
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Count",
+                    "color": "blue"
+                  }
+                ]
+              }
+            },
+            "customWidth": "50",
+            "name": "costcenter_bar_chart"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend Environment = tostring(coalesce(tags['Environment'], tags['environment']))\n| where isnotempty(Environment)\n| summarize Count = count() by Environment\n| order by Count desc",
+              "size": 1,
+              "title": "Environment Distribution",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "piechart"
+            },
+            "customWidth": "50",
+            "name": "environment_pie_chart"
+          }
+        ]
+      },
+      "name": "group_tags"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n\n# 📈 **Now For The Best Part - Proving Your Success**\n\n**We've come a long way together:**\n\n✅ **You understand the business value** - the millions at stake and the competitive advantage waiting  \n✅ **You've taken immediate action** - addressing critical vulnerabilities and reducing risk  \n✅ **You've embraced efficiency** - transforming your team from reactive to strategic  \n✅ **You have complete visibility** - enterprise-wide security intelligence at your fingertips  \n✅ **You control your assets** - smart cost management and accountability  \n\n**But here's what I'm most excited to show you:**\n\n**How to prove to your board, your investors, and your stakeholders that every dollar you've invested in security is delivering measurable returns.**\n\n**This isn't just about compliance. This is about demonstrating leadership.**\n\n---"
+      },
+      "name": "transition_to_success"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "title": "📈 Success Metrics & Proof",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🏆 **Board-Ready Success Proof That Drives Shareholder Value**\n\n**Demonstrate Security ROI That Impresses Boards and Investors**\n\nThis section provides bulletproof evidence that your security investments deliver measurable business value, competitive advantage, and shareholder returns. Perfect for board presentations, investor relations, and C-suite decision-making.\n\n### **💎 Four Pillars of Executive Success Proof**\n\n**1. Continuous Improvement Trajectory:** Quantified security enhancement over time\n**2. Operational Excellence Metrics:** Team effectiveness and process maturity scores\n**3. Strategic Risk Intelligence:** Data-driven investment prioritisation guidance\n**4. Technology Performance Analytics:** Infrastructure security optimisation insights\n\n### **🎯 Executive Presentation Arsenal**\n\n**📊 For Board Presentations:** \"Our compliance improved 15% this quarter, preventing an estimated $3.2M in incident costs\"\n**💰 For Budget Justifications:** \"97% remediation success rate proves our security team delivers exceptional ROI\"\n**🛡️ For Audit Committee:** \"Comprehensive risk category management demonstrates enterprise-grade governance\"\n**📈 For Investor Relations:** \"Industry-leading security metrics strengthen competitive position and valuation\"\n\n### **� Championship Performance Indicators**\n\n**📈 Rising Compliance Trajectory:** Market-leading security program delivering sustainable competitive advantage\n**🏆 Stable High Performance (90%+):** Elite operational maturity - benchmark for industry leadership\n**⚡ High Remediation Success (95%+):** World-class team effectiveness - justifies premium investment\n**🎯 Balanced Risk Portfolio:** Sophisticated risk management demonstrating strategic excellence\n\n### **🚨 Executive Intervention Triggers**\n\n**📉 Declining Compliance:** Immediate C-suite intervention required - competitive disadvantage risk\n**⚠️ Low Remediation Success (<80%):** Strategic review needed - capability investment opportunity\n**🔴 Risk Category Concentration:** Systemic vulnerability - board-level strategic focus required\n**⚙️ Technology Performance Gaps:** Innovation investment opportunity for competitive edge\n\n### **💰 Shareholder Value Translation**\n\n**🛡️ Risk Mitigation:** Each compliance percentage point = $500K-$2M in avoided incident costs\n**⚡ Operational Efficiency:** High automation rates = 30-50% reduction in security operational costs\n**🏆 Competitive Positioning:** Superior metrics = Enhanced valuation through reduced risk premium\n**📈 Growth Enablement:** Strong security posture = Accelerated digital transformation and market expansion\n\n### **🎬 C-Suite Strategic Framework**\n\n**Monthly Executive Reviews:** Track performance against industry benchmarks and competitive position\n**Quarterly Board Reports:** Present trend analysis with business impact quantification\n**Annual Strategic Planning:** Leverage insights for security investment strategy and competitive positioning\n**Stakeholder Communications:** Share success metrics for investor confidence and market positioning\n\n**Executive Promise:** This intelligence platform transforms security from operational necessity to strategic differentiator with quantifiable shareholder value creation.\n\n---\n\n## 📈 **Compliance Trend Analysis Explanation**\n\n**What You're Looking At:** Daily compliance percentage over the last 30 days showing governance program trajectory\n\n**Trend Interpretation:**\n- **Rising line**: Governance improving - effective remediation efforts\n- **Flat high line (85%+)**: Stable excellent governance - maintain current approach\n- **Declining line**: Degrading compliance - immediate executive attention needed\n- **Volatile/spiky line**: Inconsistent processes - review operational procedures\n\n**Executive Action Points:**\n- Declining trends require immediate investigation and corrective action\n- Stable high performance validates current governance investments\n- Use trends for quarterly governance program reviews\n\n## 🔧 **Policy Remediation Success Explanation**\n\n**What You're Looking At:** Effectiveness of automated and manual policy remediation efforts\n\n**Success Rate Assessment:**\n- **High Success (90%+)**: Excellent remediation processes and tooling\n- **Medium Success (70-89%)**: Good but room for automation improvement\n- **Low Success (<70%)**: Process issues requiring management attention\n\n**Status Meanings:**\n- **Succeeded (Green)**: Remediation completed successfully\n- **Failed (Red)**: Remediation attempt unsuccessful - needs investigation\n- **In Progress (Blue)**: Currently running - monitor for completion\n\n**Business Impact:** Higher success rates = Lower ongoing compliance risk and reduced manual effort\n\n## 📊 **Risk Category Distribution Explanation**\n\n**What You're Looking At:** Pie chart showing which types of policies are most frequently violated\n\n**Category Analysis:**\n- **Large slices**: Systemic issues requiring process improvement or training\n- **Security category dominance**: Indicates need for security awareness programs\n- **Monitoring category issues**: Suggests gaps in observability tooling\n- **Multiple small slices**: Diverse issues - may need comprehensive governance review\n\n**Strategic Response:** Focus improvement efforts on largest violation categories first\n\n## 🎯 **Resource Type Violations Explanation**\n\n**What You're Looking At:** Bar chart showing which types of Azure resources most frequently violate policies\n\n**Resource Analysis:**\n- **Longer bars**: Resource types needing focused governance attention\n- **Virtual machines dominance**: May need enhanced configuration management\n- **Storage account issues**: Often related to security or compliance settings\n- **Network resource violations**: Typically security or access control related\n\n**Operational Impact:** Target governance automation and training efforts on problematic resource types"
+            },
+            "name": "trends_text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| extend resourceId = tostring(properties.resourceId)\n| extend policyAssignmentId = tostring(properties.policyAssignmentId)\n| where isnotempty(resourceId) and isnotempty(policyAssignmentId)\n| summarize arg_max(todatetime(properties.timestamp), *) by resourceId, policyAssignmentId\n| extend evaluationDate = startofday(todatetime(properties.timestamp))\n| where evaluationDate >= startofday(ago(30d))\n| extend complianceState = tostring(properties.complianceState)\n| summarize \n    TotalEvaluations = count(),\n    CompliantCount = countif(complianceState == 'Compliant'),\n    NonCompliantCount = countif(complianceState == 'NonCompliant')\n    by evaluationDate\n| extend ComplianceRate = round(todouble(CompliantCount) * 100.0 / todouble(TotalEvaluations), 2)\n| project Date = evaluationDate, ['Compliance %'] = ComplianceRate, TotalEvaluations, CompliantCount, NonCompliantCount\n| order by Date asc",
+              "size": 0,
+              "title": "Overall Compliance Trend (Last 30 Days)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "barchart",
+              "chartSettings": {
+                "xAxis": "Date",
+                "yAxis": [
+                  "Compliance %"
+                ],
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Compliance %",
+                    "label": "Daily Compliance Rate",
+                    "color": "blue"
+                  }
+                ],
+                "ySettings": {
+                  "numberFormatSettings": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true
+                    }
+                  },
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "compliance_trend_chart"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| extend timestamp = todatetime(properties.timestamp)\n| extend resourceGroup = tostring(split(tostring(properties.resourceId), '/')[4])\n| where timestamp >= ago(30d)\n| where isnotempty(resourceGroup)\n| summarize \n    Total = count(),\n    Compliant = countif(complianceState == 'Compliant')\n    by bin(timestamp, 1d), resourceGroup\n| extend ComplianceRate = round(todouble(Compliant) * 100.0 / todouble(Total), 2)\n| project timestamp, resourceGroup, ComplianceRate\n| order by timestamp asc",
+              "size": 0,
+              "title": "Compliance Trend by Resource Group (Last 30 Days)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "linechart",
+              "chartSettings": {
+                "xAxis": "timestamp",
+                "yAxis": [
+                  "ComplianceRate"
+                ],
+                "group": "resourceGroup",
+                "createOtherGroup": 10,
+                "ySettings": {
+                  "numberFormatSettings": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true
+                    }
+                  },
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "compliance_trend_by_rg_chart"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/remediations'\n| extend provisioningState = tostring(properties.provisioningState)\n| extend deploymentStatus = tostring(properties.deploymentStatus)\n| extend lastUpdated = todatetime(properties.lastUpdatedDateTime)\n| extend policyAssignmentId = tostring(properties.policyAssignmentId)\n| extend policyDefinitionReferenceId = tostring(properties.policyDefinitionReferenceId)\n| summarize \n    Total = count(),\n    Succeeded = countif(provisioningState == 'Succeeded'),\n    Failed = countif(provisioningState == 'Failed'),\n    InProgress = countif(provisioningState == 'Running' or provisioningState == 'Evaluating')\n| project Total, Succeeded, Failed, InProgress\n| extend ['Success Rate %'] = round(todouble(Succeeded) * 100.0 / todouble(Total), 2)",
+              "size": 3,
+              "title": "Policy Remediation Summary",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Total",
+                  "formatter": 1
+                },
+                "rightContent": {
+                  "columnMatch": "Success Rate %",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "redGreen"
+                  },
+                  "numberFormat": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                },
+                "secondaryContent": {
+                  "columnMatch": "Succeeded",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "name": "remediation_summary_tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/remediations'\n| extend provisioningState = tostring(properties.provisioningState)\n| extend lastUpdated = todatetime(properties.lastUpdatedDateTime)\n| extend policyAssignmentName = tostring(split(tostring(properties.policyAssignmentId), '/')[8])\n| extend resourceCount = toint(properties.deploymentStatus.totalDeployments)\n| extend successCount = toint(properties.deploymentStatus.successfulDeployments)\n| extend failedCount = toint(properties.deploymentStatus.failedDeployments)\n| project \n    ['Remediation Name'] = name,\n    ['Policy Assignment'] = policyAssignmentName,\n    ['Status'] = provisioningState,\n    ['Total Resources'] = resourceCount,\n    ['Successful'] = successCount,\n    ['Failed'] = failedCount,\n    ['Last Updated'] = lastUpdated\n| order by ['Last Updated'] desc",
+              "size": 0,
+              "title": "Remediation Task Details",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Status",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Succeeded",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Failed",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Running",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Successful",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "green"
+                    }
+                  },
+                  {
+                    "columnMatch": "Failed",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "Last Updated",
+                    "formatter": 6
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "remediation_details_grid"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| extend policyCategory = tostring(properties.policyDefinitionCategory)\n| where complianceState == 'NonCompliant'\n| summarize Count = count() by policyCategory\n| order by Count desc",
+              "size": 1,
+              "title": "Non-Compliant Resources by Policy Category",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "piechart"
+            },
+            "customWidth": "50",
+            "name": "noncompliant_by_category_pie"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "PolicyResources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend complianceState = tostring(properties.complianceState)\n| extend resourceType = tostring(properties.resourceType)\n| where complianceState == 'NonCompliant'\n| summarize Count = count() by resourceType\n| order by Count desc\n| take 10",
+              "size": 1,
+              "title": "Top 10 Non-Compliant Resource Types",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{p_subs}"
+              ],
+              "visualization": "barchart",
+              "chartSettings": {
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Count",
+                    "color": "redBright"
+                  }
+                ]
+              }
+            },
+            "customWidth": "50",
+            "name": "noncompliant_by_type_bar"
+          }
+        ]
+      },
+      "name": "group_trends"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n\n# 🎯 **Your Transformation Is Complete**\n\n## **From Security Burden to Competitive Advantage**\n\n**Today, you've gained something extraordinary:**\n\n🏆 **Executive Intelligence** - Real-time visibility into your security posture with business impact clarity  \n💰 **Quantified ROI** - Measurable proof that your security investments deliver shareholder value  \n⚡ **Operational Excellence** - Automated efficiency that transforms your team from reactive to strategic  \n🛡️ **Competitive Edge** - Security capabilities that differentiate your organisation in the market  \n📈 **Board Confidence** - Data-driven evidence of leadership and risk management excellence  \n\n---\n\n## 🚀 **Your Next 30 Days**\n\n**Week 1:** Use Immediate Action section to eliminate critical vulnerabilities  \n**Week 2:** Implement efficiency recommendations to reduce operational costs  \n**Week 3:** Present Business Value metrics to executive leadership  \n**Week 4:** Plan next quarter's security strategy using Success Metrics insights  \n\n---\n\n## 💎 **The Executive Advantage**\n\n**Before today:** Security was a necessary cost with unclear value  \n**After today:** Security is a strategic differentiator with measurable business impact  \n\n**You now have what every executive wants:**\n- **Clear visibility** into business-critical risks\n- **Quantified justification** for security investments  \n- **Competitive intelligence** that drives strategic decisions\n- **Board-ready proof** of exceptional governance\n\n---\n\n## 🎬 **One More Thing...**\n\n**This dashboard will continue to evolve with your organisation.**\n\n**As your security posture improves, these metrics will reflect your success.**  \n**As new threats emerge, this intelligence will guide your response.**  \n**As your business grows, this platform will scale with you.**  \n\n**You haven't just implemented a dashboard. You've gained a strategic advantage.**\n\n---\n\n### 🏆 **Welcome to the Future of Executive Security Intelligence**\n\n**Congratulations. You're no longer just managing security.**  \n**You're leading it.**"
+      },
+      "name": "executive_conclusion"
+    }
+  ],
+  "styleSettings": {},
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
+
+

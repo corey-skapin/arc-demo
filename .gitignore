@@ -17,7 +17,7 @@ Thumbs.db
 
 # Bicep build artifacts
 *.json
-!workbooks/*.json
+!workbooks/**/*.json
 !.github/**/*.json
 !bicep/**/parameters*.json
 

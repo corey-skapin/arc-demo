@@ -84,7 +84,6 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
         name: '${vmName}-osdisk'
         createOption: 'FromImage'
         managedDisk: { storageAccountType: 'StandardSSD_LRS' }
-        diskSizeGB: 64
       }
     }
     networkProfile: {

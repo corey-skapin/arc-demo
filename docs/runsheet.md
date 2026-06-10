@@ -36,7 +36,7 @@
 - Set the rule: **don't open the Arc blade first**. Lead with insights and let the customer ask "wait, how do we get this?"
 
 ### 2. Estate connectivity workbook  (~2 min) — *exec lens*
-- Open **Arc Demo — Estate Overview** workbook.
+- Open **Arc — Compliance, Security & Governance** (from Nic's library) for the heavyweight scorecard view, or **Arc Demo — Estate Overview** (our custom one-pager) for a quick at-a-glance.
 - Walk through tiles top-to-bottom:
   - "8 hosts beating, mix of Windows/Linux"
   - "Tagging hygiene — half my fleet is missing ownership tags. *In your environment, that's hundreds of unattributed servers.*"
@@ -55,19 +55,17 @@
 - Tie it back: *"This data comes from Defender for Endpoint, which Defender Plan 2 auto-deployed to every Arc machine — no SCCM, no SCOM, no third-party agent we had to wedge in."*
 
 ### 5. Inventory & change tracking  (~3 min) — *ops lens*
-- **Arc → Inventory** workbook → show software inventory across the fleet.
-- Switch to KQL: `ConfigurationChange | where TimeGenerated > ago(7d) | summarize Changes=count() by Computer, ConfigChangeType`.
+- Open **Arc — Asset Inventory** (Nic's library) for software-across-the-estate, then KQL `ConfigurationChange | where TimeGenerated > ago(7d) | summarize Changes=count() by Computer, ConfigChangeType`.
 - *"Software-installed, service-changed, file-changed, registry-changed — all event-driven, like cloud. Customers replacing SCOM love this."*
 
 ### 6. SQL on Arc  (~3 min) — *DBA lens*
-- **Azure Arc → SQL Server instances** → drill into `win-sql-01`.
+- Open **Arc — SQL Estate Dashboard** (from Nic's library) for the cross-estate view, then **Azure Arc → SQL Server instances → win-sql-01** for the drill-down.
 - Show **Best practice assessment** results (will be populated after the first run).
 - *"BPA needs Software Assurance — most enterprise customers already have it. They get this for free."*
 - Mention migration assistant + automated backup as the follow-on conversation.
 
 ### 7. Performance deep-dive  (~2 min) — *ops lens*
-- Back to **Arc Demo — Estate Overview** workbook → CPU table.
-- Pick the highest p95 host → drill into **VM Insights → Performance**.
+- Open **Arc — Machine Intelligence Center** (Nic's library) and select the worst-performing host → live CPU/memory/disk/network + change events + CVSS vulns all on one page.
 - *"This is the conversation that saves customers from upgrading to a bigger SQL Standard core licence when their actual peak is 35%."*
 
 ### 8. Alerts & ITSM story  (~2 min)

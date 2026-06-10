@@ -12,12 +12,15 @@ param workspaceId string
 @description('Email address to notify on alerts')
 param adminEmail string
 
+@description('Name prefix used for AG / alert names')
+param namePrefix string = 'arc-demo'
+
 resource ag 'Microsoft.Insights/actionGroups@2024-10-01-preview' = {
-  name: 'ag-arc-demo'
+  name: 'ag-${namePrefix}'
   location: 'global'
   tags: tags
   properties: {
-    groupShortName: 'ArcDemo'
+    groupShortName: take(replace(namePrefix, '-', ''), 12)
     enabled: true
     emailReceivers: [
       {
@@ -30,7 +33,7 @@ resource ag 'Microsoft.Insights/actionGroups@2024-10-01-preview' = {
 }
 
 resource alert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
-  name: 'alert-host-missing-heartbeat'
+  name: 'alert-${namePrefix}-host-missing-heartbeat'
   location: location
   tags: tags
   properties: {

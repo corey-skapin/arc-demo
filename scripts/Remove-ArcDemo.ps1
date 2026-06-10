@@ -53,10 +53,10 @@ foreach ($n in "mcsb-$NamePrefix", "nist-$NamePrefix") {
 }
 
 Write-Step 'Removing budget...'
-if ($PSCmdlet.ShouldProcess('budget-arc-demo', 'delete budget')) {
+if ($PSCmdlet.ShouldProcess("budget-$NamePrefix", 'delete budget')) {
     try {
-        Invoke-AzRest -Method Delete -Url "https://management.azure.com/subscriptions/$sub/providers/Microsoft.Consumption/budgets/budget-arc-demo?api-version=2024-08-01" | Out-Null
-        Write-Ok 'Deleted budget'
+        Invoke-AzRest -Method Delete -Url "https://management.azure.com/subscriptions/$sub/providers/Microsoft.Consumption/budgets/budget-$NamePrefix`?api-version=2024-08-01" | Out-Null
+        Write-Ok "Deleted budget-$NamePrefix"
     } catch { Write-Warn "Budget delete: $($_.Exception.Message)" }
 }
 

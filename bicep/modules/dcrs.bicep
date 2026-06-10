@@ -116,64 +116,8 @@ resource dcrVmi 'Microsoft.Insights/dataCollectionRules@2023-03-11' = {
   }
 }
 
-resource dcrCt 'Microsoft.Insights/dataCollectionRules@2023-03-11' = {
+resource dcrCt 'Microsoft.Insights/dataCollectionRules@2023-03-11' existing = {
   name: 'dcr-changetracking'
-  location: location
-  tags: tags
-  properties: {
-    description: 'Change Tracking & Inventory DCR'
-    dataSources: {
-      extensions: [
-        {
-          name: 'CTDataSource-Windows'
-          streams: ['Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData']
-          extensionName: 'ChangeTracking-Windows'
-          extensionSettings: {
-            enableFiles: true
-            enableSoftware: true
-            enableRegistry: true
-            enableServices: true
-            enableInventory: true
-            registrySettings: { registryCollectionFrequency: 3000, registryInfo: [] }
-            fileSettings: { fileCollectionFrequency: 2700 }
-            softwareSettings: { softwareCollectionFrequency: 1800 }
-            inventorySettings: { inventoryCollectionFrequency: 36000 }
-            servicesSettings: { serviceCollectionFrequency: 1800 }
-          }
-        }
-        {
-          name: 'CTDataSource-Linux'
-          streams: ['Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData']
-          extensionName: 'ChangeTracking-Linux'
-          extensionSettings: {
-            enableFiles: true
-            enableSoftware: true
-            enableRegistry: false
-            enableServices: true
-            enableInventory: true
-            fileSettings: { fileCollectionFrequency: 900, fileInfo: [] }
-            softwareSettings: { softwareCollectionFrequency: 300 }
-            inventorySettings: { inventoryCollectionFrequency: 36000 }
-            servicesSettings: { serviceCollectionFrequency: 300 }
-          }
-        }
-      ]
-    }
-    destinations: {
-      logAnalytics: [
-        {
-          name: 'Microsoft-CT-Dest'
-          workspaceResourceId: workspaceId
-        }
-      ]
-    }
-    dataFlows: [
-      {
-        streams: ['Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData']
-        destinations: ['Microsoft-CT-Dest']
-      }
-    ]
-  }
 }
 
 output dcrCoreId string = dcrCore.id

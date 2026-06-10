@@ -109,6 +109,7 @@ $paramFile = Join-Path $env:TEMP "arc-demo-params-$(Get-Random).json"
         location              = @{ value = $Location }
         arcResourceGroup      = @{ value = $arcRg }
         infraResourceGroup    = @{ value = $infraRg }
+        namePrefix            = @{ value = $NamePrefix }
         tenantId              = @{ value = $TenantId }
         deployerPrincipalId   = @{ value = $principalId }
         keyVaultName          = @{ value = $kvName }
@@ -136,8 +137,12 @@ if ($WhatIfPreference) {
 }
 
 Write-Step "Deploying main.bicep (deployment: $deploymentName)..."
-$null = az deployment sub create --name $deploymentName --location $Location `
-    --template-file $bicepFile --parameters @$paramFile --only-show-errors
+az deployment sub create --name $deploymentName --location $Location `
+    --template-file $bicepFile --parameters @$paramFile --only-show-errors -o none
+if ($LASTEXITCODE -ne 0) {
+    Remove-Item $paramFile -Force -ErrorAction SilentlyContinue
+    throw "Bicep deployment failed. Inspect with: az deployment sub show --name $deploymentName"
+}
 $outputs = az deployment sub show --name $deploymentName --query properties.outputs -o json | ConvertFrom-Json
 Remove-Item $paramFile -Force
 Write-Ok 'Bicep deployment complete'
@@ -152,26 +157,95 @@ $winVms = $vmNames | Where-Object { $_ -like 'win-*' }
 $lnxVms = $vmNames | Where-Object { $_ -like 'lnx-*' }
 $sqlVms = $vmNames | Where-Object { $_ -like 'win-sql-*' }
 
+# Phase 2.5: Create Change Tracking DCR (must wait for solution to provision tables)
+Write-Header 'Phase 2.5 — Change Tracking DCR (post-Bicep)'
+Write-Step 'Waiting for ChangeTracking tables to appear in workspace (up to 5 min)...'
+$ctReady = Wait-Until -TimeoutSeconds 300 -IntervalSeconds 30 -Message 'CT tables' -Condition {
+    $token = Get-LawQueryToken
+    $hdr = @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
+    $q = @{ query = "ConfigurationData | take 1" } | ConvertTo-Json
+    try {
+        $null = Invoke-RestMethod -Method Post -Headers $hdr -Body $q `
+          -Uri "https://api.loganalytics.io/v1/workspaces/$workspaceCustomerId/query"
+        return $true
+    } catch { return $false }
+}
+if (-not $ctReady) {
+    Write-Warn 'Tables not yet visible — attempting DCR PUT anyway (may take longer to become queryable)'
+}
+$ctDcrBody = @{
+    location = $Location
+    tags = @{ owner='demo'; purpose='arc-demo'; costcenter='demo'; env='demo' }
+    properties = @{
+        description = 'Change Tracking & Inventory DCR'
+        dataSources = @{
+            extensions = @(
+                @{
+                    name = 'CTDataSource-Windows'
+                    streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
+                    extensionName = 'ChangeTracking-Windows'
+                    extensionSettings = @{
+                        enableFiles = $true; enableSoftware = $true; enableRegistry = $true
+                        enableServices = $true; enableInventory = $true
+                        registrySettings = @{ registryCollectionFrequency = 3000; registryInfo = @() }
+                        fileSettings = @{ fileCollectionFrequency = 2700 }
+                        softwareSettings = @{ softwareCollectionFrequency = 1800 }
+                        inventorySettings = @{ inventoryCollectionFrequency = 36000 }
+                        servicesSettings = @{ serviceCollectionFrequency = 1800 }
+                    }
+                }
+                @{
+                    name = 'CTDataSource-Linux'
+                    streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
+                    extensionName = 'ChangeTracking-Linux'
+                    extensionSettings = @{
+                        enableFiles = $true; enableSoftware = $true; enableRegistry = $false
+                        enableServices = $true; enableInventory = $true
+                        fileSettings = @{ fileCollectionFrequency = 900; fileInfo = @() }
+                        softwareSettings = @{ softwareCollectionFrequency = 300 }
+                        inventorySettings = @{ inventoryCollectionFrequency = 36000 }
+                        servicesSettings = @{ serviceCollectionFrequency = 300 }
+                    }
+                }
+            )
+        }
+        destinations = @{
+            logAnalytics = @(@{ name = 'Microsoft-CT-Dest'; workspaceResourceId = $workspaceId })
+        }
+        dataFlows = @(@{
+            streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
+            destinations = @('Microsoft-CT-Dest')
+        })
+    }
+}
+$null = Invoke-AzRest -Method Put `
+    -Url "https://management.azure.com${dcrCtId}?api-version=2023-03-11" `
+    -Body $ctDcrBody
+Write-Ok "Change Tracking DCR created"
+
 # Phase 3: NAT Gateway (separate so Hibernate can delete it)
 Write-Header 'Phase 3 — NAT Gateway'
-$pipExists = az network public-ip show -g $infraRg -n pip-natgw --query id -o tsv 2>$null
+$natName = "natgw-$NamePrefix"
+$pipName = "pip-natgw-$NamePrefix"
+$vnetName = "vnet-$NamePrefix"
+$pipExists = az network public-ip show -g $infraRg -n $pipName --query id -o tsv 2>$null
 if (-not $pipExists) {
-    az network public-ip create -g $infraRg -n pip-natgw -l $Location `
+    az network public-ip create -g $infraRg -n $pipName -l $Location `
         --sku Standard --allocation-method Static --only-show-errors -o none
-    Write-Ok 'Public IP created'
+    Write-Ok "Public IP created ($pipName)"
 } else { Write-Ok 'Public IP already exists' }
 
-$natExists = az network nat gateway show -g $infraRg -n natgw-arc-demo --query id -o tsv 2>$null
+$natExists = az network nat gateway show -g $infraRg -n $natName --query id -o tsv 2>$null
 if (-not $natExists) {
-    az network nat gateway create -g $infraRg -n natgw-arc-demo -l $Location `
-        --public-ip-addresses pip-natgw --idle-timeout 10 --only-show-errors -o none
-    Write-Ok 'NAT Gateway created'
+    az network nat gateway create -g $infraRg -n $natName -l $Location `
+        --public-ip-addresses $pipName --idle-timeout 10 --only-show-errors -o none
+    Write-Ok "NAT Gateway created ($natName)"
 } else { Write-Ok 'NAT Gateway already exists' }
 
-$attached = az network vnet subnet show -g $infraRg --vnet-name vnet-arc-demo -n snet-vms --query "natGateway.id" -o tsv 2>$null
+$attached = az network vnet subnet show -g $infraRg --vnet-name $vnetName -n snet-vms --query "natGateway.id" -o tsv 2>$null
 if (-not $attached) {
-    az network vnet subnet update -g $infraRg --vnet-name vnet-arc-demo -n snet-vms `
-        --nat-gateway natgw-arc-demo --only-show-errors -o none
+    az network vnet subnet update -g $infraRg --vnet-name $vnetName -n snet-vms `
+        --nat-gateway $natName --only-show-errors -o none
     Write-Ok 'NAT Gateway attached to subnet'
 } else { Write-Ok 'Subnet already has NAT GW' }
 
@@ -397,33 +471,65 @@ Get-Service MSSQLSERVER | Format-List Name, Status
     Write-Ok 'WindowsAgent.SqlServer extension installed on SQL hosts'
 }
 
-# Phase 11: Workbook
-Write-Header 'Phase 11 — Workbook'
-$wbContent = Get-Content (Join-Path $repoRoot 'workbooks\arc-demo-overview.workbook.json') -Raw
-$existingWb = az resource list -g $arcRg --resource-type Microsoft.Insights/workbooks `
-    --query "[?tags.workbookTag=='arc-demo-overview'].id" -o tsv 2>$null
-if ($existingWb) {
-    Write-Ok 'Workbook already exists — skipping'
-    $wbId = $existingWb
-} else {
+# Phase 11: Workbooks (custom + Nic's library)
+Write-Header 'Phase 11 — Workbooks'
+
+function Publish-Workbook {
+    param(
+        [string]$FilePath,
+        [string]$DisplayName,
+        [string]$Category = 'workbook'
+    )
+    if (-not (Test-Path $FilePath)) {
+        Write-Warn "Skipping $DisplayName — file not found: $FilePath"
+        return
+    }
+    $wbContent = Get-Content $FilePath -Raw
+    # Strip any incoming $schema-incompatible chars
+    $wbContent = $wbContent.TrimStart([char]0xFEFF)
+    $tag = ($DisplayName -replace '[^A-Za-z0-9]', '-').ToLower()
+    # Look for an existing workbook with this tag (idempotent re-runs)
+    $existing = az resource list -g $arcRg --resource-type Microsoft.Insights/workbooks `
+        --query "[?tags.workbookTag=='$tag'].id" -o tsv 2>$null
+    if ($existing) {
+        Write-Ok "Workbook '$DisplayName' already exists — skipping"
+        return $existing
+    }
     $wbGuid = [guid]::NewGuid().ToString()
     $wbBody = @{
         location = $Location
-        tags = @{ owner = 'demo'; purpose = 'arc-demo'; costcenter = 'demo'; env = 'demo'; workbookTag = 'arc-demo-overview' }
+        tags = @{ owner = 'demo'; purpose = 'arc-demo'; costcenter = 'demo'; env = 'demo'; workbookTag = $tag }
         kind = 'shared'
         properties = @{
-            displayName    = 'Arc Demo — Estate Overview'
+            displayName    = $DisplayName
             serializedData = $wbContent
             version        = 'Notebook/1.0'
-            category       = 'workbook'
+            category       = $Category
             sourceId       = $workspaceId.ToLower()
         }
     }
     $r = Invoke-AzRest -Method Put `
         -Url "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$arcRg/providers/Microsoft.Insights/workbooks/${wbGuid}?api-version=2023-06-01" `
         -Body $wbBody
-    $wbId = $r.id
     Write-Ok "Workbook created: $($r.properties.displayName)"
+    return $r.id
+}
+
+# Custom one-pager
+$customWb = Join-Path $repoRoot 'workbooks\arc-demo-overview.workbook.json'
+$wbId = Publish-Workbook -FilePath $customWb -DisplayName 'Arc Demo — Estate Overview'
+
+# Nic Seilaz's workbook collection (vendored snapshot)
+$nseilazDir = Join-Path $repoRoot 'workbooks\nseilaz'
+$nseilazSet = @(
+    @{ file = 'Arc_Compliance_Security_Governance_example.json'; name = 'Arc — Compliance, Security & Governance' }
+    @{ file = 'ArcMachineIntelligenceCenter.json';               name = 'Arc — Machine Intelligence Center' }
+    @{ file = 'Asset_Inventory_Workbook_Example.json';           name = 'Arc — Asset Inventory' }
+    @{ file = 'GovernanceComplianceWorkbook_Experiment.json';    name = 'Arc — Governance & Compliance (experimental)' }
+    @{ file = 'SQL_Estate_Dashboard.json';                       name = 'Arc — SQL Estate Dashboard' }
+)
+foreach ($wb in $nseilazSet) {
+    Publish-Workbook -FilePath (Join-Path $nseilazDir $wb.file) -DisplayName $wb.name | Out-Null
 }
 
 # Phase 12: validation

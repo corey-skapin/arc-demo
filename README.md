@@ -115,7 +115,8 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 
 ## Inspiration & credits
 
-Demo flow modelled on **Nic Seilaz's** Arc + Azure Monitor demo. The persona-first structure (exec → security → ops) and the focus on workbooks-as-story were his ideas; this repo is the scripted version.
+- Demo flow modelled on **[Nic Seilaz's](https://github.com/nseilaz)** Arc + Azure Monitor demo. The persona-first structure (exec → security → ops) and the focus on workbooks-as-story were his ideas.
+- **Workbook library** in `workbooks/nseilaz/` is a vendored snapshot from [github.com/nseilaz/AzureArc_Workbooks](https://github.com/nseilaz/AzureArc_Workbooks) (MIT). Run `Deploy-ArcDemo.ps1` and they'll land in your demo workspace alongside our custom one-pager.
 
 ## License
 

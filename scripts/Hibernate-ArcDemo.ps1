@@ -25,8 +25,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
 
-$infraRg = "rg-$NamePrefix-infra"
 $arcRg   = "rg-$NamePrefix"
+$infraRg = "rg-$NamePrefix-infra"
+$vnet    = "vnet-$NamePrefix"
+$subnet  = 'snet-vms'
+$natGw   = "natgw-$NamePrefix"
+$natPip  = "pip-natgw-$NamePrefix"
 
 Write-Header "Hibernating Arc demo ($arcRg + $infraRg)"
 
@@ -45,21 +49,22 @@ Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'all VMs deallocated
 } | Out-Null
 Write-Ok 'All VMs deallocated'
 
+# NAT GW must be deleted BEFORE the public IP (PIP delete fails if still allocated)
 Write-Step 'Detaching + deleting NAT Gateway...'
-$attached = az network vnet subnet show -g $infraRg --vnet-name "vnet-$NamePrefix" -n snet-vms --query "natGateway.id" -o tsv 2>$null
+$attached = az network vnet subnet show -g $infraRg --vnet-name $vnet -n $subnet --query "natGateway.id" -o tsv 2>$null
 if ($attached -and $PSCmdlet.ShouldProcess('subnet', 'detach NAT GW')) {
-    az network vnet subnet update -g $infraRg --vnet-name "vnet-$NamePrefix" -n snet-vms --remove natGateway --only-show-errors -o none
-    Write-Ok 'Detached'
+    az network vnet subnet update -g $infraRg --vnet-name $vnet -n $subnet --remove natGateway --only-show-errors -o none
+    Write-Ok 'Detached NAT GW from subnet'
 }
-$natExists = az network nat gateway show -g $infraRg -n "natgw-$NamePrefix" --query id -o tsv 2>$null
-if ($natExists -and $PSCmdlet.ShouldProcess("natgw-$NamePrefix", 'delete')) {
-    az network nat gateway delete -g $infraRg -n "natgw-$NamePrefix" --only-show-errors
-    Write-Ok "Deleted natgw-$NamePrefix"
+$natExists = az network nat gateway show -g $infraRg -n $natGw --query id -o tsv 2>$null
+if ($natExists -and $PSCmdlet.ShouldProcess($natGw, 'delete')) {
+    az network nat gateway delete -g $infraRg -n $natGw --only-show-errors
+    Write-Ok "Deleted $natGw"
 }
-$pipExists = az network public-ip show -g $infraRg -n "pip-natgw" --query id -o tsv 2>$null
-if ($pipExists -and $PSCmdlet.ShouldProcess('pip-natgw', 'delete')) {
-    az network public-ip delete -g $infraRg -n pip-natgw --only-show-errors
-    Write-Ok 'Deleted pip-natgw'
+$pipExists = az network public-ip show -g $infraRg -n $natPip --query id -o tsv 2>$null
+if ($pipExists -and $PSCmdlet.ShouldProcess($natPip, 'delete')) {
+    az network public-ip delete -g $infraRg -n $natPip --only-show-errors
+    Write-Ok "Deleted $natPip"
 }
 
 Write-Header '✅ Demo hibernated'

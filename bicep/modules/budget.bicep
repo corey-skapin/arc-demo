@@ -14,6 +14,9 @@ param arcResourceGroup string
 @description('Infra resource group name')
 param infraResourceGroup string
 
+@description('Name prefix for budget name')
+param namePrefix string = 'arc-demo'
+
 @description('Budget start date (must be first of a month, ISO)')
 param startDate string = utcNow('yyyy-MM-01')
 
@@ -21,7 +24,7 @@ param startDate string = utcNow('yyyy-MM-01')
 param endDate string = '${string(int(substring(utcNow('yyyy'), 0, 4)) + 2)}-${utcNow('MM')}-01'
 
 resource budget 'Microsoft.Consumption/budgets@2024-08-01' = {
-  name: 'budget-arc-demo'
+  name: 'budget-${namePrefix}'
   properties: {
     category: 'Cost'
     amount: amount

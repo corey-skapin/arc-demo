@@ -1,0 +1,1171 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# 🤖 Azure Arc Machine Intelligence Centre\n\n## **Your Complete Single-Machine Dashboard**\n\n**🎯 What This Does**: Get a complete 360-degree view of any Azure Arc machine in your organisation with just one click.\n\n**✨ What You'll See:**\n- **🔍 Live Performance Data** - CPU, memory, disk, and network activity\n- **🛡️ Security Health** - Defender alerts, threats, and security status\n- **� Vulnerability Intelligence** - Real CVSS risk scores and detailed security assessments\n- **📊 Security Health Summary** - Complete security report card with compliance scores\n- **�💾 Software Tracking** - Recent installs, removals, and change history\n- **🗄️ SQL Server Details** - Database inventory, performance, and security (when available)\n- **⚙️ Arc Management** - Extensions, policies, and compliance status\n- **📊 Operations Timeline** - Connection history, updates, and maintenance events\n\n**🚀 Why This Matters**: This dashboard shows how Azure Arc transforms any machine into a fully managed, monitored, and secured part of your cloud environment with real-time vulnerability intelligence.\n\n---\n\n### 📋 **Choose Your Arc Machine**"
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "machine-selector",
+            "version": "KqlParameterItem/1.0",
+            "name": "SelectedMachine",
+            "type": 5,
+            "label": "🖥️ Arc Machine",
+            "isRequired": true,
+            "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project label = name, value = name, group = resourceGroup, subscription = subscriptionId\n| order by label asc",
+            "crossComponentResources": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "showDefault": false,
+              "additionalResourceOptions": []
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          },
+          {
+            "id": "time-range",
+            "version": "KqlParameterItem/1.0", 
+            "name": "TimeRange",
+            "type": 4,
+            "label": "📅 Analysis Period",
+            "value": {
+              "durationMs": 2592000000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                }
+              ],
+              "allowCustom": true
+            }
+          },
+          {
+            "id": "workspace-selector",
+            "version": "KqlParameterItem/1.0",
+            "name": "LogAnalyticsWorkspace",
+            "type": 5,
+            "label": "📊 Log Analytics Workspace",
+            "isRequired": false,
+            "query": "where type =~ 'microsoft.operationalinsights/workspaces'",
+            "crossComponentResources": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "resourceTypeFilter": {
+                "microsoft.operationalinsights/workspaces": true
+              },
+              "showDefault": false
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          }
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🏷️ **Machine Overview & Identity**\n\n**What You're Looking At**: Basic machine information pulled directly from Azure Arc registration and connection data.\n\n**Why This Matters**: Quickly check the machine's identity, location, and whether the Arc agent is working properly before looking at detailed information."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Machine Overview - Basic Identity and Status\nresources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where name =~ '{SelectedMachine}'\n| extend \n    MachineName = name,\n    OperatingSystem = tostring(properties.osName),\n    OSVersion = tostring(properties.osVersion),\n    AgentVersion = tostring(properties.agentVersion),\n    LastStatusChange = todatetime(properties.lastStatusChange),\n    Status = tostring(properties.status),\n    DomainName = tostring(properties.domainName),\n    Location = location,\n    ResourceGroup = resourceGroup,\n    Subscription = subscriptionId,\n    PrivateIP = tostring(properties.networkProfile.publicIpAddresses[0]),\n    FQDN = tostring(properties.dnsFqdn),\n    LogicalCores = toint(properties.detectedProperties.logicalCoreCount),\n    TotalMemoryGB = toint(properties.detectedProperties.totalPhysicalMemoryInGigabytes),\n    Manufacturer = tostring(properties.detectedProperties.manufacturer),\n    Model = tostring(properties.detectedProperties.model)\n| extend \n    DaysOffline = case(\n        Status == \"Connected\", 0,\n        Status == \"Disconnected\", datetime_diff('day', now(), LastStatusChange),\n        datetime_diff('day', now(), LastStatusChange)\n    )\n| extend \n    HealthStatus = case(\n        Status == \"Connected\", \"🟢 Healthy\",\n        Status == \"Disconnected\" and DaysOffline <= 1, \"🟡 Recent Disconnect\",\n        Status == \"Disconnected\" and DaysOffline <= 7, \"🟠 Short Disconnect\",\n        Status == \"Disconnected\", \"🔴 Extended Offline\",\n        \"⚪ Unknown\"\n    ),\n    HardwareSpecs = case(\n        LogicalCores > 0 and TotalMemoryGB > 0, strcat(LogicalCores, \" cores, \", TotalMemoryGB, \" GB RAM\"),\n        LogicalCores > 0, strcat(LogicalCores, \" cores\"),\n        TotalMemoryGB > 0, strcat(TotalMemoryGB, \" GB RAM\"),\n        \"Hardware info not available\"\n    ),\n    MachineType = case(\n        isnotempty(Manufacturer) and isnotempty(Model), strcat(Manufacturer, \" \", Model),\n        isnotempty(Manufacturer), Manufacturer,\n        \"Physical/Virtual Machine\"\n    )\n| project \n    MachineName, HealthStatus, OperatingSystem, OSVersion, \n    AgentVersion, Status, LastStatusChange, DaysOffline,\n    HardwareSpecs, MachineType, DomainName, Location, ResourceGroup, PrivateIP, FQDN",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "HealthStatus",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟢",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains", 
+                    "thresholdValue": "🟡",
+                    "representation": "yellow"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟠", 
+                    "representation": "orange"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "DaysOffline",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            },
+            {
+              "columnMatch": "LastStatusChange",
+              "formatter": 1
+            }
+          ]
+        },
+        "title": "🖥️ Machine Identity & Arc Agent Status",
+        "description": "Core machine information and Azure Arc connectivity status"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 📊 **Performance Intelligence**\n\n**What You're Looking At**: Live and historical performance data collected by Azure Monitor from this specific machine.\n\n**Why This Matters**: Understand how your machine is performing right now, spot potential problems early, and plan for future capacity needs."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Performance Hero KPIs - Current Status\nInsightsMetrics\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated > ago(1h)\n| where (Namespace == \"Processor\" and Name == \"UtilizationPercentage\") or\n        (Namespace == \"Memory\" and Name == \"AvailableMB\") or\n        (Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\")\n| summarize \n    LatestValue = avg(Val),\n    SampleCount = count()\n    by Namespace, Name\n| extend \n    MetricName = case(\n        Name == \"UtilizationPercentage\", \"CPU Usage\",\n        Name == \"AvailableMB\", \"Available Memory (MB)\",\n        Name == \"FreeSpacePercentage\", \"Disk Free Space\",\n        Name\n    ),\n    Status = case(\n        Name == \"UtilizationPercentage\" and LatestValue > 80, \"🔴 High\",\n        Name == \"UtilizationPercentage\" and LatestValue > 60, \"🟡 Moderate\", \n        Name == \"UtilizationPercentage\", \"🟢 Normal\",\n        Name == \"AvailableMB\" and LatestValue < 1024, \"🔴 Low\",\n        Name == \"AvailableMB\" and LatestValue < 2048, \"🟡 Moderate\",\n        Name == \"AvailableMB\", \"🟢 Good\",\n        Name == \"FreeSpacePercentage\" and LatestValue < 10, \"🔴 Critical\",\n        Name == \"FreeSpacePercentage\" and LatestValue < 20, \"🟡 Low\",\n        Name == \"FreeSpacePercentage\", \"🟢 Good\",\n        \"⚪ Unknown\"\n    ),\n    FormattedValue = case(\n        Name == \"UtilizationPercentage\", strcat(round(LatestValue, 1), \"%\"),\n        Name == \"AvailableMB\", strcat(round(LatestValue, 0), \" MB\"),\n        Name == \"FreeSpacePercentage\", strcat(round(LatestValue, 1), \"%\"),\n        tostring(round(LatestValue, 2))\n    )\n| project MetricName, Status, FormattedValue, SampleCount",
+        "size": 3,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "FormattedValue",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "MetricName",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Status",
+            "formatter": 1
+          },
+          "showBorder": true
+        },
+        "title": "⚡ Real-Time Performance Metrics (Last Hour)",
+        "description": "Current CPU, memory, and disk usage with health status indicators"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// CPU Usage Trend - Historical Data\nInsightsMetrics\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| where Namespace == \"Processor\" and Name == \"UtilizationPercentage\"\n| summarize CPUUsage = avg(Val) by bin(TimeGenerated, 1h)\n| extend \n    CPUStatus = case(\n        CPUUsage > 80, \"High\",\n        CPUUsage > 60, \"Moderate\",\n        \"Normal\"\n    )\n| project TimeGenerated, CPUUsage, CPUStatus\n| order by TimeGenerated asc",
+        "size": 1,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "linechart",
+        "chartSettings": {
+          "xAxis": "TimeGenerated",
+          "yAxis": ["CPUUsage"],
+          "showLegend": true,
+          "showDataPoints": false,
+          "yAxisMinimum": 0,
+          "yAxisMaximum": 100
+        },
+        "title": "🖥️ CPU Usage Trend Over Time",
+        "description": "Historical CPU utilisation percentage - helps identify performance patterns and peak usage periods"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Memory Usage Trend - Historical Data\nInsightsMetrics\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| where Namespace == \"Memory\" and Name == \"AvailableMB\"\n| summarize MemoryAvailableMB = avg(Val) by bin(TimeGenerated, 1h)\n| extend \n    MemoryAvailableGB = round(MemoryAvailableMB / 1024.0, 2),\n    MemoryStatus = case(\n        MemoryAvailableMB < 1024, \"Critical\",\n        MemoryAvailableMB < 2048, \"Low\",\n        MemoryAvailableMB < 4096, \"Moderate\",\n        \"Healthy\"\n    )\n| project TimeGenerated, MemoryAvailableGB, MemoryStatus\n| order by TimeGenerated asc",
+        "size": 1,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "linechart",
+        "chartSettings": {
+          "xAxis": "TimeGenerated",
+          "yAxis": ["MemoryAvailableGB"],
+          "showLegend": true,
+          "showDataPoints": false,
+          "yAxisMinimum": 0
+        },
+        "title": "💾 Memory Availability Trend Over Time",
+        "description": "Historical available memory in GB - shows memory consumption patterns and helps plan capacity"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Disk Free Space Trend - Historical Data\nInsightsMetrics\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| where Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| summarize DiskFreeSpace = avg(Val) by bin(TimeGenerated, 1h)\n| extend \n    DiskStatus = case(\n        DiskFreeSpace < 10, \"Critical\",\n        DiskFreeSpace < 20, \"Low\",\n        DiskFreeSpace < 40, \"Moderate\",\n        \"Healthy\"\n    )\n| project TimeGenerated, DiskFreeSpace, DiskStatus\n| order by TimeGenerated asc",
+        "size": 1,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "linechart",
+        "chartSettings": {
+          "xAxis": "TimeGenerated",
+          "yAxis": ["DiskFreeSpace"],
+          "showLegend": true,
+          "showDataPoints": false,
+          "yAxisMinimum": 0,
+          "yAxisMaximum": 100
+        },
+        "title": "� Disk Free Space Trend Over Time",
+        "description": "Historical disk free space percentage - tracks storage consumption and helps prevent disk full situations"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### 📊 **Performance Pattern Analysis**\n\n**What These Tables Show**: The next three tables break down your machine's performance into different ranges (called 'buckets') and show you what percentage of time your machine operates in each range.\n\n**Why This Helps**: Instead of just seeing averages, you can see the full picture - for example, if your CPU averages 50%, these tables tell you whether it's consistently at 50% or bouncing between 20% and 80%. This helps you plan for capacity and spot performance patterns."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Performance Distribution Analysis - CPU Usage Buckets\nlet CPUData = \n    InsightsMetrics\n    | where Computer == '{SelectedMachine}'\n    | where TimeGenerated {TimeRange}\n    | where Namespace == \"Processor\" and Name == \"UtilizationPercentage\"\n    | extend CPUUsage = round(Val, 1)\n    | summarize TotalCPUSamples = count();\nInsightsMetrics\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| where Namespace == \"Processor\" and Name == \"UtilizationPercentage\"\n| extend CPUUsage = round(Val, 1)\n| extend \n    UsageBucket = case(\n        CPUUsage >= 0 and CPUUsage <= 10, \"0-10%\",\n        CPUUsage > 10 and CPUUsage <= 20, \"11-20%\",\n        CPUUsage > 20 and CPUUsage <= 30, \"21-30%\",\n        CPUUsage > 30 and CPUUsage <= 40, \"31-40%\",\n        CPUUsage > 40 and CPUUsage <= 50, \"41-50%\",\n        CPUUsage > 50 and CPUUsage <= 60, \"51-60%\",\n        CPUUsage > 60 and CPUUsage <= 70, \"61-70%\",\n        CPUUsage > 70 and CPUUsage <= 80, \"71-80%\",\n        CPUUsage > 80 and CPUUsage <= 90, \"81-90%\",\n        CPUUsage > 90 and CPUUsage <= 100, \"91-100%\",\n        \"Other\"\n    ),\n    BucketOrder = case(\n        CPUUsage >= 0 and CPUUsage <= 10, 1,\n        CPUUsage > 10 and CPUUsage <= 20, 2,\n        CPUUsage > 20 and CPUUsage <= 30, 3,\n        CPUUsage > 30 and CPUUsage <= 40, 4,\n        CPUUsage > 40 and CPUUsage <= 50, 5,\n        CPUUsage > 50 and CPUUsage <= 60, 6,\n        CPUUsage > 60 and CPUUsage <= 70, 7,\n        CPUUsage > 70 and CPUUsage <= 80, 8,\n        CPUUsage > 80 and CPUUsage <= 90, 9,\n        CPUUsage > 90 and CPUUsage <= 100, 10,\n        11\n    )\n| summarize SampleCount = count() by UsageBucket, BucketOrder\n| extend \n    TotalSamples = toint(toscalar(CPUData | project TotalCPUSamples)),\n    PercentageOfTime = round(100.0 * SampleCount / toint(toscalar(CPUData | project TotalCPUSamples)), 2),\n    PerformanceZone = case(\n        UsageBucket in (\"0-10%\", \"11-20%\", \"21-30%\"), \"🟢 Optimal\",\n        UsageBucket in (\"31-40%\", \"41-50%\", \"51-60%\"), \"🟡 Normal\",\n        UsageBucket in (\"61-70%\", \"71-80%\"), \"🟠 Busy\",\n        UsageBucket in (\"81-90%\", \"91-100%\"), \"🔴 Stressed\",\n        \"⚪ Unknown\"\n    )\n| project \n    CPURange = UsageBucket,\n    PerformanceZone,\n    SampleCount,\n    PercentageOfTime,\n    TotalSamples,\n    BucketOrder\n| order by BucketOrder asc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "PerformanceZone",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟢",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟡",
+                    "representation": "yellow"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟠",
+                    "representation": "orange"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "PercentageOfTime",
+              "formatter": 12,
+              "formatOptions": {
+                "palette": "greenRed"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 2
+                }
+              }
+            },
+            {
+              "columnMatch": "SampleCount",
+              "formatter": 0,
+              "numberFormat": {
+                "unit": 17,
+                "options": {
+                  "style": "decimal"
+                }
+              }
+            },
+            {
+              "columnMatch": "BucketOrder",
+              "formatter": 5
+            }
+          ]
+        },
+        "title": "📊 CPU Usage Distribution Analysis",
+        "description": "Shows how often your CPU runs at different usage levels - helps you understand if your machine typically runs smoothly (0-30%), normally busy (31-60%), or frequently stressed (61-100%). Each row shows what percentage of time your CPU spent in that usage range."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Performance Distribution Analysis - Memory Usage Buckets\nlet MemoryData = \n    InsightsMetrics\n    | where Computer == '{SelectedMachine}'\n    | where TimeGenerated {TimeRange}\n    | where Namespace == \"Memory\" and Name == \"AvailableMB\"\n    | extend MemoryAvailableGB = round(Val / 1024.0, 1)\n    | summarize TotalMemorySamples = count();\nInsightsMetrics\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| where Namespace == \"Memory\" and Name == \"AvailableMB\"\n| extend MemoryAvailableGB = round(Val / 1024.0, 1)\n| extend \n    MemoryBucket = case(\n        MemoryAvailableGB >= 0 and MemoryAvailableGB <= 1, \"0-1 GB\",\n        MemoryAvailableGB > 1 and MemoryAvailableGB <= 2, \"1-2 GB\",\n        MemoryAvailableGB > 2 and MemoryAvailableGB <= 4, \"2-4 GB\",\n        MemoryAvailableGB > 4 and MemoryAvailableGB <= 8, \"4-8 GB\",\n        MemoryAvailableGB > 8 and MemoryAvailableGB <= 16, \"8-16 GB\",\n        MemoryAvailableGB > 16 and MemoryAvailableGB <= 32, \"16-32 GB\",\n        MemoryAvailableGB > 32 and MemoryAvailableGB <= 64, \"32-64 GB\",\n        MemoryAvailableGB > 64, \"64+ GB\",\n        \"Other\"\n    ),\n    BucketOrder = case(\n        MemoryAvailableGB >= 0 and MemoryAvailableGB <= 1, 1,\n        MemoryAvailableGB > 1 and MemoryAvailableGB <= 2, 2,\n        MemoryAvailableGB > 2 and MemoryAvailableGB <= 4, 3,\n        MemoryAvailableGB > 4 and MemoryAvailableGB <= 8, 4,\n        MemoryAvailableGB > 8 and MemoryAvailableGB <= 16, 5,\n        MemoryAvailableGB > 16 and MemoryAvailableGB <= 32, 6,\n        MemoryAvailableGB > 32 and MemoryAvailableGB <= 64, 7,\n        MemoryAvailableGB > 64, 8,\n        9\n    )\n| summarize SampleCount = count() by MemoryBucket, BucketOrder\n| extend \n    TotalSamples = toint(toscalar(MemoryData | project TotalMemorySamples)),\n    PercentageOfTime = round(100.0 * SampleCount / toint(toscalar(MemoryData | project TotalMemorySamples)), 2),\n    MemoryHealthZone = case(\n        MemoryBucket in (\"0-1 GB\", \"1-2 GB\"), \"🔴 Critical\",\n        MemoryBucket in (\"2-4 GB\"), \"🟠 Low\",\n        MemoryBucket in (\"4-8 GB\", \"8-16 GB\"), \"🟡 Moderate\",\n        MemoryBucket in (\"16-32 GB\", \"32-64 GB\", \"64+ GB\"), \"🟢 Abundant\",\n        \"⚪ Unknown\"\n    )\n| project \n    MemoryRange = MemoryBucket,\n    MemoryHealthZone,\n    SampleCount,\n    PercentageOfTime,\n    TotalSamples,\n    BucketOrder\n| order by BucketOrder asc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "MemoryHealthZone",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟢",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟡",
+                    "representation": "yellow"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "�",
+                    "representation": "orange"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "�🔴",
+                    "representation": "redBright"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "PercentageOfTime",
+              "formatter": 12,
+              "formatOptions": {
+                "palette": "greenRed",
+                "reverse": true
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 2
+                }
+              }
+            },
+            {
+              "columnMatch": "SampleCount",
+              "formatter": 0,
+              "numberFormat": {
+                "unit": 17,
+                "options": {
+                  "style": "decimal"
+                }
+              }
+            },
+            {
+              "columnMatch": "BucketOrder",
+              "formatter": 5
+            }
+          ]
+        },
+        "title": "💾 Memory Availability Distribution Analysis",
+        "description": "Shows how much free memory your machine typically has available - helps you spot if you're often running low on memory (red zones) or have plenty to spare (green zones). Each row shows what percentage of time your machine had that amount of free memory."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Performance Distribution Analysis - Disk Space Buckets\nlet DiskData = \n    InsightsMetrics\n    | where Computer == '{SelectedMachine}'\n    | where TimeGenerated {TimeRange}\n    | where Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n    | extend DiskFreePercent = round(Val, 1)\n    | summarize TotalDiskSamples = count();\nInsightsMetrics\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| where Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend DiskFreePercent = round(Val, 1)\n| extend \n    DiskBucket = case(\n        DiskFreePercent >= 0 and DiskFreePercent <= 10, \"0-10%\",\n        DiskFreePercent > 10 and DiskFreePercent <= 20, \"11-20%\",\n        DiskFreePercent > 20 and DiskFreePercent <= 30, \"21-30%\",\n        DiskFreePercent > 30 and DiskFreePercent <= 40, \"31-40%\",\n        DiskFreePercent > 40 and DiskFreePercent <= 50, \"41-50%\",\n        DiskFreePercent > 50 and DiskFreePercent <= 60, \"51-60%\",\n        DiskFreePercent > 60 and DiskFreePercent <= 70, \"61-70%\",\n        DiskFreePercent > 70 and DiskFreePercent <= 80, \"71-80%\",\n        DiskFreePercent > 80 and DiskFreePercent <= 90, \"81-90%\",\n        DiskFreePercent > 90 and DiskFreePercent <= 100, \"91-100%\",\n        \"Other\"\n    ),\n    BucketOrder = case(\n        DiskFreePercent >= 0 and DiskFreePercent <= 10, 1,\n        DiskFreePercent > 10 and DiskFreePercent <= 20, 2,\n        DiskFreePercent > 20 and DiskFreePercent <= 30, 3,\n        DiskFreePercent > 30 and DiskFreePercent <= 40, 4,\n        DiskFreePercent > 40 and DiskFreePercent <= 50, 5,\n        DiskFreePercent > 50 and DiskFreePercent <= 60, 6,\n        DiskFreePercent > 60 and DiskFreePercent <= 70, 7,\n        DiskFreePercent > 70 and DiskFreePercent <= 80, 8,\n        DiskFreePercent > 80 and DiskFreePercent <= 90, 9,\n        DiskFreePercent > 90 and DiskFreePercent <= 100, 10,\n        11\n    )\n| summarize SampleCount = count() by DiskBucket, BucketOrder\n| extend \n    TotalSamples = toint(toscalar(DiskData | project TotalDiskSamples)),\n    PercentageOfTime = round(100.0 * SampleCount / toint(toscalar(DiskData | project TotalDiskSamples)), 2),\n    DiskHealthZone = case(\n        DiskBucket in (\"0-10%\", \"11-20%\"), \"🔴 Critical\",\n        DiskBucket in (\"21-30%\", \"31-40%\"), \"🟠 Low Space\",\n        DiskBucket in (\"41-50%\", \"51-60%\"), \"🟡 Moderate\",\n        DiskBucket in (\"61-70%\", \"71-80%\", \"81-90%\", \"91-100%\"), \"🟢 Healthy\",\n        \"⚪ Unknown\"\n    )\n| project \n    DiskFreeRange = DiskBucket,\n    DiskHealthZone,\n    SampleCount,\n    PercentageOfTime,\n    TotalSamples,\n    BucketOrder\n| order by BucketOrder asc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "DiskHealthZone",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟢",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟡",
+                    "representation": "yellow"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟠",
+                    "representation": "orange"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "PercentageOfTime",
+              "formatter": 12,
+              "formatOptions": {
+                "palette": "redGreen"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 2
+                }
+              }
+            },
+            {
+              "columnMatch": "SampleCount",
+              "formatter": 0,
+              "numberFormat": {
+                "unit": 17,
+                "options": {
+                  "style": "decimal"
+                }
+              }
+            },
+            {
+              "columnMatch": "BucketOrder",
+              "formatter": 5
+            }
+          ]
+        },
+        "title": "💿 Disk Free Space Distribution Analysis",
+        "description": "Shows how much free disk space your machine usually has - helps you see if you're often running low on storage (red zones) or have healthy amounts of free space (green zones). Each row shows what percentage of time your disk had that amount of free space available."
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🛡️ **Security & Defender Intelligence**\n\n**What You're Looking At**: Microsoft Defender for Cloud security assessments, recommendations, and alerts for this Arc machine.\n\n**Why This Matters**: See your security status, get specific recommendations to improve it, and check compliance through Defender for Cloud's comprehensive security monitoring.\n\n### **🎯 How to Read the Security Assessment Tile:**\n\n**📊 The Big Number (Top)**: Your security compliance score (0-100%)\n- Shows what percentage of security recommendations are currently \"Healthy\"\n- **Higher percentage = Better security** (90%+ is excellent, below 70% needs attention)\n\n**� The Small Number (Bottom)**: Count of **High Severity** security issues\n- This is the number of critical security problems found\n- **Lower number = Better security** (0 is ideal, 3+ means urgent action needed)\n\n**🎨 Tile Colour & Status Text Meanings**:\n- 🟢 **Green \"Healthy\"**: No high-severity issues, good security posture\n- 🟡 **Yellow \"Multiple Medium Issues\"**: Some medium-priority items to address\n- 🟠 **Orange \"Some Medium Issues\"**: Few medium-priority concerns\n- 🔴 **Red \"Critical Issues\"**: High-severity security problems requiring immediate action\n- ⚪ **Grey \"No Assessments Found\"**: Defender for Cloud not configured or no data\n\n**💡 Example**: If you see a red tile showing \"Critical Issues\" with score 65% and small number 3, this means:\n- 65% of security checks are passing (the big number)\n- You have 3 high-severity security problems (the small number)\n- The red colour warns you about those 3 critical issues that need immediate attention"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Defender for Cloud - Security Recommendations for Arc VM\n// Using the corrected schema structure from real data analysis\nSecurityResources\n| where type == \"microsoft.security/assessments\"\n| extend \n    ResourceType = tostring(properties.resourceDetails.ResourceType),\n    ResourceName = tostring(properties.resourceDetails.ResourceName),\n    NativeResourceId = tostring(properties.resourceDetails.NativeResourceId),\n    Recommendation = tostring(properties.displayName),\n    Status = tostring(properties.status.code),\n    Severity = tostring(properties.metadata.severity),\n    Category = tostring(properties.metadata.categories[0])\n| where ResourceType == \"virtualMachines\" or NativeResourceId contains \"microsoft.hybridcompute/machines\"\n| extend \n    MachineName = case(\n        NativeResourceId contains \"microsoft.hybridcompute/machines\", tostring(split(NativeResourceId, '/')[8]),\n        ResourceType == \"virtualMachines\", ResourceName,\n        \"Unknown\"\n    )\n| where MachineName =~ '{SelectedMachine}'\n| summarize \n    TotalRecommendations = count(),\n    HighSeverity = countif(Severity == \"High\"),\n    MediumSeverity = countif(Severity == \"Medium\"),\n    LowSeverity = countif(Severity == \"Low\"),\n    HealthyCount = countif(Status == \"Healthy\"),\n    UnhealthyCount = countif(Status == \"Unhealthy\")\n| extend \n    SecurityScore = case(\n        TotalRecommendations > 0, round(100.0 * HealthyCount / TotalRecommendations, 0),\n        100.0\n    ),\n    SecurityScoreDisplay = case(\n        TotalRecommendations > 0, strcat(tostring(round(100.0 * HealthyCount / TotalRecommendations, 0)), \"%\"),\n        \"100%\"\n    ),\n    SecurityStatus = case(\n        TotalRecommendations == 0, \"⚪ No Assessments Found\",\n        HighSeverity > 0, \"🔴 Critical Issues\",\n        MediumSeverity > 3, \"🟡 Multiple Medium Issues\",\n        MediumSeverity > 0, \"🟠 Some Medium Issues\",\n        LowSeverity > 0, \"💙 Minor Issues Only\",\n        \"🟢 Healthy\"\n    )\n| project SecurityStatus, SecurityScoreDisplay, SecurityScore, TotalRecommendations, HighSeverity, MediumSeverity, LowSeverity, HealthyCount, UnhealthyCount",
+        "size": 3,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "SecurityScoreDisplay",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen"
+            }
+          },
+          "leftContent": {
+            "columnMatch": "SecurityStatus",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "HighSeverity",
+            "formatter": 1
+          },
+          "showBorder": true
+        },
+        "title": "🛡️ Defender for Cloud - Security Assessments Summary",
+        "description": "Microsoft Defender for Servers security recommendations and compliance status for this machine"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Security Assessment Discovery - Find Arc Machine Assessments\n// Based on the schema analysis, look for Arc machine-specific assessments\nSecurityResources\n| where type == \"microsoft.security/assessments\"\n| extend \n    ResourceType = tostring(properties.resourceDetails.ResourceType),\n    ResourceName = tostring(properties.resourceDetails.ResourceName),\n    ResourceId = tostring(properties.resourceDetails.ResourceId),\n    NativeResourceId = tostring(properties.resourceDetails.NativeResourceId)\n| where ResourceType == \"virtualMachines\" or NativeResourceId contains \"microsoft.hybridcompute/machines\"\n| extend \n    MachineName = case(\n        NativeResourceId contains \"microsoft.hybridcompute/machines\", tostring(split(NativeResourceId, '/')[8]),\n        ResourceType == \"virtualMachines\", ResourceName,\n        \"Unknown\"\n    )\n| where MachineName =~ '{SelectedMachine}'\n| project \n    MachineName,\n    ResourceType,\n    AssessmentName = tostring(properties.displayName),\n    Status = tostring(properties.status.code),\n    Severity = tostring(properties.metadata.severity),\n    Category = tostring(properties.metadata.categories[0]),\n    Description = tostring(properties.metadata.description)\n| take 10",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "title": "� Security Schema Exploration - What Data Exists?",
+        "description": "Find security assessments specifically for the chosen Arc machine using the correct data structure"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 💾 **Software Intelligence & Change Tracking**\n\n**What You're Looking At**: Database detection (SQL Server, PostgreSQL, MySQL), software change tracking, and installation history.\n\n**Why This Matters**: Find databases for licence optimisation, track software changes for compliance, and spot potential security risks from unauthorised installations."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0", 
+        "query": "// Database Discovery - SQL Server, PostgreSQL, MySQL Detection\nresources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where name =~ '{SelectedMachine}'\n| extend \n    machineName = name,\n    status = tostring(properties.status),\n    mssqlInstalled = coalesce(tobool(properties.detectedProperties.mssqldiscovered), false),\n    pgsqlInstalled = coalesce(tobool(properties.detectedProperties.pgsqldiscovered), false),\n    mysqlInstalled = coalesce(tobool(properties.detectedProperties.mysqldiscovered), false),\n    osName = tostring(properties.osName),\n    coreCount = tostring(properties.detectedProperties.logicalCoreCount),\n    totalMemoryGB = tostring(properties.detectedProperties.totalPhysicalMemoryInGigabytes)\n| extend \n    DatabasesFound = case(\n        mssqlInstalled and pgsqlInstalled and mysqlInstalled, \"🗄️ SQL Server + PostgreSQL + MySQL\",\n        mssqlInstalled and pgsqlInstalled, \"🗄️ SQL Server + PostgreSQL\",\n        mssqlInstalled and mysqlInstalled, \"🗄️ SQL Server + MySQL\", \n        pgsqlInstalled and mysqlInstalled, \"🗄️ PostgreSQL + MySQL\",\n        mssqlInstalled, \"🗄️ SQL Server Only\",\n        pgsqlInstalled, \"🐘 PostgreSQL Only\",\n        mysqlInstalled, \"🐬 MySQL Only\",\n        \"❌ No Databases Detected\"\n    ),\n    DatabaseCount = case(\n        mssqlInstalled and pgsqlInstalled and mysqlInstalled, 3,\n        (mssqlInstalled and pgsqlInstalled) or (mssqlInstalled and mysqlInstalled) or (pgsqlInstalled and mysqlInstalled), 2,\n        mssqlInstalled or pgsqlInstalled or mysqlInstalled, 1,\n        0\n    )\n| project machineName, DatabasesFound, DatabaseCount, osName, coreCount, totalMemoryGB, mssqlInstalled, pgsqlInstalled, mysqlInstalled",
+        "size": 3,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "DatabaseCount",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "blue"
+            }
+          },
+          "leftContent": {
+            "columnMatch": "DatabasesFound",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "osName",
+            "formatter": 1
+          },
+          "showBorder": true
+        },
+        "title": "🗄️ Database Detection & Discovery",
+        "description": "Automatically detected database engines on this Arc machine"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Recent Software Changes - Simple approach\nConfigurationChange\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| where ConfigChangeType == \"Software\"\n| where ChangeCategory in (\"Added\", \"Removed\")\n| project \n    TimeGenerated,\n    ChangeType = ChangeCategory,\n    SoftwareName,\n    Publisher,\n    Previous\n| extend \n    ChangeIcon = case(\n        ChangeType == \"Added\", \"➕ Installed\",\n        ChangeType == \"Removed\", \"➖ Removed\",\n        ChangeType\n    ),\n    Version = case(\n        isnotempty(Previous) and Previous != \"Not Installed\", Previous,\n        \"Unknown\"\n    )\n| project TimeGenerated, ChangeIcon, SoftwareName, Publisher, Version\n| order by TimeGenerated desc\n| take 20",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ChangeIcon",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "Installed",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "Removed",
+                    "representation": "orange"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "TimeGenerated",
+              "formatter": 1
+            },
+            {
+              "columnMatch": "Size",
+              "formatter": 0,
+              "numberFormat": {
+                "unit": 38,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 1
+                }
+              }
+            }
+          ]
+        },
+        "title": "📦 Recent Software Changes (Last 20)",
+        "description": "Software installations and removals tracked by Change Tracking & Inventory"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🗄️ **SQL Server Intelligence** (When Available)\n\n**What You're Looking At**: Detailed insights into SQL Server instances running on this Arc machine, including databases, performance, and security assessments.\n\n**Why This Matters**: Gives database administrators critical information about SQL health, security vulnerabilities, and performance optimisation opportunities."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// SQL Server Instance Overview\nresources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| where id contains '{SelectedMachine}'\n| extend \n    InstanceName = name,\n    Version = tostring(properties.version),\n    Edition = tostring(properties.edition),\n    Status = tostring(properties.status),\n    LicenseType = tostring(properties.licenseType),\n    Cores = toint(properties.cores),\n    HostType = tostring(properties.hostType)\n| extend \n    StatusIcon = case(\n        Status == \"Connected\", \"🟢 Connected\",\n        Status == \"Disconnected\", \"� Disconnected\",\n        \"⚪ Unknown\"\n    ),\n    LicenseIcon = case(\n        LicenseType == \"Paid\", \"� Licensed\",\n        LicenseType == \"Free\", \"🆓 Free\",\n        LicenseType == \"HADR\", \"🔄 HADR\",\n        \"❓ Unknown\"\n    )\n| project \n    InstanceName,\n    StatusIcon,\n    Version,\n    Edition,\n    LicenseIcon,\n    Cores,\n    HostType\n| order by InstanceName asc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "StatusIcon",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟢",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "LicenseIcon",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "�",
+                    "representation": "blue"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🆓",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔄",
+                    "representation": "purple"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "title": "🏢 SQL Server Instances Overview",
+        "description": "SQL Server instances discovered and managed by Azure Arc"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// SQL Server Database Discovery with Enhanced Details\nresources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n| where id contains '{SelectedMachine}'\n| extend \n    DatabaseName = name,\n    State = tostring(properties.state),\n    ProvisioningState = tostring(properties.provisioningState),\n    SizeMB = todouble(properties.sizeMB),\n    DataFileSizeMB = todouble(properties.dataFileSizeMB),\n    LogFileSizeMB = todouble(properties.logFileSizeMB),\n    SpaceAvailableMB = todouble(properties.spaceAvailableMB),\n    IsEncrypted = tobool(properties.databaseOptions.isEncrypted),\n    IsReadOnly = tobool(properties.isReadOnly),\n    IsAutoShrinkOn = tobool(properties.databaseOptions.isAutoShrinkOn),\n    IsAutoCloseOn = tobool(properties.databaseOptions.isAutoCloseOn),\n    IsTrustworthyOn = tobool(properties.databaseOptions.isTrustworthyOn),\n    IsMemoryOptimizationEnabled = tobool(properties.databaseOptions.isMemoryOptimizationEnabled),\n    CompatibilityLevel = toint(properties.compatibilityLevel),\n    Collation = tostring(properties.collationName),\n    RecoveryMode = tostring(properties.recoveryMode),\n    CreateDate = todatetime(properties.databaseCreationDate),\n    LastUploadTime = todatetime(properties.lastDatabaseUploadTime),\n    AssessmentUploadTime = todatetime(properties.migration.assessment.assessmentUploadTime)\n| extend \n    SizeGB = round(SizeMB / 1024.0, 2),\n    DataSizeGB = round(DataFileSizeMB / 1024.0, 2),\n    LogSizeGB = round(LogFileSizeMB / 1024.0, 2),\n    FreeSpaceGB = round(SpaceAvailableMB / 1024.0, 2),\n    StatusIcon = case(\n        State == \"Online\", \"🟢 Online\",\n        State == \"Offline\", \"🔴 Offline\",\n        State == \"Restoring\", \"🟡 Restoring\",\n        State == \"Recovering\", \"🟡 Recovering\",\n        State == \"Suspect\", \"🔴 Suspect\",\n        \"⚪ Unknown\"\n    ),\n    EncryptionStatus = case(\n        IsEncrypted == true, \"🔒 Encrypted\",\n        IsEncrypted == false, \"🔓 Not Encrypted\",\n        \"❓ Unknown\"\n    ),\n    ReadOnlyStatus = case(\n        IsReadOnly == true, \"📖 Read-Only\",\n        \"✏️ Read-Write\"\n    ),\n    ConfigurationFlags = strcat(\n        case(IsAutoShrinkOn == true, \"⚠️AutoShrink \", \"\"),\n        case(IsAutoCloseOn == true, \"⚠️AutoClose \", \"\"),\n        case(IsTrustworthyOn == true, \"�Trustworthy \", \"\"),\n        case(IsMemoryOptimizationEnabled == true, \"⚡InMemory \", \"\")\n    ),\n    DaysOld = datetime_diff('day', now(), CreateDate),\n    DaysSinceLastUpload = datetime_diff('day', now(), LastUploadTime),\n    SpaceUtilization = case(\n        SizeMB > 0 and SpaceAvailableMB >= 0, round(100.0 * (SizeMB - SpaceAvailableMB) / SizeMB, 1),\n        0.0\n    )\n| project \n    DatabaseName,\n    StatusIcon,\n    SizeGB,\n    DataSizeGB,\n    LogSizeGB,\n    FreeSpaceGB,\n    SpaceUtilization,\n    EncryptionStatus,\n    ReadOnlyStatus,\n    RecoveryMode,\n    CompatibilityLevel,\n    ConfigurationFlags,\n    DaysOld,\n    DaysSinceLastUpload\n| order by SizeGB desc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "StatusIcon",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟢",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟡",
+                    "representation": "yellow"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "EncryptionStatus",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔒",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔓",
+                    "representation": "orange"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ReadOnlyStatus",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "�",
+                    "representation": "blue"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "✏️",
+                    "representation": "green"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ConfigurationFlags",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "⚠️",
+                    "representation": "orange"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "⚡",
+                    "representation": "blue"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔓",
+                    "representation": "redBright"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "SizeGB|DataSizeGB|LogSizeGB|FreeSpaceGB",
+              "formatter": 0,
+              "numberFormat": {
+                "unit": 5,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 2
+                }
+              }
+            },
+            {
+              "columnMatch": "SpaceUtilization",
+              "formatter": 12,
+              "formatOptions": {
+                "palette": "greenRed"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 1
+                }
+              }
+            },
+            {
+              "columnMatch": "DaysSinceLastUpload",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            }
+          ]
+        },
+        "title": "🗄️ SQL Server Databases - Comprehensive Analysis",
+        "description": "Detailed database inventory including storage breakdown, configuration flags, encryption, and space usage"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🛡️ **Vulnerability Intelligence**\n\n**What You're Looking At**: Real security vulnerability data from Microsoft Defender showing exactly what security holes exist on this machine.\n\n**Why This Matters**: This shows you the actual security threats on your machine with clear risk scores. You'll know exactly what needs fixing first and how urgent each problem is.\n\n### **🎯 How to Read the Vulnerability Levels:**\n\n**🔴 Critical (9.0+)**: **Drop everything and fix now** - These can be hacked easily\n**🟠 High (7.0-8.9)**: **Fix this week** - Serious security risks that need quick action  \n**🟡 Medium (4.0-6.9)**: **Fix next month** - Important but not urgent\n**🟢 Low (0.1-3.9)**: **Fix when convenient** - Minor security issues\n**⚪ Scanner Not Set Up**: **Install security scanner first** - We can't check for problems yet\n**✅ No Vulnerabilities**: **Well done!** - Your machine is secure\n\n### **💡 Real Example:**\nIf you see \"🔴 Critical (9.8)\" that means hackers can easily break into this machine. Fix it immediately before continuing with other work."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// DETAILED VULNERABILITY STATUS TABLE\nSecurityResources  \n| where type == \"microsoft.security/assessments\"\n| where properties.displayName == \"Machines should have vulnerability findings resolved\"\n| extend \n    ResourceId = tostring(properties.resourceDetails.ResourceId),\n    ResourceName = tostring(properties.resourceDetails.ResourceName)\n| where ResourceId contains \"hybridcompute\"\n| where ResourceName == \"{SelectedMachine}\"\n| extend \n    Status = tostring(properties.status.code),\n    MaxCVSS = tostring(properties.additionalData.maxCvss30Score),\n    StatusDescription = tostring(properties.status.description)\n| extend \n    VulnerabilityLevel = case(\n        todouble(MaxCVSS) >= 9.0, \"🔴 Critical (9.0+)\",\n        todouble(MaxCVSS) >= 7.0, \"🟠 High (7.0-8.9)\",\n        todouble(MaxCVSS) >= 4.0, \"🟡 Medium (4.0-6.9)\",\n        todouble(MaxCVSS) >= 0.1, \"🟢 Low (0.1-3.9)\",\n        Status == \"NotApplicable\", \"⚪ Scanner Not Deployed\",\n        Status == \"Healthy\", \"✅ No Vulnerabilities\",\n        \"❓ Unknown\"\n    ),\n    ScannerStatus = case(\n        Status == \"NotApplicable\", \"❌ Not Deployed\",\n        Status == \"Healthy\", \"✅ Deployed & Clean\", \n        Status == \"Unhealthy\", \"⚠️ Deployed & Found Issues\",\n        \"❓ Unknown\"\n    ),\n    RiskDescription = case(\n        todouble(MaxCVSS) >= 9.0, \"Immediate patching required - Critical vulnerabilities detected\",\n        todouble(MaxCVSS) >= 7.0, \"High priority patching recommended\",\n        todouble(MaxCVSS) >= 4.0, \"Schedule patching in next maintenance window\",\n        Status == \"NotApplicable\", \"Deploy vulnerability scanner to assess security posture\",\n        Status == \"Healthy\", \"No action required - machine is secure\",\n        \"Review scanner configuration\"\n    )\n| project \n    MachineName = ResourceName,\n    VulnerabilityLevel,\n    MaxCVSSScore = MaxCVSS,\n    ScannerStatus,\n    RiskDescription,\n    StatusDescription",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "title": "🛡️ Vulnerability Intelligence",
+        "description": "Complete vulnerability analysis with security risk scores and clear action steps"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 📊 **Security Health Summary**\n\n**What You're Looking At**: A complete health check of your machine's security across all areas checked by Microsoft Defender.\n\n**Why This Matters**: This gives you a simple report card for your machine's security. You'll see what percentage of security checks are passing and what needs attention.\n\n### **📋 How to Read Your Security Report Card:**\n\n**Security Score**: Think of this like a school grade - what percentage of security tests your machine passes\n- **90%+** = Excellent (A grade) - Your security is fantastic\n- **75-89%** = Good (B grade) - Pretty secure, minor improvements needed\n- **60-74%** = Fair (C grade) - Some security problems to fix\n- **Below 60%** = Poor (D/F grade) - Serious security issues requiring immediate attention\n\n**Risk Profile**: The worst security problem found on your machine\n- **🔴 High Risk** = Critical security issues found - fix immediately\n- **🟡 Medium Risk** = Some security problems - fix soon\n- **🟢 Low Risk** = Minor security issues - fix when convenient\n- **✅ Secure** = No security problems found - well done!\n\n**Assessment Categories**: Types of security checks performed (like different subjects in school)\n- **Compute** = Computer security settings and patches\n- **Networking** = Internet connection security\n- **Data** = Information protection\n- **Identity** = User access controls\n\n### **💡 Business Example:**\nIf you see \"75% Good\" with \"🟡 Medium Risk\", this means your machine passes 75% of security tests (good grade) but has some medium-priority security issues that should be fixed in the next few weeks."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// SECURITY POSTURE SUMMARY\n// High-level security health metrics we can calculate\nSecurityResources\n| where type == \"microsoft.security/assessments\"\n| extend \n    ResourceId = tostring(properties.resourceDetails.ResourceId),\n    ResourceName = tostring(properties.resourceDetails.ResourceName)\n| where ResourceId contains \"hybridcompute\"\n| where ResourceName == \"{SelectedMachine}\"\n| extend \n    AssessmentName = tostring(properties.displayName),\n    Category = tostring(properties.metadata.categories[0]),\n    Severity = tostring(properties.metadata.severity),\n    Status = tostring(properties.status.code)\n| summarize \n    TotalAssessments = count(),\n    SecurityIssues = countif(Status == \"Unhealthy\"),\n    CompliantItems = countif(Status == \"Healthy\"),\n    HighRiskIssues = countif(Status == \"Unhealthy\" and Severity == \"High\"),\n    MediumRiskIssues = countif(Status == \"Unhealthy\" and Severity == \"Medium\"),\n    Categories = make_set(Category)\n    by MachineName = ResourceName\n| extend \n    SecurityScore = round((CompliantItems * 100.0) / TotalAssessments, 1),\n    RiskProfile = case(\n        HighRiskIssues > 0, \"🔴 High Risk\",\n        MediumRiskIssues > 0, \"🟡 Medium Risk\", \n        SecurityIssues > 0, \"🟢 Low Risk\",\n        \"✅ Secure\"\n    )\n| extend\n    ComplianceLevel = case(\n        SecurityScore >= 90, \"✅ Excellent\",\n        SecurityScore >= 75, \"🟢 Good\",\n        SecurityScore >= 60, \"🟡 Fair\",\n        \"🔴 Poor\"\n    )\n| project \n    MachineName,\n    SecurityScore = strcat(tostring(SecurityScore), \"%\"),\n    ComplianceLevel,\n    RiskProfile,\n    TotalAssessments,\n    CompliantItems,\n    SecurityIssues,\n    HighRiskIssues,\n    MediumRiskIssues,\n    CategoriesCovered = strcat_array(Categories, \", \")",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "title": "📊 Security Health Summary",
+        "description": "Complete security report card showing compliance scores, risk levels, and assessment coverage"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## ⚙️ **Azure Arc Extensions & Management**\n\n**What You're Looking At**: Azure Arc agent version status, installed extensions, and Azure Policy compliance for this machine.\n\n**Why This Matters**: Make sure the Arc agent is up-to-date, check that required extensions are installed, and verify policy compliance for governance.\n\n### **🏛️ Understanding Azure Policy Compliance:**\n\n**What Azure Policy Is**: Think of Azure Policy as your organisation's \"rules engine\" for cloud resources. IT administrators create policies (rules) that automatically check if machines follow company standards.\n\n**Common Policy Examples**:\n- **🛡️ Security**: \"All machines must have antivirus installed\"\n- **💾 Backup**: \"All servers must have backup enabled\"\n- **🏷️ Tagging**: \"All resources must be tagged with owner and cost centre\"\n- **🌍 Location**: \"Resources can only be deployed in approved regions\"\n- **⚙️ Configuration**: \"Windows machines must have specific security settings\"\n\n**How to Read the Compliance Tile**:\n- **Big Number**: Percentage of policies this machine is following correctly\n- **Small Number**: Count of policies this machine is violating\n- **🟢 Green (95%+)**: Machine follows almost all company rules\n- **🟡 Yellow (85-94%)**: Machine mostly compliant, minor issues\n- **🟠 Orange (70-84%)**: Some policy violations need attention\n- **🔴 Red (Below 70%)**: Machine has significant compliance problems\n- **⚪ Grey**: No policies assigned to this machine\n\n**💡 Your Example**: If you see a red tile with \"Poor Compliance\", a percentage like 25%, and the small number 17:\n- **25%** = Only 25% of your organisation's IT policies are being followed\n- **17** = There are exactly 17 specific policy violations that need to be fixed\n- **🔴 Red + \"Poor Compliance\"** = This machine has serious governance issues requiring immediate attention\n\n**Why This Matters**: Poor policy compliance can mean security risks, failed audits, or non-compliance with regulations. High compliance means your machine follows your organisation's governance standards."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Arc Agent Version Status - Simplified approach\nresources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where name =~ '{SelectedMachine}'\n| extend \n    machineName = name,\n    currentVersion = tostring(properties.agentVersion),\n    status = tostring(properties.status),\n    lastStatusChange = todatetime(properties.lastStatusChange)\n| extend \n    AgentStatus = case(\n        status == \"Connected\", \"🟢 Connected\",\n        status == \"Disconnected\", \"🔴 Disconnected\", \n        \"⚪ Unknown\"\n    ),\n    VersionInfo = currentVersion,\n    DaysSinceUpdate = datetime_diff('day', now(), lastStatusChange)\n| project machineName, AgentStatus, VersionInfo, currentVersion = VersionInfo, DaysSinceUpdate",
+        "size": 3,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "VersionInfo",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "AgentStatus",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "machineName",
+            "formatter": 1
+          },
+          "showBorder": true
+        },
+        "title": "🔄 Azure Arc Agent Version Status",
+        "description": "Current Arc agent version and update recommendations"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Arc Extensions Status - Simplified approach\nresources\n| where type =~ 'microsoft.hybridcompute/machines/extensions'\n| extend \n    machineName = tostring(split(id, '/')[8]),\n    ExtensionName = name,\n    ExtensionType = tostring(properties.type),\n    Publisher = tostring(properties.publisher),\n    Version = tostring(properties.typeHandlerVersion),\n    ProvisioningState = tostring(properties.provisioningState),\n    AutoUpgrade = tobool(properties.enableAutomaticUpgrade)\n| where machineName =~ '{SelectedMachine}'\n| extend \n    StatusIcon = case(\n        ProvisioningState == \"Succeeded\", \"🟢 Running\",\n        ProvisioningState == \"Failed\", \"🔴 Failed\",\n        ProvisioningState == \"Creating\", \"🟡 Installing\",\n        \"⚪ Unknown\"\n    ),\n    AutoUpgradeIcon = case(\n        AutoUpgrade == true, \"✅ Enabled\",\n        \"❌ Disabled\"\n    )\n| project ExtensionName, StatusIcon, ExtensionType, Publisher, Version, AutoUpgradeIcon\n| order by ExtensionName asc",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "StatusIcon",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟢",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟡",
+                    "representation": "yellow"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "AutoUpgradeIcon",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "✅",
+                    "representation": "green"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "❌",
+                    "representation": "orange"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "title": "🔧 Installed Arc Extensions",
+        "description": "Azure Arc extensions providing monitoring, security, and management capabilities"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Azure Policy Compliance Status - Fixed approach\npolicyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend \n    resourceName = tostring(split(properties.resourceId, '/')[8]),\n    PolicyName = tostring(properties.policyDefinitionName),\n    ComplianceState = tostring(properties.complianceState)\n| where resourceName =~ '{SelectedMachine}'\n| where ComplianceState in (\"Compliant\", \"NonCompliant\", \"Conflict\")\n| summarize \n    TotalPolicies = count(),\n    CompliantPolicies = countif(ComplianceState == \"Compliant\"),\n    NonCompliantPolicies = countif(ComplianceState == \"NonCompliant\"),\n    ConflictPolicies = countif(ComplianceState == \"Conflict\")\n| extend \n    CompliancePercentage = case(\n        TotalPolicies > 0, round(100.0 * CompliantPolicies / TotalPolicies, 1),\n        0.0\n    )\n| extend \n    ComplianceStatus = case(\n        TotalPolicies == 0, \"⚪ No Policies\",\n        CompliancePercentage >= 95, \"🟢 Excellent\",\n        CompliancePercentage >= 85, \"🟡 Good\",\n        CompliancePercentage >= 70, \"🟠 Needs Attention\",\n        \"🔴 Poor Compliance\"\n    )\n| project ComplianceStatus, CompliancePercentage, TotalPolicies, CompliantPolicies, NonCompliantPolicies",
+        "size": 3,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "CompliancePercentage",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen"
+            },
+            "numberFormat": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 1
+              }
+            }
+          },
+          "leftContent": {
+            "columnMatch": "ComplianceStatus",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "NonCompliantPolicies",
+            "formatter": 1
+          },
+          "showBorder": true
+        },
+        "title": "📋 Azure Policy Compliance",
+        "description": "Governance and compliance status against assigned Azure policies"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Detailed Policy Violations - What are the specific non-compliant policies?\npolicyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend \n    resourceName = tostring(split(properties.resourceId, '/')[8]),\n    PolicyName = tostring(properties.policyDefinitionName),\n    PolicyDisplayName = tostring(properties.policyDefinitionDisplayName),\n    ComplianceState = tostring(properties.complianceState),\n    PolicyCategory = tostring(properties.policyDefinitionGroupNames[0]),\n    ResourceType = tostring(properties.resourceType),\n    Timestamp = todatetime(properties.timestamp)\n| where resourceName =~ '{SelectedMachine}'\n| where ComplianceState == \"NonCompliant\"\n| extend \n    ViolationSeverity = case(\n        PolicyDisplayName contains \"security\" or PolicyDisplayName contains \"Security\", \"🔴 High - Security\",\n        PolicyDisplayName contains \"backup\" or PolicyDisplayName contains \"Backup\", \"🟠 Medium - Backup\",\n        PolicyDisplayName contains \"tag\" or PolicyDisplayName contains \"Tag\", \"🟡 Low - Tagging\",\n        PolicyDisplayName contains \"location\" or PolicyDisplayName contains \"Location\", \"🟡 Low - Location\",\n        PolicyDisplayName contains \"encryption\" or PolicyDisplayName contains \"Encryption\", \"🔴 High - Encryption\",\n        PolicyDisplayName contains \"monitoring\" or PolicyDisplayName contains \"Monitoring\", \"🟠 Medium - Monitoring\",\n        \"🔵 Standard\"\n    ),\n    PolicySummary = case(\n        strlen(PolicyDisplayName) > 80, strcat(substring(PolicyDisplayName, 0, 77), \"...\"),\n        PolicyDisplayName\n    ),\n    DaysNonCompliant = datetime_diff('day', now(), Timestamp)\n| project \n    PolicySummary,\n    ViolationSeverity,\n    ComplianceState,\n    PolicyCategory,\n    DaysNonCompliant,\n    Timestamp\n| order by ViolationSeverity desc, DaysNonCompliant desc\n| take 20",
+        "size": 0,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ViolationSeverity",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟠",
+                    "representation": "orange"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟡",
+                    "representation": "yellow"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔵",
+                    "representation": "blue"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "ComplianceState",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "NonCompliant",
+                    "representation": "redBright"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "DaysNonCompliant",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            },
+            {
+              "columnMatch": "Timestamp",
+              "formatter": 1
+            }
+          ]
+        },
+        "title": "🚨 Specific Policy Violations - What Needs to Be Fixed",
+        "description": "Detailed list of the specific policies this machine is violating, prioritised by severity and how long they've been non-compliant"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 📊 **Operational Intelligence & Timeline**\n\n**What You're Looking At**: Historical operational data including connection patterns, maintenance events, and system updates.\n\n**Why This Matters**: Understand operational patterns, maintenance windows, and spot potential issues before they impact business operations."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Connection and Heartbeat History\nHeartbeat\n| where Computer == '{SelectedMachine}'\n| where TimeGenerated {TimeRange}\n| summarize \n    HeartbeatCount = count(),\n    FirstHeartbeat = min(TimeGenerated),\n    LastHeartbeat = max(TimeGenerated),\n    UptimeHours = datetime_diff('hour', max(TimeGenerated), min(TimeGenerated))\n    by bin(TimeGenerated, 1d)\n| extend \n    HealthScore = case(\n        HeartbeatCount >= 1440, 100, // 24 hours * 60 minutes = full day\n        HeartbeatCount >= 720, 75,   // Half day\n        HeartbeatCount >= 360, 50,   // Quarter day\n        25\n    ),\n    AvailabilityStatus = case(\n        HeartbeatCount >= 1440, \"🟢 Fully Available\",\n        HeartbeatCount >= 720, \"🟡 Mostly Available\",\n        HeartbeatCount >= 360, \"🟠 Intermittent\",\n        \"🔴 Poor Connectivity\"\n    )\n| project TimeGenerated, AvailabilityStatus, HealthScore, HeartbeatCount\n| order by TimeGenerated asc",
+        "size": 1,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visibility": [
+          {
+            "parameterName": "LogAnalyticsWorkspace",
+            "comparison": "isNotEqualTo",
+            "value": null
+          }
+        ],
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "TimeGenerated",
+          "yAxis": ["HealthScore"],
+          "showLegend": true,
+          "showDataPoints": true
+        },
+        "title": "📡 Connectivity & Availability Timeline",
+        "description": "Daily connectivity patterns and availability scores based on heartbeat data"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🎯 **Azure Arc Machine Intelligence Summary**\n\n**🚀 Well done!** You've just experienced the complete power of Azure Arc machine management and monitoring.\n\n### **✨ What You've Seen:**\n\n**🔍 Complete Visibility:**\n- Live machine health and performance metrics\n- Historical trends and capacity planning insights\n- Comprehensive security status with Defender integration\n\n**🛡️ Advanced Security Intelligence:**\n- **BREAKTHROUGH**: Real CVSS vulnerability scores and risk assessments\n- Active threat detection and alert management\n- Complete security health report cards with compliance scoring\n- Software change tracking and inventory management\n\n**💎 Enterprise Features:**\n- SQL Server discovery and security assessment\n- Azure Arc extensions management and monitoring\n- Azure Policy compliance and governance oversight\n\n**📊 Operational Excellence:**\n- Connection and availability timeline\n- Streamlined operational intelligence and monitoring\n- End-to-end machine lifecycle management\n\n### **🎬 Business Impact:**\n\nThis dashboard shows how **Azure Arc transforms any machine** into a fully managed, monitored, and secured asset in your hybrid cloud environment. With a single click, administrators and executives can understand everything about any machine in their infrastructure - including real vulnerability intelligence that was previously hidden.\n\n**Key Benefits:**\n- ✅ **Unified Management** - One screen for all machine intelligence\n- ✅ **Live Insights** - Real-time performance and security data\n- ✅ **Proactive Security** - Live vulnerability intelligence with CVSS risk scores\n- ✅ **Compliance Automation** - Policy-driven governance at scale\n- ✅ **Operational Efficiency** - Reduce time to resolution with comprehensive machine context\n\n---\n\n*This is the future of hybrid infrastructure management - delivered today through Azure Arc.*"
+      }
+    }
+  ],
+  "styleSettings": {
+    "fontFamily": "Segoe UI",
+    "fontSize": 14
+  },
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

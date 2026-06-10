@@ -110,8 +110,11 @@ az bicep build --file .\bicep\main.bicep --stdout > $null
 # Dry-run deploy (validates Bicep + checks RBAC, no resources created)
 .\scripts\Deploy-ArcDemo.ps1 -WhatIf -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail test@example.com
 
-# Full smoke test (deploys with prefix "arctest", validates, hibernates, activates, removes)
-.\scripts\Test-EndToEnd.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
+# Full smoke test cycle (~45 min total). Run manually with prefix "arctest":
+.\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail you@contoso.com -NamePrefix arctest
+.\scripts\Hibernate-ArcDemo.ps1 -NamePrefix arctest
+.\scripts\Activate-ArcDemo.ps1 -NamePrefix arctest
+.\scripts\Remove-ArcDemo.ps1 -NamePrefix arctest
 ```
 
 ## When something breaks

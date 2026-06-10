@@ -7,8 +7,8 @@ param location string
 @description('Resource tags')
 param tags object
 
-@description('VNet name')
-param vnetName string = 'vnet-arc-demo'
+@description('Name prefix used for vnet/nsg names')
+param namePrefix string = 'arc-demo'
 
 @description('Subnet name')
 param subnetName string = 'snet-vms'
@@ -20,7 +20,7 @@ param addressPrefix string = '10.50.0.0/16'
 param subnetPrefix string = '10.50.1.0/24'
 
 resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
-  name: 'nsg-arc-demo'
+  name: 'nsg-${namePrefix}'
   location: location
   tags: tags
   properties: {
@@ -29,7 +29,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
 }
 
 resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
-  name: vnetName
+  name: 'vnet-${namePrefix}'
   location: location
   tags: tags
   properties: {
@@ -48,6 +48,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   }
 }
 
+output vnetName string = vnet.name
 output vnetId string = vnet.id
 output subnetId string = '${vnet.id}/subnets/${subnetName}'
 output nsgId string = nsg.id

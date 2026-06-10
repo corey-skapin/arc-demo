@@ -63,6 +63,9 @@ param adminEmail string
 @description('Monthly budget amount in subscription currency')
 param budgetAmount int = 200
 
+@description('Name prefix for derived resource names (vnet, nsg, ag, alert)')
+param namePrefix string = 'arc-demo'
+
 resource rgArc 'Microsoft.Resources/resourceGroups@2024-11-01' = {
   name: arcResourceGroup
   location: location
@@ -83,6 +86,7 @@ module workspaceMod 'modules/workspace.bicep' = {
   params: {
     location: location
     tags: tags
+    workspaceName: 'law-${namePrefix}'
   }
 }
 
@@ -105,6 +109,7 @@ module alertsMod 'modules/alerts.bicep' = {
     tags: tags
     workspaceId: workspaceMod.outputs.workspaceId
     adminEmail: adminEmail
+    namePrefix: namePrefix
   }
 }
 
@@ -116,6 +121,7 @@ module networkMod 'modules/network.bicep' = {
   params: {
     location: location
     tags: tags
+    namePrefix: namePrefix
   }
 }
 
@@ -182,6 +188,7 @@ module policyMod 'modules/policy.bicep' = {
   name: 'policy-deploy'
   params: {
     location: location
+    namePrefix: namePrefix
   }
 }
 
@@ -192,6 +199,7 @@ module budgetMod 'modules/budget.bicep' = {
     adminEmail: adminEmail
     arcResourceGroup: arcResourceGroup
     infraResourceGroup: infraResourceGroup
+    namePrefix: namePrefix
   }
 }
 

@@ -1,0 +1,464 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# SQL Server Estate - Executive Intelligence Dashboard\r\n\r\n## Procurement & Data Platform Governance for SQL Server Environment\r\n\r\nThis dashboard provides data executives with strategic oversight of the SQL Server estate, focusing on **license optimization**, **compliance risk management**, **cost control**, and **performance health**. Use this to make informed decisions about SQL Server investments, identify cost-saving opportunities, and ensure your data platform meets business and regulatory requirements."
+      },
+      "name": "Header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "parameters": [
+          {
+            "id": "1",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscription",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "value": [
+              "value::all"
+            ]
+          },
+          {
+            "id": "2",
+            "version": "KqlParameterItem/1.0",
+            "name": "LogAnalyticsWorkspace",
+            "label": "Log Analytics Workspace",
+            "type": 5,
+            "isRequired": false,
+            "query": "where type =~ 'microsoft.operationalinsights/workspaces'\r\n| project id",
+            "crossComponentResources": [
+              "{Subscription}"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          },
+          {
+            "id": "3",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time Range",
+            "type": 4,
+            "isRequired": true,
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 2592000000
+                },
+                {
+                  "durationMs": 7776000000
+                }
+              ],
+              "allowCustom": true
+            },
+            "value": {
+              "durationMs": 2592000000
+            }
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "Parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\r\n## Executive Summary\r\n\r\n### What You're Looking At\r\n\r\nThese 6 key performance indicators provide an at-a-glance view of your SQL Server estate:\r\n\r\n1. **Total SQL Instances** - The complete count of SQL Server instances across your organization\r\n2. **Critical Issues** - High-severity best practice violations requiring immediate attention (🔴 these expose your organization to security breaches, data loss, or compliance failures)\r\n3. **Enterprise Edition Instances** - Count of premium-licensed SQL Servers (these represent your highest license costs at ~$14,000 per core)\r\n4. **Standard Edition Instances** - Count of mid-tier licensed SQL Servers (~$3,700 per core)\r\n5. **Unsupported Versions** - SQL Server versions no longer receiving security patches from Microsoft (🔴 critical security and compliance risk)\r\n6. **Instances Without Defender** - Servers lacking Azure Defender for SQL protection (missing real-time threat detection and vulnerability assessment)\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nThese metrics directly impact your budget, security posture, and regulatory compliance:\r\n\r\n- **License Optimization**: Enterprise Edition licenses cost 3.8x more than Standard Edition. Identifying over-licensed instances can save **$40,000-$280,000 per downgraded server**\r\n- **Security & Compliance**: Unsupported versions cannot pass SOC 2, ISO 27001, or HIPAA audits. Critical issues represent vulnerabilities that could lead to data breaches with average costs of **$4.35 million per incident**\r\n- **Risk Management**: Running unsupported software exposes the organization to liability, with potential fines of **$50,000-$1.5M for compliance violations**\r\n- **Budget Planning**: Understanding your edition mix helps forecast annual software assurance costs and plan for Azure migrations\r\n\r\n### Action Items\r\n\r\n- 🔴 **Immediate**: Address all critical issues within 48 hours - these represent active security or stability risks\r\n- 🟡 **This Quarter**: Upgrade all unsupported SQL Server versions (2012, 2008 R2) or migrate to Azure SQL\r\n- 🔵 **This Month**: Enable Azure Defender for SQL on all instances ($15/server/month investment prevents $4M+ breach costs)\r\n- 💰 **License Review**: Evaluate Enterprise Edition instances - consider downgrading to Standard or migrating to Azure SQL Managed Instance for 40% cost savings"
+      },
+      "name": "Executive Summary Narrative"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend edition = tostring(properties.edition)\r\n| extend version = tostring(properties.version)\r\n| extend licenseType = tostring(properties.licenseType)\r\n| extend defenderStatus = tostring(properties.azureDefenderStatus)\r\n| summarize \r\n    total = count(),\r\n    enterprise = countif(edition =~ 'Enterprise'),\r\n    standard = countif(edition =~ 'Standard'),\r\n    unsupported = countif(version startswith '10.' or version startswith '11.' or version startswith '12.'),\r\n    noDefender = countif(defenderStatus !~ 'Protected')\r\n| extend critical = 0\r\n| project data = pack_array(\r\n    pack('Metric', 'Total Instances', 'Value', total, 'Type', 'count'),\r\n    pack('Metric', 'Critical Issues', 'Value', critical, 'Type', 'alert'),\r\n    pack('Metric', 'Enterprise Edition', 'Value', enterprise, 'Type', 'license'),\r\n    pack('Metric', 'Standard Edition', 'Value', standard, 'Type', 'license'),\r\n    pack('Metric', 'Unsupported Versions', 'Value', unsupported, 'Type', 'alert'),\r\n    pack('Metric', 'No Azure Defender', 'Value', noDefender, 'Type', 'security')\r\n)\r\n| mv-expand data\r\n| project \r\n    Metric = tostring(data['Metric']), \r\n    Value = data['Value'], \r\n    Type = tostring(data['Type'])",
+        "size": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Metric",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            },
+            "numberFormat": {
+              "unit": 17,
+              "options": {
+                "style": "decimal",
+                "useGrouping": true
+              }
+            }
+          },
+          "showBorder": true
+        }
+      },
+      "name": "Executive Summary Tiles"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\r\n## Estate Health - Best Practice Assessment\r\n\r\n### What You're Looking At\r\n\r\nThis section shows the health and compliance status of your SQL Server estate based on Microsoft's Best Practice Assessments:\r\n\r\n1. **Issues by Severity** - Distribution of configuration, security, and performance findings across Critical, High, Medium, and Low severity levels\r\n2. **Top 10 Issues** - The most common problems affecting multiple servers (these indicate systemic issues requiring enterprise-wide remediation)\r\n3. **Issue Distribution** - Visual breakdown showing where problems concentrate (helps prioritize remediation efforts)\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nBest Practice Assessment results directly correlate with:\r\n\r\n- **Operational Stability**: High-severity issues often cause outages costing **$5,600 per minute** of downtime for production databases\r\n- **Performance**: Medium-severity performance findings typically indicate 20-40% waste in server capacity and licenses\r\n- **Security Posture**: Critical security findings represent attack vectors - 60% of SQL Server breaches exploit known misconfigurations\r\n- **Audit Readiness**: Compliance auditors review BPA results - unresolved High/Critical issues can fail audits\r\n\r\n### Financial Impact Examples\r\n\r\n- **Performance Issue**: Poorly configured tempDB can reduce query performance by 50%, effectively doubling the servers needed (**$280K in wasted licensing**)\r\n- **Backup Issue**: Missing transaction log backups expose you to data loss - average cost per lost GB is **$141**\r\n- **Security Issue**: Weak authentication settings are #1 cause of ransomware attacks (**$4.5M average ransom + downtime**)\r\n\r\n### Action Plan\r\n\r\n- 🔴 **Critical Severity**: Fix within 48 hours - these represent immediate security or data loss risks\r\n- 🟠 **High Severity**: Remediate within 2 weeks - significant risk or performance degradation  \r\n- 🟡 **Medium Severity**: Address within quarter - optimization opportunities and minor risks\r\n- 🔵 **Low/Information**: Review annually - best practice improvements\r\n\r\n**Tip**: Issues affecting 10+ servers should be addressed via automation or policy rather than manual fixes"
+      },
+      "name": "Estate Health Narrative"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SqlAssessment_CL\r\n| where TimeGenerated {TimeRange}\r\n| extend asmt = parse_csv(RawData)\r\n| extend\r\n    AsmtId=tostring(asmt[1]),\r\n    CheckId=tostring(asmt[2]),\r\n    Severity=case(\r\n        asmt[8] == 30, \"High\", \r\n        asmt[8] == 20, \"Medium\", \r\n        asmt[8] == 10, \"Low\", \r\n        asmt[8] == 2, \"Critical\",\r\n        asmt[8] == 1, \"Warning\",\r\n        \"Information\"\r\n    ),\r\n    Sev = toint(asmt[8])\r\n| join kind=inner\r\n    (\r\n    SqlAssessment_CL\r\n    | extend asmt = parse_csv(RawData)\r\n    | extend AsmtId=tostring(asmt[1])   \r\n    | summarize arg_max(TimeGenerated, *) by _ResourceId\r\n    | project AsmtId\r\n    ) on AsmtId\r\n| where Sev > 0\r\n| summarize IssueCount = count() by Severity, Sev\r\n| order by Sev desc\r\n| project Severity, IssueCount",
+        "size": 1,
+        "title": "Issues by Severity",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "visualization": "barchart",
+        "chartSettings": {
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Critical",
+              "color": "redBright"
+            },
+            {
+              "seriesName": "High",
+              "color": "orange"
+            },
+            {
+              "seriesName": "Medium",
+              "color": "yellow"
+            },
+            {
+              "seriesName": "Low",
+              "color": "blue"
+            }
+          ]
+        }
+      },
+      "customWidth": "50",
+      "name": "Issues by Severity Chart",
+      "conditionalVisibility": {
+        "parameterName": "LogAnalyticsWorkspace",
+        "comparison": "isNotEqualTo"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SqlAssessment_CL\r\n| where TimeGenerated {TimeRange}\r\n| extend asmt = parse_csv(RawData)\r\n| extend\r\n    AsmtId=tostring(asmt[1]),\r\n    CheckId=tostring(asmt[2]),\r\n    DisplayString=tostring(asmt[3]),\r\n    Severity=case(\r\n        asmt[8] == 30, \"High\", \r\n        asmt[8] == 20, \"Medium\", \r\n        asmt[8] == 10, \"Low\", \r\n        asmt[8] == 2, \"Critical\",\r\n        asmt[8] == 1, \"Warning\",\r\n        \"Information\"\r\n    ),\r\n    Sev = toint(asmt[8])\r\n| join kind=inner\r\n    (\r\n    SqlAssessment_CL\r\n    | extend asmt = parse_csv(RawData)\r\n    | extend AsmtId=tostring(asmt[1])   \r\n    | summarize arg_max(TimeGenerated, *) by _ResourceId\r\n    | project AsmtId\r\n    ) on AsmtId\r\n| where Sev > 0\r\n| summarize \r\n    AffectedServers = dcount(_ResourceId),\r\n    TotalIssues = count() \r\n    by CheckId, DisplayString, Severity, Sev\r\n| top 10 by AffectedServers desc\r\n| project Issue = DisplayString, Severity, AffectedServers, TotalIssues\r\n| order by AffectedServers desc",
+        "size": 1,
+        "title": "Top 10 Most Common Issues",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{LogAnalyticsWorkspace}"
+        ],
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Severity",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Critical",
+                    "representation": "Sev0",
+                    "text": "Critical"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "High",
+                    "representation": "Sev1",
+                    "text": "High"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Medium",
+                    "representation": "Sev2",
+                    "text": "Medium"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Low",
+                    "representation": "Sev3",
+                    "text": "Low"
+                  },
+                  {
+                    "operator": "Default",
+                    "representation": "info"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "customWidth": "50",
+      "name": "Top Issues Table",
+      "conditionalVisibility": {
+        "parameterName": "LogAnalyticsWorkspace",
+        "comparison": "isNotEqualTo"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\r\n## License Optimization - Edition Analysis\r\n\r\n### What You're Looking At\r\n\r\nThis analysis breaks down your SQL Server estate by license edition, helping identify optimization opportunities:\r\n\r\n1. **Edition Distribution** - Count of instances by Enterprise, Standard, Express, and Developer editions\r\n2. **Version Distribution** - SQL Server versions in use (2012, 2014, 2016, 2017, 2019, 2022)\r\n3. **License Type Analysis** - Mix of PAYG (pay-as-you-go), Paid (perpetual licenses), and LicenseOnly (Azure Hybrid Benefit)\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nSQL Server licensing represents one of your largest software investments:\r\n\r\n- **Enterprise Edition**: $14,000 per core (requires minimum 4 cores) = **$56,000 base cost per server**\r\n- **Standard Edition**: $3,700 per core (minimum 4 cores) = **$14,800 base cost per server**  \r\n- **Annual Software Assurance**: 25% of license cost = **$14,000/year per Enterprise server**, **$3,700/year per Standard server**\r\n\r\n### Cost Optimization Opportunities\r\n\r\n**Edition Downgrade Analysis**:\r\n- Servers using <20% of Enterprise features can downgrade to Standard: **$41,200 savings per server**\r\n- Express/Developer editions in production should be licensed: avoiding compliance fines of **$100K-$500K**\r\n\r\n**Azure Hybrid Benefit**:\r\n- Leverage existing licenses in Azure for free (PAYG → LicenseOnly): **40-55% Azure cost reduction**\r\n- Example: 10 Enterprise servers moved to Azure SQL MI = **$840,000 annual savings**\r\n\r\n**Version Consolidation**:\r\n- Standardizing on SQL 2019/2022 reduces support overhead by **30-40%** (fewer security patches, testing cycles)\r\n- Newer versions include performance improvements reducing hardware needs by **15-25%**\r\n\r\n### Action Plan\r\n\r\n- 📊 **License Audit**: Review Enterprise Edition instances - validate they actually need Enterprise features (Always On, Compression, Partitioning)\r\n- 💰 **Quick Win**: Enable Azure Hybrid Benefit on Azure-based SQL instances (immediate 40% cost reduction)\r\n- 📈 **Migration Planning**: Prioritize SQL 2012/2014 upgrades - extended support costs **$600-$1000 per core per year**\r\n- 🔍 **Feature Usage Analysis**: Deploy scripts to audit actual feature usage - most organizations over-license by 30-50%"
+      },
+      "name": "License Optimization Narrative"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend edition = tostring(properties.edition)\r\n| summarize InstanceCount = count() by edition\r\n| order by InstanceCount desc",
+        "size": 1,
+        "title": "SQL Server Edition Distribution",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "piechart"
+      },
+      "customWidth": "33",
+      "name": "Edition Distribution"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend version = tostring(properties.version)\r\n| extend versionMajor = case(\r\n    version startswith '10.', 'SQL 2008/R2',\r\n    version startswith '11.', 'SQL 2012',\r\n    version startswith '12.', 'SQL 2014',\r\n    version startswith '13.', 'SQL 2016',\r\n    version startswith '14.', 'SQL 2017',\r\n    version startswith '15.', 'SQL 2019',\r\n    version startswith '16.', 'SQL 2022',\r\n    'Unknown'\r\n)\r\n| summarize InstanceCount = count() by versionMajor\r\n| order by versionMajor asc",
+        "size": 1,
+        "title": "SQL Server Version Distribution",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "barchart"
+      },
+      "customWidth": "33",
+      "name": "Version Distribution"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend licenseType = tostring(properties.licenseType)\r\n| extend licenseDisplay = case(\r\n    licenseType =~ 'PAYG', 'Pay-As-You-Go',\r\n    licenseType =~ 'Paid', 'Perpetual License',\r\n    licenseType =~ 'LicenseOnly', 'Azure Hybrid Benefit',\r\n    'Unknown'\r\n)\r\n| summarize InstanceCount = count() by licenseDisplay\r\n| order by InstanceCount desc",
+        "size": 1,
+        "title": "License Type Distribution",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "piechart"
+      },
+      "customWidth": "33",
+      "name": "License Type Distribution"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\r\n## Security & Compliance\r\n\r\n### What You're Looking At\r\n\r\nCritical security metrics for your SQL Server estate:\r\n\r\n1. **Azure Defender Status** - Count of instances with/without Azure Defender for SQL enabled\r\n2. **Unsupported Versions** - SQL Server versions past end-of-life (no security patches)\r\n3. **Security Issue Breakdown** - High-priority security findings from Best Practice Assessments\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nSQL Server security directly impacts:\r\n\r\n- **Breach Prevention**: 83% of data breaches involve databases - average breach cost is **$4.35 million**\r\n- **Regulatory Compliance**: GDPR, HIPAA, PCI-DSS all require up-to-date security patches - fines range from **$50,000 to $1.5M per violation**\r\n- **Insurance Coverage**: Cyber insurance increasingly requires proof of active vulnerability management - premiums increase **25-40% for unsupported software**\r\n- **Audit Failures**: SOC 2, ISO 27001 audits will fail if running unsupported SQL versions or lacking security monitoring\r\n\r\n### Financial Impact Examples\r\n\r\n**Azure Defender Investment**:\r\n- Cost: **$15 per server per month** = $180/year\r\n- Value: Detects threats worth **$4.35M average breach cost**\r\n- ROI: **24,000:1 return** on security investment\r\n\r\n**Unsupported Version Risks**:\r\n- Extended Support: **$600-$1,000 per core per year** (often more expensive than upgrading)\r\n- Zero-Day Exploits: Unsupported versions have no patches - recent SQL vulnerabilities exploited within **48 hours of disclosure**\r\n- Compliance Fines: **$50K-$1.5M per violation** for running unpatched systems with regulated data\r\n\r\n### Action Plan\r\n\r\n- 🚨 **Immediate**: Enable Azure Defender on all production SQL instances (takes <5 minutes per server)\r\n- 🔒 **This Quarter**: Upgrade or retire all SQL 2012 and earlier versions (end-of-life = no security patches)\r\n- 🛡️ **This Month**: Review and remediate all High/Critical security findings from BPA\r\n- 📋 **Ongoing**: Establish monthly security review cadence with CISO office"
+      },
+      "name": "Security Compliance Narrative"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend defenderStatus = tostring(properties.azureDefenderStatus)\r\n| extend status = case(\r\n    defenderStatus =~ 'Protected', 'Protected',\r\n    'Not Protected'\r\n)\r\n| summarize InstanceCount = count() by status",
+        "size": 1,
+        "title": "Azure Defender for SQL Status",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "piechart",
+        "chartSettings": {
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Protected",
+              "color": "green"
+            },
+            {
+              "seriesName": "Not Protected",
+              "color": "redBright"
+            }
+          ]
+        }
+      },
+      "customWidth": "50",
+      "name": "Azure Defender Status"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend version = tostring(properties.version)\r\n| extend supportStatus = case(\r\n    version startswith '10.' or version startswith '11.' or version startswith '12.', 'Unsupported',\r\n    version startswith '13.', 'Mainstream Support Ended',\r\n    'Supported'\r\n)\r\n| summarize InstanceCount = count() by supportStatus",
+        "size": 1,
+        "title": "SQL Server Support Status",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "piechart",
+        "chartSettings": {
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Supported",
+              "color": "green"
+            },
+            {
+              "seriesName": "Mainstream Support Ended",
+              "color": "yellow"
+            },
+            {
+              "seriesName": "Unsupported",
+              "color": "redBright"
+            }
+          ]
+        }
+      },
+      "customWidth": "50",
+      "name": "Support Status"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\r\n## SQL Server Instance Details\r\n\r\n### What You're Looking At\r\n\r\nDetailed inventory of all SQL Server instances in your environment:\r\n\r\n- **Server Name**: Host machine name\r\n- **Instance Name**: SQL Server instance identifier\r\n- **Edition**: License edition (Enterprise, Standard, etc.)\r\n- **Version**: SQL Server version number\r\n- **License Type**: How the instance is licensed (PAYG, Perpetual, Azure Hybrid Benefit)\r\n- **Azure Defender**: Security protection status\r\n- **vCores**: Number of virtual cores allocated\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nThis inventory serves as your:\r\n\r\n- **License Asset Register**: Required for SAM (Software Asset Management) audits\r\n- **Cost Allocation Tool**: Track license costs by department/application\r\n- **Risk Register**: Quickly identify unsupported or unprotected instances\r\n- **Migration Planning**: Prioritize upgrade/migration candidates\r\n\r\n### Action Plan\r\n\r\n- 📋 Export this data monthly for finance and compliance records\r\n- 🏷️ Ensure all instances are tagged with cost center, application owner, and business criticality\r\n- 🔍 Sort by Edition/Version to identify optimization opportunities\r\n- 💰 Calculate total license costs: (Enterprise count × $56K) + (Standard count × $14.8K)"
+      },
+      "name": "Instance Details Narrative"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend \r\n    serverName = tostring(split(properties.containerResourceId, '/')[8]),\r\n    instanceName = name,\r\n    edition = tostring(properties.edition),\r\n    version = tostring(properties.version),\r\n    licenseType = tostring(properties.licenseType),\r\n    defenderStatus = tostring(properties.azureDefenderStatus),\r\n    vcores = tostring(properties.vCore),\r\n    resourceGroup,\r\n    subscriptionId\r\n| extend versionDisplay = case(\r\n        version startswith '10.', strcat('SQL 2008/R2 (', version, ')'),\r\n        version startswith '11.', strcat('SQL 2012 (', version, ')'),\r\n        version startswith '12.', strcat('SQL 2014 (', version, ')'),\r\n        version startswith '13.', strcat('SQL 2016 (', version, ')'),\r\n        version startswith '14.', strcat('SQL 2017 (', version, ')'),\r\n        version startswith '15.', strcat('SQL 2019 (', version, ')'),\r\n        version startswith '16.', strcat('SQL 2022 (', version, ')'),\r\n        version\r\n    )\r\n| project \r\n    ServerName = serverName,\r\n    InstanceName = instanceName,\r\n    Edition = edition,\r\n    Version = versionDisplay,\r\n    LicenseType = licenseType,\r\n    AzureDefender = defenderStatus,\r\n    vCores = vcores,\r\n    ResourceGroup = resourceGroup,\r\n    Subscription = subscriptionId\r\n| order by ServerName asc, InstanceName asc",
+        "size": 0,
+        "title": "SQL Server Instance Inventory",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Edition",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Enterprise",
+                    "representation": "orange",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Standard",
+                    "representation": "blue",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "representation": "gray",
+                    "text": "{0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "AzureDefender",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Protected",
+                    "representation": "green",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "representation": "redBright",
+                    "text": "{0}"
+                  }
+                ]
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Edition",
+              "sortOrder": 1
+            }
+          ]
+        },
+        "sortBy": [
+          {
+            "itemKey": "Edition",
+            "sortOrder": 1
+          }
+        ]
+      },
+      "name": "Instance Inventory Table"
+    }
+  ],
+  "fallbackResourceIds": [
+    "azure monitor"
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

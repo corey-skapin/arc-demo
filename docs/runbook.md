@@ -437,18 +437,21 @@ Two DCRs, both via REST PUT:
 ### 4.4 Associate both DCRs with all 8 Arc machines, install CT extension
 DCRA target = Arc HybridCompute resource (consistent with Phase 3). CT extension publisher = `Microsoft.Azure.ChangeTrackingAndInventory`, type `ChangeTracking-Windows` or `ChangeTracking-Linux`.
 
-### 4.5 Deploy the "Arc Demo — Estate Overview" workbook
-Single custom workbook with 8 tiles modelled on Nic's story-first flow:
-1. **Estate connectivity** (heartbeat bar, last 15m)
-2. **Hosts beating over time** (24h timechart)
-3. **Per-host CPU utilisation** (avg / max / p95, 24h)
-4. **Configuration changes** (by host & type)
-5. **Top 25 applications** across the estate
-6. **Tagging hygiene** (Resource Graph: hasOwner + hasCostCenter)
-7. **Critical & Error Windows events** (24h)
-8. **Linux syslog errors** (24h)
+### 4.5 Deploy the "Arc Demo — Estate Overview" workbook + Nic's library
 
-Created via REST as `Microsoft.Insights/workbooks` (kind=shared), GUID name, `sourceId` set to the LAW resource ID so it opens in workspace context.
+Two sets of workbooks land in `rg-arc-demo`:
+
+**Our custom one-pager** (`workbooks/arc-demo-overview.workbook.json`):
+- Estate connectivity, hosts beating over time, per-host CPU, change events, top apps, tagging hygiene, Windows critical events, Linux syslog errors.
+
+**Nic Seilaz's workbook library** (vendored snapshot from [github.com/nseilaz/AzureArc_Workbooks](https://github.com/nseilaz/AzureArc_Workbooks) — MIT):
+- **Arc — Compliance, Security & Governance** — estate inventory, NIST CSF v2, patch posture, privileged activity, TLS hardening, Defender alerts, drift.
+- **Arc — Machine Intelligence Center** — 360° view of a single Arc machine.
+- **Arc — Asset Inventory** — estate-wide hardware/software roll-up.
+- **Arc — Governance & Compliance (experimental)** — deeper compliance drill-downs.
+- **Arc — SQL Estate Dashboard** — Arc-enabled SQL inventory + BPA.
+
+All 6 are deployed as shared workbooks via REST PUT (idempotent — re-runs match on the `workbookTag` tag).
 
 ### 4.6 Validation
 Wait 10–15 min after CT extension installs for first data. Then in Azure Portal: `rg-arc-demo` → Workbooks → "Arc Demo — Estate Overview". Tagging tile is instant via Resource Graph.

@@ -36,7 +36,7 @@ $infraRg = "rg-$NamePrefix-infra"
 $vnet    = "vnet-$NamePrefix"
 $subnet  = 'snet-vms'
 $natGw   = "natgw-$NamePrefix"
-$natPip  = 'pip-natgw'
+$natPip  = "pip-natgw-$NamePrefix"
 
 Write-Header "Activating Arc demo ($arcRg + $infraRg)"
 
