@@ -67,7 +67,7 @@ az login --tenant <TENANT_ID>
 az account set --subscription <SUBSCRIPTION_ID>
 
 # 3. Verify prereqs
-.\scripts\Test-Prerequisites.ps1
+.\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
 
 # 4. Deploy
 .\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail you@contoso.com

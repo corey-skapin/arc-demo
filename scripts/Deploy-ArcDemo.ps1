@@ -147,7 +147,13 @@ if ($existingBudgetStart) {
         adminEmail            = @{ value = $AdminEmail }
         budgetAmount          = @{ value = $BudgetAmount }
     }
-} | ConvertTo-Json -Depth 12 | Set-Content -Path $paramFile -Encoding utf8
+} | ConvertTo-Json -Depth 12 | ForEach-Object {
+    # Use raw .NET write so the file is created even when the script is invoked with
+    # -WhatIf. Set-Content respects ShouldProcess (because CmdletBinding declares
+    # SupportsShouldProcess), which would otherwise skip the write and break the
+    # subsequent `az deployment sub what-if` call that consumes this file.
+    [System.IO.File]::WriteAllText($paramFile, $_, [System.Text.UTF8Encoding]::new($false))
+}
 
 $deploymentName = "arc-demo-$(Get-Date -Format yyyyMMdd-HHmmss)"
 $bicepFile = Join-Path $repoRoot 'bicep\main.bicep'
