@@ -1,5 +1,10 @@
 // Network: VNet + subnet + NSG. NAT GW is created separately
 // by Activate-ArcDemo.ps1 so it can be torn down during hibernation.
+//
+// Idempotency: if a NAT GW already exists (from a prior Activate run), the
+// subnet preserves the attachment on re-deploy. Without this guard, re-running
+// main.bicep against an existing environment would strip the NAT GW from the
+// subnet and break outbound for all Arc agents.
 
 @description('Azure region')
 param location string
@@ -18,6 +23,9 @@ param addressPrefix string = '10.50.0.0/16'
 
 @description('Subnet prefix')
 param subnetPrefix string = '10.50.1.0/24'
+
+@description('Optional existing NAT Gateway resource ID to attach to the subnet (preserves Activate-ArcDemo state on re-deploy)')
+param existingNatGatewayId string = ''
 
 resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
   name: 'nsg-${namePrefix}'
@@ -39,10 +47,13 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
     subnets: [
       {
         name: subnetName
-        properties: {
-          addressPrefix: subnetPrefix
-          networkSecurityGroup: { id: nsg.id }
-        }
+        properties: union(
+          {
+            addressPrefix: subnetPrefix
+            networkSecurityGroup: { id: nsg.id }
+          },
+          empty(existingNatGatewayId) ? {} : { natGateway: { id: existingNatGatewayId } }
+        )
       }
     ]
   }

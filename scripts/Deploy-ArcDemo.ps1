@@ -102,6 +102,28 @@ Write-Header 'Generating admin password + deploying Bicep'
 $adminPwd = New-StrongPassword -Length 24
 
 $paramFile = Join-Path $env:TEMP "arc-demo-params-$(Get-Random).json"
+
+# Idempotency: if Activate-ArcDemo previously created a NAT Gateway, look it up
+# and pass the ID through to the network module so the subnet's natGateway
+# attachment is preserved on this redeploy. Without this, ARM strips the attach.
+$existingNatGwId = az network nat gateway show -g "rg-$NamePrefix-infra" -n "natgw-$NamePrefix" --query id -o tsv 2>$null
+if ($existingNatGwId) {
+    Write-Step "Found existing NAT Gateway natgw-$NamePrefix — will preserve subnet attachment"
+} else {
+    $existingNatGwId = ''
+}
+
+# Idempotency: preserve the existing budget start date. Azure refuses to change
+# the start date of an existing budget; without this guard, redeploys would fail.
+$existingBudgetStart = az consumption budget show --budget-name "budget-$NamePrefix" --query "timePeriod.startDate" -o tsv 2>$null
+if ($existingBudgetStart) {
+    # Normalise to YYYY-MM-01 (Azure returns full ISO timestamp)
+    $existingBudgetStart = $existingBudgetStart.Substring(0, 7) + '-01'
+    Write-Step "Found existing budget budget-$NamePrefix (start $existingBudgetStart) — preserving"
+} else {
+    $existingBudgetStart = (Get-Date).ToUniversalTime().ToString('yyyy-MM-01')
+}
+
 @{
     '$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
     contentVersion = '1.0.0.0'
@@ -110,6 +132,8 @@ $paramFile = Join-Path $env:TEMP "arc-demo-params-$(Get-Random).json"
         arcResourceGroup      = @{ value = $arcRg }
         infraResourceGroup    = @{ value = $infraRg }
         namePrefix            = @{ value = $NamePrefix }
+        existingNatGatewayId    = @{ value = $existingNatGwId }
+        existingBudgetStartDate = @{ value = $existingBudgetStart }
         tenantId              = @{ value = $TenantId }
         deployerPrincipalId   = @{ value = $principalId }
         keyVaultName          = @{ value = $kvName }

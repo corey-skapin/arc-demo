@@ -17,7 +17,7 @@ param infraResourceGroup string
 @description('Name prefix for budget name')
 param namePrefix string = 'arc-demo'
 
-@description('Budget start date (must be first of a month, ISO)')
+@description('Budget start date (must be first of a month, ISO). Pass through from the deploy script on re-runs to preserve the existing budget; Azure rejects changes to the start date of an existing budget.')
 param startDate string = utcNow('yyyy-MM-01')
 
 @description('Budget end date (2 years out, must be first of a month, ISO)')

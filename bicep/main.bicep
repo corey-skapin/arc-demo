@@ -66,6 +66,12 @@ param budgetAmount int = 200
 @description('Name prefix for derived resource names (vnet, nsg, ag, alert)')
 param namePrefix string = 'arc-demo'
 
+@description('Optional existing NAT Gateway resource ID to attach to the subnet. Pass through from the deploy script so re-runs preserve the Activate-ArcDemo NAT GW attachment. Leave empty on fresh deploys.')
+param existingNatGatewayId string = ''
+
+@description('Existing budget start date (YYYY-MM-01) to preserve on re-runs. Defaults to the first of the current UTC month for fresh deploys.')
+param existingBudgetStartDate string = utcNow('yyyy-MM-01')
+
 resource rgArc 'Microsoft.Resources/resourceGroups@2024-11-01' = {
   name: arcResourceGroup
   location: location
@@ -122,6 +128,7 @@ module networkMod 'modules/network.bicep' = {
     location: location
     tags: tags
     namePrefix: namePrefix
+    existingNatGatewayId: existingNatGatewayId
   }
 }
 
@@ -200,6 +207,7 @@ module budgetMod 'modules/budget.bicep' = {
     arcResourceGroup: arcResourceGroup
     infraResourceGroup: infraResourceGroup
     namePrefix: namePrefix
+    startDate: existingBudgetStartDate
   }
 }
 

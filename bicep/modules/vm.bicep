@@ -81,7 +81,9 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
         version: 'latest'
       }
       osDisk: {
-        name: '${vmName}-osdisk'
+        // Disk name intentionally omitted so Azure auto-generates one. Hardcoding
+        // it as ${vmName}-osdisk works on a fresh deploy but blocks any delta
+        // update because Azure refuses to rename the OS disk of an existing VM.
         createOption: 'FromImage'
         managedDisk: { storageAccountType: 'StandardSSD_LRS' }
       }
