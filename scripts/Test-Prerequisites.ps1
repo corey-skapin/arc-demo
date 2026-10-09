@@ -12,18 +12,22 @@
 .PARAMETER TenantId
     The Entra tenant ID for the subscription.
 
+.PARAMETER DeployerPrincipalId
+    Optional Entra object ID to use when Graph signed-in-user lookup is blocked.
+
 .EXAMPLE
     .\Test-Prerequisites.ps1 -SubscriptionId 6ff7d039-... -TenantId 4a2e6a7b-...
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$SubscriptionId,
-    [Parameter(Mandatory)][string]$TenantId
+    [Parameter(Mandatory)][string]$TenantId,
+    [string]$DeployerPrincipalId = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
 
-$null = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId
+$null = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId
 Write-Host ''
 Write-Ok 'All prerequisites satisfied. You can now run Deploy-ArcDemo.ps1.'

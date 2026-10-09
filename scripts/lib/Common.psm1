@@ -56,7 +56,8 @@ function Test-Prerequisites {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$SubscriptionId,
-        [Parameter(Mandatory)][string]$TenantId
+        [Parameter(Mandatory)][string]$TenantId,
+        [string]$DeployerPrincipalId = ''
     )
 
     Write-Header 'Pre-flight checks'
@@ -99,10 +100,20 @@ function Test-Prerequisites {
     }
     Write-Ok "Signed in as $($ctx.user) in tenant $TenantId"
 
-    # Owner role (or higher — inherited via MG is normal for MCAPS)
-    $principalId = (az ad signed-in-user show --query id -o tsv 2>$null)
-    $userUpn     = (az ad signed-in-user show --query userPrincipalName -o tsv 2>$null)
+    # Owner role (or higher — inherited via MG is normal for MCAPS). Some MCAPS
+    # lab tenants can satisfy ARM RBAC while Graph user lookup is blocked by a
+    # CAE challenge, so allow the deploy script to pass the known object id.
+    $principalId = $DeployerPrincipalId
+    $userUpn = $ctx.user
+    if (-not $principalId) {
+        $principalId = (az ad signed-in-user show --query id -o tsv 2>$null)
+        $userUpn     = (az ad signed-in-user show --query userPrincipalName -o tsv 2>$null)
+    }
     if (-not $principalId) { throw "Unable to resolve signed-in user object id" }
+    if ($DeployerPrincipalId) {
+        Write-Ok "Using supplied deployer principal id $DeployerPrincipalId"
+        Write-Warn "Skipping role lookup because Graph user resolution was bypassed. Ensure this principal has Owner/UAA."
+    } else {
     # Include inherited assignments by using --all + UPN (the object-id query
     # only returns direct sub-scope assignments, missing MG-inherited Owner)
     $roles = az role assignment list --all --assignee $userUpn --query "[?contains(scope,'/subscriptions/$SubscriptionId') || contains(scope,'/providers/Microsoft.Management') || scope=='/'].roleDefinitionName" -o tsv 2>$null
@@ -110,6 +121,7 @@ function Test-Prerequisites {
         Write-Ok "User has Owner/UAA role on the subscription (direct or inherited)"
     } else {
         Write-Warn "User does not appear to have Owner on this subscription. Some operations (policy, role assignments) may fail."
+    }
     }
 
     # Resource provider registrations

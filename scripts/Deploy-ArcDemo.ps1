@@ -28,6 +28,10 @@
 .PARAMETER TenantId
     The Entra tenant ID.
 
+.PARAMETER DeployerPrincipalId
+    Optional Entra object ID for the deploying user/service principal. Use this when
+    ARM access works but Graph signed-in-user lookup is blocked by CAE.
+
 .PARAMETER AdminEmail
     Email address for budget + alert notifications. Defaults from config\demo-skin.json when omitted.
 
@@ -96,6 +100,7 @@
 param(
     [Parameter(Mandatory)][string]$SubscriptionId,
     [Parameter(Mandatory)][string]$TenantId,
+    [string]$DeployerPrincipalId = '',
     [string]$AdminEmail = '',
     [string]$Location = 'australiaeast',
     [string]$NamePrefix = 'arc-demo',
@@ -221,7 +226,7 @@ function Get-ArcMachineTagArgs {
 }
 
 # Phase 1: pre-flight
-$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId
+$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"
