@@ -75,7 +75,7 @@ param deployAzureVMs bool = false
 @description('Deploy the optional Container Apps workload. Placeholder only until the workload module is implemented.')
 param deployContainerApps bool = false
 
-@description('Deploy the optional AKS workload. Placeholder only until the workload module is implemented.')
+@description('Deploy the optional AKS workload with Container Insights, a sample workload, and a pod restart alert.')
 param deployAks bool = false
 
 @description('Optional existing NAT Gateway resource ID to attach to the subnet. Pass through from the deploy script so re-runs preserve the Activate-ArcDemo NAT GW attachment. Leave empty on fresh deploys.')
@@ -225,6 +225,8 @@ module aksMod 'modules/aks.bicep' = if (deployAks) {
     location: location
     tags: tags
     namePrefix: namePrefix
+    workspaceId: workspaceMod.outputs.workspaceId
+    actionGroupId: alertsMod.outputs.actionGroupId
   }
 }
 
