@@ -54,11 +54,15 @@ if (-not $vms) {
         }
     }
 
-    Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'all VMs deallocated' -Condition {
-        $running = (az vm list -g $infraRg --show-details --query "[?powerState=='VM running'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-        return $running.Count -eq 0
-    } | Out-Null
-    Write-Ok 'All VMs deallocated'
+    if ($WhatIfPreference) {
+        Write-Warn 'WhatIf set — skipping wait for VM deallocation'
+    } else {
+        Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'all VMs deallocated' -Condition {
+            $running = (az vm list -g $infraRg --show-details --query "[?powerState=='VM running'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
+            return $running.Count -eq 0
+        } | Out-Null
+        Write-Ok 'All VMs deallocated'
+    }
 }
 
 Write-Step 'Scaling optional Container Apps workload to zero...'
