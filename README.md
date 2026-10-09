@@ -7,20 +7,28 @@
 
 ## What you get
 
-8 config-driven Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` — fully supported for demo/test scenarios), wired into a Log Analytics workspace with Defender for Servers Plan 2, VM Insights, Change Tracking, MCSB + NIST policy initiatives, and a custom workbook tuned for the persona-first demo flow described in [`docs/runsheet.md`](docs/runsheet.md).
+A **standalone Azure Arc + Azure Monitor lab**. It does **not** require Azure SRE Agent or any later repo; the optional `sre-agent` repo can be layered on afterwards against the alerts this repo emits.
 
+Default deployment:
+
+- 8 config-driven Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` — fully supported for demo/test scenarios)
 - 5 × Windows Server across WS2016/WS2019/WS2022 by default (2 of which run **SQL Server 2022 Developer**, Arc-enabled with BPA)
 - 3 × Ubuntu 22.04 LTS
-- Legacy Windows tiers such as WS2012R2 are supported in the fleet config as Arc-control-plane-only entries; see [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md)
-- Optional Azure-native Windows VM workload (`-DeployAzureVMs $true`) with Azure Monitor Agent and DCR associations to the shared workspace
-- VM SKU: `Standard_B2as_v2` (2 vCPU / 8 GiB AMD burstable, ~AUD 50/mo each)
-- Defender for Servers **Plan 2** at subscription scope
-- DevTest-Labs auto-shutdown at 19:00 local time
-- Custom workbook with 8 tiles modelled on the original demo flow
+- Log Analytics workspace, DCRs, Defender for Servers Plan 2, VM Insights, Change Tracking, MCSB + NIST policy initiatives, heartbeat alert, Action Group, and a custom workbook tuned for [`docs/runsheet.md`](docs/runsheet.md)
+
+Optional workloads, independently toggleable in any combination:
+
+- Azure-native Windows VM (`-DeployAzureVMs $true`) with AMA + DCR associations to the shared workspace
+- Container App (`-DeployContainerApps $true`) with a `SIMULATE_CRASH` fault toggle and `RestartCount` alert
+- AKS (`-DeployAks $true`) with Container Insights, a sample crash-loop workload, and pod restart alert
+
+Legacy Windows tiers such as WS2012R2/WS2008R2 are represented as Arc-control-plane-only entries: inventory/tags, ESU discussion, Update Manager/Defender/Machine Configuration surfaces where available, but no AMA/VM Insights/Change Tracking payloads on unsupported OS versions. See [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md).
 
 See [`docs/architecture.md`](docs/architecture.md) for the full topology.
 
 ## Cost states
+
+Default Act-1 deployment costs are shown below. Optional Azure VM, Container App, and AKS workloads add their own incremental cost.
 
 | State | ~AUD/month | What stays | What goes |
 |---|---|---|---|
@@ -41,6 +49,8 @@ Full breakdown: [`docs/cost.md`](docs/cost.md).
 - Permission to create service principals in the target tenant
 - An email address for cost & alert notifications
 
+For lab repeatability, use a clean/new subscription in the **same tenant** you will use for any later optional `sre-agent` lab. Pass tenant and subscription IDs at runtime; do not hard-code private subscription details in docs or scripts.
+
 ### Deploy
 
 ```powershell
@@ -54,18 +64,26 @@ az account set --subscription <SUBSCRIPTION_ID>
 # Check you've got what you need
 .\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
 
-# Deploy (~25-30 min end-to-end)
+# Deploy default Act-1 Arc/Monitor estate (~25-30 min end-to-end)
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUB> `
   -TenantId <TENANT> `
   -AdminEmail you@contoso.com
+
+# Example: add Azure-native VM + Container App alert scenario
+.\scripts\Deploy-ArcDemo.ps1 `
+  -SubscriptionId <SUB> `
+  -TenantId <TENANT> `
+  -AdminEmail you@contoso.com `
+  -DeployAzureVMs $true `
+  -DeployContainerApps $true
 ```
 
 When it finishes, open the workbook URL printed at the end (or navigate to **Azure Arc → Workbooks → "Arc Demo — Estate Overview"** in the portal).
 
 ### Use it
 
-Follow [`docs/runsheet.md`](docs/runsheet.md) — a 15-25 min persona-ordered walkthrough that mirrors the demo flow this repo was built to replicate.
+Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor walkthrough with optional Azure-native workload beats.
 
 ### Hibernate / activate
 
@@ -95,7 +113,7 @@ All scripts accept parameters. The most useful:
 | `-DeployArcOnPrem` | `$true` | Deploy the on-prem-simulated Arc VM workload |
 | `-DeployAzureVMs` | `$false` | Deploy a monitored Azure-native Windows VM workload (not Arc-enabled) |
 | `-DeployContainerApps` | `$false` | Deploy a tiny Azure Container App with a `SIMULATE_CRASH` fault toggle and RestartCount alert |
-| `-DeployAks` | `$false` | Toggle placeholder for the future AKS workload |
+| `-DeployAks` | `$false` | Deploy AKS with Container Insights, crash-loop sample workload, and pod-restart alert |
 | `-OnPremFleetPath` | *(empty)* | Optional JSON fleet array. Omit to use the default WS2016/2019/2022 + Ubuntu mix |
 | `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
 | `-LinuxVmCount` | `3` | Deprecated compatibility generator for an Ubuntu count-based fleet |
@@ -104,6 +122,27 @@ All scripts accept parameters. The most useful:
 | `-AutoShutdownTime` | `1900` | 24-hour HHMM in `AutoShutdownTimezone` |
 | `-AutoShutdownTimezone` | `Cen. Australia Standard Time` | .NET timezone ID for shutdown |
 | `-SkipSqlInstall` | `$false` | Set to skip SQL installation (saves ~20 min) |
+
+### Common workload combinations
+
+| Demo goal | Switches |
+|---|---|
+| Act-1 Arc/Monitor only (default) | *(none)* |
+| Arc/Monitor + Azure-native VM comparison | `-DeployAzureVMs $true` |
+| Arc/Monitor + Container App fault alert | `-DeployContainerApps $true` |
+| Arc/Monitor + AKS crash-loop alert | `-DeployAks $true` |
+| All current workloads | `-DeployAzureVMs $true -DeployContainerApps $true -DeployAks $true` |
+| Azure-native scenarios without Arc backing VMs | `-DeployArcOnPrem $false -DeployAzureVMs $true -DeployContainerApps $true` |
+
+### OS-tier demo coverage
+
+| Tier | Demo coverage |
+|---|---|
+| WS2016+ | Full Monitor path: AMA, core DCR, VM Insights, Change Tracking, Defender, Update Manager/Machine Configuration surfaces, workbook/alert data |
+| Ubuntu 22.04 | AMA + core DCR + Change Tracking; VM Insights map is intentionally off until Dependency Agent support is validated |
+| WS2008/WS2012-era | Arc-control-plane-only: inventory/resource graph, tags, ESU eligibility discussion, Update Manager/Defender/Machine Configuration surfaces where available; no AMA/VM Insights/Change Tracking |
+
+The live Arc cook's tour is: inventory, Machine Configuration/TLS 1.2 policy posture, Update Manager, Defender, and ESU. See [`docs/runsheet.md`](docs/runsheet.md) for click-path and talk track.
 
 ## For AI coding agents
 
@@ -116,6 +155,7 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | [`docs/architecture.md`](docs/architecture.md) | What gets deployed and how it's wired together |
 | [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md) | Fleet schema, legacy OS image approach, and Monitor gating rules |
 | [`docs/container-app-fault.md`](docs/container-app-fault.md) | Optional Container App fault/repair commands and alert mechanism |
+| [`docs/aks-break-scenario.md`](docs/aks-break-scenario.md) | Optional AKS crash-loop/repair commands and alert mechanism |
 | [`docs/runbook.md`](docs/runbook.md) | The original step-by-step build runbook |
 | [`docs/runsheet.md`](docs/runsheet.md) | Live demo walkthrough — what to click and what to say |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |

@@ -9,9 +9,10 @@
 - A signed-in CLI session against the target tenant
 
 ```powershell
-# Sign in to the MCAPS demo tenant
-az login --tenant 4a2e6a7b-9d04-4e89-9d8b-01c75a2444c1
-az account set --subscription 6ff7d039-8bfd-4cdb-8d74-f7a9f1eb9ff5
+# Sign in to the target tenant and a clean/new lab subscription.
+# Use the same tenant if you later layer on the optional sre-agent repo.
+az login --tenant <TENANT_ID>
+az account set --subscription <SUBSCRIPTION_ID>
 az account show --query "{name:name, id:id, tenantId:tenantId}" -o table
 ```
 
@@ -21,7 +22,7 @@ az account show --query "{name:name, id:id, tenantId:tenantId}" -o table
 | Resource group | `rg-arc-demo` |
 | Region | `australiaeast` |
 | Log Analytics | `law-arc-demo` |
-| Tags | `owner=corey`, `purpose=arc-demo`, `costcenter=demo`, `env=demo` |
+| Tags | `owner=demo`, `purpose=arc-demo`, `costcenter=demo`, `env=demo` |
 
 ---
 
@@ -55,7 +56,7 @@ foreach ($rp in @(
 az group create `
   --name rg-arc-demo `
   --location australiaeast `
-  --tags owner=corey purpose=arc-demo costcenter=demo env=demo
+  --tags owner=demo purpose=arc-demo costcenter=demo env=demo
 ```
 
 ### 1.3 Create Log Analytics workspace
@@ -66,7 +67,7 @@ az monitor log-analytics workspace create `
   --location australiaeast `
   --sku PerGB2018 `
   --retention-time 30 `
-  --tags owner=corey purpose=arc-demo costcenter=demo env=demo
+  --tags owner=demo purpose=arc-demo costcenter=demo env=demo
 ```
 
 Capture the workspace resource ID for later phases:
@@ -106,7 +107,7 @@ The Azure VMs live in `rg-arc-demo-infra` so they're cleanly separated from the 
 
 ```powershell
 az group create -n rg-arc-demo-infra -l australiaeast `
-  --tags owner=corey purpose=arc-demo costcenter=demo env=demo
+  --tags owner=demo purpose=arc-demo costcenter=demo env=demo
 ```
 
 ### 2.2 Key Vault for VM admin credentials
@@ -114,7 +115,7 @@ az group create -n rg-arc-demo-infra -l australiaeast `
 $kvName = "kv-arcdemo-" + -join ((48..57)+(97..122) | Get-Random -Count 6 | ForEach-Object {[char]$_})
 az keyvault create -n $kvName -g rg-arc-demo-infra -l australiaeast `
   --enable-rbac-authorization true `
-  --tags owner=corey purpose=arc-demo costcenter=demo env=demo
+  --tags owner=demo purpose=arc-demo costcenter=demo env=demo
 
 # Grant self KV admin
 $me   = az ad signed-in-user show --query id -o tsv
@@ -147,7 +148,7 @@ az ad sp create-for-rbac --name "sp-arc-demo-onboard" `
 ```
 
 ### 2.5 VM SKU + region notes
-- **Standard_B2s / B2ms unavailable** in this MCAPS subscription on 2026-05-14 (capacity-restricted in **both** australiaeast and australiasoutheast).
+- **Standard_B2s / B2ms unavailable** in some demo subscriptions on 2026-05-14 (capacity-restricted in **both** australiaeast and australiasoutheast).
 - Settled on **`Standard_B2as_v2`** for all 8 VMs (2 vCPU / 8 GiB / AMD burstable) in **australiaeast**.
 
 Probe technique used to find a working SKU:
@@ -178,7 +179,7 @@ foreach ($vm in $vms) {
     --vnet-name vnet-arc-demo --subnet snet-vms `
     --public-ip-address '""' --nsg '""' `
     --admin-username azureuser --admin-password $pwd --authentication-type password `
-    --tags owner=corey purpose=arc-demo costcenter=demo env=demo `
+    --tags owner=demo purpose=arc-demo costcenter=demo env=demo `
           "role=$($vm.role)" "ostype=$($vm.os)" `
     --no-wait
 }
@@ -198,7 +199,7 @@ Start-Process msiexec.exe -Wait -ArgumentList "/i $env:TEMP\AzureConnectedMachin
   --service-principal-id <appId> --service-principal-secret <secret> `
   --resource-group rg-arc-demo --tenant-id <tenant> --location australiaeast `
   --subscription-id <sub> `
-  --tags "owner=corey,purpose=arc-demo,costcenter=demo,env=demo"
+  --tags "owner=demo,purpose=arc-demo,costcenter=demo,env=demo"
 ```
 
 **Linux** — the wrapper script `https://aka.ms/azcmagent` *refuses* to install on Azure VMs. **Use the apt repo directly:**
@@ -210,7 +211,7 @@ sudo MSFT_ARC_TEST=true azcmagent connect \
   --service-principal-id <appId> --service-principal-secret '<secret>' \
   --resource-group rg-arc-demo --tenant-id <tenant> --location australiaeast \
   --subscription-id <sub> \
-  --tags "owner=corey,purpose=arc-demo,costcenter=demo,env=demo"
+  --tags "owner=demo,purpose=arc-demo,costcenter=demo,env=demo"
 ```
 
 Push to all VMs in parallel via Run Command + PowerShell `Start-Job`:
@@ -520,7 +521,7 @@ Portal: **Azure Arc → SQL Server instances** then drill into each for BPA / Mi
 ## Phase 6 — Alerting (email via Action Group)
 
 ### Decision: email only for v1
-Teams webhooks unavailable (MCAPS tenant has no Teams licence). Used **Action Group → email** to `coreyskapin@microsoft.com`.
+If Teams webhooks are unavailable in the target tenant, use **Action Group → email** to the runtime `-AdminEmail` recipient.
 
 > 📌 **Note for the demo:** When showing this tile, explicitly call out: *"In a real customer environment we'd add a second action on this Action Group — a webhook that POSTs the same payload to ServiceNow, PagerDuty, or any HTTP endpoint. It's a single `--action webhook <url>` switch. We just don't have a webhook target wired for this demo."*
 
@@ -528,7 +529,7 @@ Teams webhooks unavailable (MCAPS tenant has no Teams licence). Used **Action Gr
 ```powershell
 az monitor action-group create -g rg-arc-demo -n ag-arc-demo `
   --short-name ArcDemo `
-  --action email "corey-email" "coreyskapin@microsoft.com" usecommonalertschema
+  --action email "admin-email" "you@contoso.com" usecommonalertschema
 ```
 
 To add a webhook later (one-liner):
@@ -561,7 +562,7 @@ az vm deallocate -g rg-arc-demo-infra -n win-app-01
 ## Phase 7 — Polish, budget, tear-down
 
 ### 7.1 Cost Management budget (AUD 200/mo)
-Subscription-scoped budget filtered to both demo RGs. Email alerts at 50/80/100% actual + 100% forecast → `coreyskapin@microsoft.com`.
+Subscription-scoped budget filtered to both demo RGs. Email alerts at 50/80/100% actual + 100% forecast go to the runtime `-AdminEmail` recipient.
 
 ### 7.2 Demo run-sheet
 Saved as `Scratchpad\arc-demo-runsheet.md` — the persona-ordered click path for live demos.

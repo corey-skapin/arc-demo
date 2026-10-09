@@ -35,7 +35,10 @@ flowchart TB
             CA[Optional Container App<br/>ca-arc-demo-fault]
             CAE[Container Apps env<br/>cae-arc-demo]
             CAR[Metric alert<br/>RestartCount > 3]
-            SCHED[8× auto-shutdown<br/>schedule @ 19:00]
+            AKS[Optional AKS cluster<br/>arc-demo-aks]
+            AKSW[Crash-loop sample workload]
+            AKSA[Scheduled query alert<br/>pod restarts]
+            SCHED[Auto-shutdown<br/>schedule @ 19:00]
         end
 
         DEFENDER([Defender for Servers<br/>Plan 2])
@@ -62,6 +65,10 @@ flowchart TB
     CA --> CAE
     CA -. platform metric .-> CAR
     CAR --> AG
+    AKS --> AKSW
+    AKS -. Container Insights .-> LAW
+    LAW -. KubePodInventory query .-> AKSA
+    AKSA --> AG
 
     DCR1 --> LAW
     DCR2 --> LAW
@@ -104,6 +111,7 @@ Keeping them separate makes the demo flow read correctly in the portal (the cust
 8. The **Estate Overview workbook** pulls all of the above into one persona-ordered dashboard.
 9. If `-DeployAzureVMs $true` is set, an extra Azure-native Windows VM is deployed in the infra resource group and monitored directly with AMA + DCR associations to the same workspace. It is not Arc-enabled, so it appears as a native Azure VM in Monitor.
 10. If `-DeployContainerApps $true` is set, a tiny Container App is deployed in the infra resource group with `SIMULATE_CRASH=false` by default. Flipping that environment variable creates a crash-looping revision; the `RestartCount` platform metric alert emails the same Action Group.
+11. If `-DeployAks $true` is set, a one-node AKS cluster is deployed in the infra resource group with Container Insights enabled against the same workspace. A sample workload can be put into `CrashLoopBackOff`, and a scheduled-query alert over `KubePodInventory` emails the same Action Group.
 
 The fleet schema and legacy OS treatment are documented in
 [`legacy-os-fleet.md`](legacy-os-fleet.md).
