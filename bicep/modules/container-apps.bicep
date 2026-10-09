@@ -26,9 +26,9 @@ param targetPort int = 8080
 @description('Deploy-time value for SIMULATE_CRASH. Keep false for normal deploys; use az containerapp update to flip it during demos.')
 param simulateCrash bool = false
 
-@description('RestartCount threshold over the alert window. The alert fires when Total RestartCount is greater than this value.')
+@description('RestartCount threshold over the alert window. The alert fires when Total RestartCount is greater than this value. Default 0 makes the demo fault deterministic because Container Apps can restart roughly once per evaluation window.')
 @minValue(0)
-param restartCountThreshold int = 3
+param restartCountThreshold int = 0
 
 var safePrefix = toLower(replace(namePrefix, '_', '-'))
 var containerAppName = take('ca-${safePrefix}-fault', 32)

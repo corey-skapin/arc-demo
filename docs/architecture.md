@@ -34,7 +34,7 @@ flowchart TB
             NATIVEVM[Optional Azure-native VM<br/>az-arcdemo-01]
             CA[Optional Container App<br/>ca-arc-demo-fault]
             CAE[Container Apps env<br/>cae-arc-demo]
-            CAR[Metric alert<br/>RestartCount > 3]
+            CAR[Metric alert<br/>RestartCount > 0]
             AKS[Optional AKS cluster<br/>arc-demo-aks]
             AKSW[Crash-loop sample workload]
             AKSA[Scheduled query alert<br/>pod restarts]

@@ -30,7 +30,9 @@ az containerapp update `
 
 The next revision exits during startup and Container Apps restarts the replica.
 Azure Monitor evaluates `RestartCount` every 5 minutes over a 5-minute window
-and fires when total restarts are greater than 3.
+and fires when total restarts are greater than 0. The low threshold is intentional:
+Container Apps may restart a failed replica about once per evaluation window, so
+`> 0` makes the demo alert deterministic.
 
 ## Verify
 
