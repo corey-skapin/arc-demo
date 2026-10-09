@@ -35,14 +35,7 @@ var containerAppName = take('ca-${safePrefix}-fault', 32)
 var environmentName = take('cae-${safePrefix}', 60)
 var restartAlertName = take('alert-${safePrefix}-containerapp-restarts', 260)
 var simulateCrashValue = simulateCrash ? 'true' : 'false'
-var startupScript = '''
-if [ "$SIMULATE_CRASH" = "true" ]; then
-  echo "[FATAL] Simulated bad deploy: crashing on startup because SIMULATE_CRASH=true" >&2
-  exit 1
-fi
-
-exec dotnet /app/aspnetapp.dll
-'''
+var startupScript = 'if [ "$SIMULATE_CRASH" = "true" ]; then echo "[FATAL] Simulated bad deploy: crashing on startup because SIMULATE_CRASH=true" >&2; exit 1; fi; exec dotnet /app/aspnetapp.dll'
 
 resource environment 'Microsoft.App/managedEnvironments@2025-01-01' = {
   name: environmentName
