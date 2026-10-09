@@ -355,7 +355,7 @@ module containerAppsMod 'modules/container-apps.bicep' = if (deployContainerApps
     namePrefix: namePrefix
     actionGroupId: alertsMod.outputs.actionGroupId
     demoTitle: demoTitle
-    containerImage: 'mcr.microsoft.com/oss/nginx/nginx:1.25'
+    containerImage: 'nginx:stable-alpine'
     targetPort: 80
     restartCountThreshold: 0
   }

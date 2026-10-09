@@ -15,13 +15,13 @@ param actionGroupId string
 @description('Customer-facing demo title used in alert descriptions.')
 param demoTitle string = 'Arc Demo'
 
-@description('Container image for the tiny HTTP app. The default Microsoft sample includes /bin/sh and dotnet.')
-param containerImage string = 'mcr.microsoft.com/dotnet/samples:aspnetapp'
+@description('Container image for the tiny HTTP app. The default nginx image includes /bin/sh and starts quickly for fault demos.')
+param containerImage string = 'nginx:stable-alpine'
 
 @description('HTTP port exposed by the sample app.')
 @minValue(1)
 @maxValue(65535)
-param targetPort int = 8080
+param targetPort int = 80
 
 @description('Deploy-time value for SIMULATE_CRASH. Keep false for normal deploys; use az containerapp update to flip it during demos.')
 param simulateCrash bool = false
@@ -35,7 +35,7 @@ var containerAppName = take('ca-${safePrefix}-fault', 32)
 var environmentName = take('cae-${safePrefix}', 60)
 var restartAlertName = take('alert-${safePrefix}-containerapp-restarts', 260)
 var simulateCrashValue = simulateCrash ? 'true' : 'false'
-var startupScript = 'if [ "$SIMULATE_CRASH" = "true" ]; then echo "[FATAL] Simulated bad deploy: crashing on startup because SIMULATE_CRASH=true" >&2; exit 1; fi; exec dotnet /app/aspnetapp.dll'
+var startupScript = 'if [ "$SIMULATE_CRASH" = "true" ]; then echo "[FATAL] Simulated bad deploy: crashing on startup because SIMULATE_CRASH=true" >&2; exit 1; fi; exec nginx -g "daemon off;"'
 
 resource environment 'Microsoft.App/managedEnvironments@2025-01-01' = {
   name: environmentName
