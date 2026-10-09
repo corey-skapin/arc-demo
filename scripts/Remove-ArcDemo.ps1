@@ -18,6 +18,9 @@
     Don't revert Defender for Servers to Free. Useful if you have other VMs
     in the subscription that benefit from P2.
 
+.PARAMETER SkinPath
+    Optional path to a demo skin variables JSON file. Defaults to config\demo-skin.json.
+
 .PARAMETER WhatIf
     Preview deletions without performing them.
 
@@ -28,11 +31,16 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$NamePrefix = 'arc-demo',
+    [string]$SkinPath = '',
     [switch]$KeepDefender
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+
+$skin = Get-DemoSkin -Path $SkinPath -RepoRoot $repoRoot
+if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue -Skin $skin -Path 'azure.namePrefix' -Default $NamePrefix }
 
 $ctx = az account show --query "{id:id,user:user.name}" -o json | ConvertFrom-Json
 $sub = $ctx.id

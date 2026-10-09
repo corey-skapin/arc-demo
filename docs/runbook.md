@@ -17,6 +17,8 @@ az account show --query "{name:name, id:id, tenantId:tenantId}" -o table
 ```
 
 ## Naming & tags (used everywhere)
+The maintained deployment path derives these values from `config\demo-skin.json`; edit that file (or pass `-SkinPath`) instead of copying hard-coded customer values into scripts. The table below documents the default DTF baseline.
+
 | Item | Value |
 |---|---|
 | Resource group | `rg-arc-demo` |
@@ -616,4 +618,3 @@ Saved as `Scratchpad\arc-demo-teardown.ps1`. Deletes both RGs, both policy assig
 | Network | vnet 10.50.0.0/16 + NAT gateway (in active state only) | rg-arc-demo-infra |
 | Auto-shutdown | 19:00 ACDT, deallocates VMs | rg-arc-demo-infra |
 | Budget | AUD 200/mo, 4 thresholds | subscription scope |
-

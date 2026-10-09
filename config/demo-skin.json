@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "customer": {
+    "name": "SA DTF",
+    "shortName": "DTF",
+    "scenarioLabel": "Infrastructure Modernisation Program"
+  },
+  "azure": {
+    "namePrefix": "arc-demo",
+    "location": "australiaeast"
+  },
+  "notifications": {
+    "email": "you@contoso.com"
+  },
+  "workloads": {
+    "deployArcOnPrem": true,
+    "deployAzureVMs": false,
+    "deployContainerApps": false,
+    "deployAks": false,
+    "skipSqlInstall": false,
+    "onPremFleetPath": ""
+  },
+  "compute": {
+    "vmSize": "Standard_B2as_v2"
+  },
+  "operations": {
+    "autoShutdownTime": "1900",
+    "autoShutdownTimezone": "Cen. Australia Standard Time"
+  },
+  "cost": {
+    "monthlyBudgetAmount": 200
+  },
+  "labels": {
+    "demoTitle": "Arc Demo",
+    "workbookTitle": "Arc Demo — Estate Overview",
+    "openingHook": "Hybrid estate modernisation: inventory, security, patching, Monitor, and a governed SRE path.",
+    "closeMessage": "Arc and Monitor are the reusable spine; customer names, labels, and workload toggles live in the skin."
+  },
+  "tags": {
+    "owner": "demo",
+    "purpose": "arc-demo",
+    "costcenter": "demo",
+    "env": "demo"
+  }
+}

@@ -15,6 +15,9 @@
 .PARAMETER Location
     Azure region (must match the original deploy).
 
+.PARAMETER SkinPath
+    Optional path to a demo skin variables JSON file. Defaults to config\demo-skin.json.
+
 .PARAMETER SkipValidate
     Don't poll for Heartbeat at the end. Useful for prep-the-night-before runs.
 
@@ -25,11 +28,17 @@
 param(
     [string]$NamePrefix = 'arc-demo',
     [string]$Location = 'australiaeast',
+    [string]$SkinPath = '',
     [switch]$SkipValidate
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+
+$skin = Get-DemoSkin -Path $SkinPath -RepoRoot $repoRoot
+if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue -Skin $skin -Path 'azure.namePrefix' -Default $NamePrefix }
+if (-not $PSBoundParameters.ContainsKey('Location')) { $Location = Get-DemoSkinValue -Skin $skin -Path 'azure.location' -Default $Location }
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"

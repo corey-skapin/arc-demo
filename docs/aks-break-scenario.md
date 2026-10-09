@@ -4,6 +4,8 @@ Optional workload behind `-DeployAks $true`. It creates a one-node AKS cluster
 `<prefix>-aks` in `australiaeast`, enables Container Insights against the shared
 Log Analytics workspace, applies a tiny Kubernetes deployment in namespace
 `arc-demo-aks`, and routes the AKS pod restart alert to the existing Action Group.
+The prefix, region, and AKS toggle can come from `config\demo-skin.json`; see
+[`reskin-guide.md`](reskin-guide.md).
 
 ## Deploy
 
@@ -11,7 +13,7 @@ Log Analytics workspace, applies a tiny Kubernetes deployment in namespace
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <subscription-id> `
   -TenantId <tenant-id> `
-  -AdminEmail you@contoso.com `
+  -SkinPath .\config\demo-skin.json `
   -DeployAks $true
 ```
 

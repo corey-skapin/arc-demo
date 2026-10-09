@@ -15,6 +15,9 @@ param adminEmail string
 @description('Name prefix used for AG / alert names')
 param namePrefix string = 'arc-demo'
 
+@description('Customer-facing demo title used in alert display names.')
+param demoTitle string = 'Arc Demo'
+
 resource ag 'Microsoft.Insights/actionGroups@2024-10-01-preview' = {
   name: 'ag-${namePrefix}'
   location: 'global'
@@ -37,7 +40,7 @@ resource alert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
   location: location
   tags: tags
   properties: {
-    displayName: 'Arc Demo — Host missing heartbeat (>10 min)'
+    displayName: '${demoTitle} — Host missing heartbeat (>10 min)'
     description: 'Fires when an Arc-monitored host has had no heartbeat for over 10 minutes.'
     severity: 2
     enabled: true

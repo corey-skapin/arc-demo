@@ -196,6 +196,9 @@ param budgetAmount int = 200
 @description('Name prefix for derived resource names (vnet, nsg, ag, alert)')
 param namePrefix string = 'arc-demo'
 
+@description('Customer-facing demo title used in alert/workbook labels.')
+param demoTitle string = 'Arc Demo'
+
 @description('Deploy the on-premises-simulated Azure VMs and Arc-enable them through the deployment script.')
 param deployArcOnPrem bool = true
 
@@ -258,6 +261,7 @@ module alertsMod 'modules/alerts.bicep' = {
     workspaceId: workspaceMod.outputs.workspaceId
     adminEmail: adminEmail
     namePrefix: namePrefix
+    demoTitle: demoTitle
   }
 }
 
@@ -350,6 +354,7 @@ module containerAppsMod 'modules/container-apps.bicep' = if (deployContainerApps
     tags: tags
     namePrefix: namePrefix
     actionGroupId: alertsMod.outputs.actionGroupId
+    demoTitle: demoTitle
   }
 }
 

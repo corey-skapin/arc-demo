@@ -11,6 +11,9 @@
 .PARAMETER NamePrefix
     Used to derive RG names (default: arc-demo).
 
+.PARAMETER SkinPath
+    Optional path to a demo skin variables JSON file. Defaults to config\demo-skin.json.
+
 .PARAMETER WhatIf
     Preview the actions without performing them.
 
@@ -19,11 +22,16 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$NamePrefix = 'arc-demo'
+    [string]$NamePrefix = 'arc-demo',
+    [string]$SkinPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+
+$skin = Get-DemoSkin -Path $SkinPath -RepoRoot $repoRoot
+if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue -Skin $skin -Path 'azure.namePrefix' -Default $NamePrefix }
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"

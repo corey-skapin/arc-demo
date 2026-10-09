@@ -12,6 +12,9 @@ param namePrefix string
 @description('Existing Action Group resource ID to notify when the Container App restarts repeatedly.')
 param actionGroupId string
 
+@description('Customer-facing demo title used in alert descriptions.')
+param demoTitle string = 'Arc Demo'
+
 @description('Container image for the tiny HTTP app. The default Microsoft sample includes /bin/sh and dotnet.')
 param containerImage string = 'mcr.microsoft.com/dotnet/samples:aspnetapp'
 
@@ -121,7 +124,7 @@ resource restartAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
     workload: 'container-app'
   })
   properties: {
-    description: 'Fires when the arc-demo Container App crash-loop scenario drives replica restarts.'
+    description: 'Fires when the ${demoTitle} Container App crash-loop scenario drives replica restarts.'
     severity: 2
     enabled: true
     scopes: [

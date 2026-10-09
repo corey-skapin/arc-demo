@@ -68,13 +68,13 @@ az account set --subscription <SUBSCRIPTION_ID>
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUB> `
   -TenantId <TENANT> `
-  -AdminEmail you@contoso.com
+  -SkinPath .\config\demo-skin.json
 
 # Example: add Azure-native VM + Container App alert scenario
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUB> `
   -TenantId <TENANT> `
-  -AdminEmail you@contoso.com `
+  -SkinPath .\config\demo-skin.json `
   -DeployAzureVMs $true `
   -DeployContainerApps $true
 ```
@@ -104,10 +104,13 @@ Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor 
 
 ## Customisation
 
+Customer-specific values live in [`config\demo-skin.json`](config/demo-skin.json). Change that file to retarget the demo name, resource prefix, region, notification email, workload toggles, workbook labels, and tags; see [`docs/reskin-guide.md`](docs/reskin-guide.md) for the swap-list and dummy-customer example. Runtime command-line parameters still override the skin when you need a one-off change.
+
 All scripts accept parameters. The most useful:
 
 | Parameter | Default | Purpose |
 |---|---|---|
+| `-SkinPath` | `config\demo-skin.json` | Variables file for customer skin defaults |
 | `-Location` | `australiaeast` | Azure region for all resources |
 | `-NamePrefix` | `arc-demo` | Used for RG / resource names (e.g. `rg-arc-demo`, `kv-arc-demo-xxxx`) |
 | `-DeployArcOnPrem` | `$true` | Deploy the on-prem-simulated Arc VM workload |
@@ -118,10 +121,19 @@ All scripts accept parameters. The most useful:
 | `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
 | `-LinuxVmCount` | `3` | Deprecated compatibility generator for an Ubuntu count-based fleet |
 | `-VmSize` | `Standard_B2as_v2` | VM SKU. Probe with `--validate` before changing |
-| `-AdminEmail` | *(required)* | Email for budget + alert notifications |
+| `-AdminEmail` | skin `notifications.email` | Email for budget + alert notifications |
 | `-AutoShutdownTime` | `1900` | 24-hour HHMM in `AutoShutdownTimezone` |
 | `-AutoShutdownTimezone` | `Cen. Australia Standard Time` | .NET timezone ID for shutdown |
 | `-SkipSqlInstall` | `$false` | Set to skip SQL installation (saves ~20 min) |
+
+Example using only the skin for customer defaults:
+
+```powershell
+.\scripts\Deploy-ArcDemo.ps1 `
+  -SubscriptionId <SUB> `
+  -TenantId <TENANT> `
+  -SkinPath .\config\demo-skin.json
+```
 
 ### Common workload combinations
 
@@ -160,6 +172,7 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | [`docs/runsheet.md`](docs/runsheet.md) | Live demo walkthrough — what to click and what to say |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |
 | [`docs/cost.md`](docs/cost.md) | Detailed cost breakdown by state |
+| [`docs/reskin-guide.md`](docs/reskin-guide.md) | Skin variables schema, swap-list, and retargeting steps |
 | [`AGENTS.md`](AGENTS.md) | Operating manual for AI coding assistants |
 
 ## Inspiration & credits

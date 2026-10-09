@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "customer": {
+    "name": "Contoso Energy",
+    "shortName": "Contoso",
+    "scenarioLabel": "Hybrid Operations Readiness"
+  },
+  "azure": {
+    "namePrefix": "contoso-arc",
+    "location": "australiaeast"
+  },
+  "notifications": {
+    "email": "ops-demo@contoso.example"
+  },
+  "workloads": {
+    "deployArcOnPrem": true,
+    "deployAzureVMs": true,
+    "deployContainerApps": true,
+    "deployAks": false,
+    "skipSqlInstall": true,
+    "onPremFleetPath": ""
+  },
+  "compute": {
+    "vmSize": "Standard_B2as_v2"
+  },
+  "operations": {
+    "autoShutdownTime": "1900",
+    "autoShutdownTimezone": "Cen. Australia Standard Time"
+  },
+  "cost": {
+    "monthlyBudgetAmount": 200
+  },
+  "labels": {
+    "demoTitle": "Contoso Arc Demo",
+    "workbookTitle": "Contoso — Hybrid Estate Overview",
+    "openingHook": "Hybrid operations readiness across branch, datacenter, and cloud workloads.",
+    "closeMessage": "The Azure build is constant; the customer skin swaps names, labels, toggles, and talk-track hooks."
+  },
+  "tags": {
+    "owner": "demo",
+    "purpose": "contoso-arc",
+    "costcenter": "demo",
+    "env": "demo"
+  }
+}

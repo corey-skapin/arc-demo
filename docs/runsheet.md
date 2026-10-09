@@ -14,6 +14,8 @@ Default resource naming uses `-NamePrefix arc-demo`:
 - Backing lab/optional workload RG: `rg-arc-demo-infra`
 - Workbook: **Arc Demo — Estate Overview**
 
+These defaults come from `config\demo-skin.json`. To retarget for another customer, update the skin file and run scripts with `-SkinPath`; see [`reskin-guide.md`](reskin-guide.md).
+
 | Goal | Deploy switches |
 |---|---|
 | Core Act-1 Arc/Monitor estate | *(defaults: `-DeployArcOnPrem $true`; all optional workloads false)* |
@@ -36,7 +38,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -AdminEmail you@contoso.com `
+  -SkinPath .\config\demo-skin.json `
   -DeployAzureVMs $true `
   -DeployContainerApps $true
 ```

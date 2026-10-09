@@ -4,6 +4,8 @@ Optional workload behind `-DeployContainerApps $true`. It creates a lightweight
 Container Apps environment `cae-<prefix>`, a tiny HTTP Container App
 `ca-<prefix>-fault`, and a metric alert
 `alert-<prefix>-containerapp-restarts` routed to the existing Action Group.
+The `<prefix>` and workload toggle can come from `config\demo-skin.json`; see
+[`reskin-guide.md`](reskin-guide.md).
 
 The app is healthy by default because `SIMULATE_CRASH=false`.
 
@@ -13,7 +15,7 @@ The app is healthy by default because `SIMULATE_CRASH=false`.
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <subscription-id> `
   -TenantId <tenant-id> `
-  -AdminEmail you@contoso.com `
+  -SkinPath .\config\demo-skin.json `
   -DeployContainerApps $true
 ```
 

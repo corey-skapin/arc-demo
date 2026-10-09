@@ -29,7 +29,10 @@
     The Entra tenant ID.
 
 .PARAMETER AdminEmail
-    Email address for budget + alert notifications.
+    Email address for budget + alert notifications. Defaults from config\demo-skin.json when omitted.
+
+.PARAMETER SkinPath
+    Optional path to a demo skin variables JSON file. Defaults to config\demo-skin.json.
 
 .PARAMETER Location
     Azure region. Default: australiaeast.
@@ -93,7 +96,7 @@
 param(
     [Parameter(Mandatory)][string]$SubscriptionId,
     [Parameter(Mandatory)][string]$TenantId,
-    [Parameter(Mandatory)][string]$AdminEmail,
+    [string]$AdminEmail = '',
     [string]$Location = 'australiaeast',
     [string]$NamePrefix = 'arc-demo',
     [bool]$DeployArcOnPrem = $true,
@@ -107,12 +110,41 @@ param(
     [string]$AutoShutdownTime = '1900',
     [string]$AutoShutdownTimezone = 'Cen. Australia Standard Time',
     [int]$BudgetAmount = 200,
+    [string]$SkinPath = '',
     [switch]$SkipSqlInstall
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+
+$skin = Get-DemoSkin -Path $SkinPath -RepoRoot $repoRoot
+if (-not $PSBoundParameters.ContainsKey('Location')) { $Location = Get-DemoSkinValue -Skin $skin -Path 'azure.location' -Default $Location }
+if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue -Skin $skin -Path 'azure.namePrefix' -Default $NamePrefix }
+if (-not $PSBoundParameters.ContainsKey('AdminEmail')) { $AdminEmail = Get-DemoSkinValue -Skin $skin -Path 'notifications.email' -Default $AdminEmail }
+if (-not $PSBoundParameters.ContainsKey('DeployArcOnPrem')) { $DeployArcOnPrem = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployArcOnPrem' -Default $DeployArcOnPrem) }
+if (-not $PSBoundParameters.ContainsKey('DeployAzureVMs')) { $DeployAzureVMs = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployAzureVMs' -Default $DeployAzureVMs) }
+if (-not $PSBoundParameters.ContainsKey('DeployContainerApps')) { $DeployContainerApps = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployContainerApps' -Default $DeployContainerApps) }
+if (-not $PSBoundParameters.ContainsKey('DeployAks')) { $DeployAks = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployAks' -Default $DeployAks) }
+if (-not $PSBoundParameters.ContainsKey('OnPremFleetPath')) { $OnPremFleetPath = Get-DemoSkinValue -Skin $skin -Path 'workloads.onPremFleetPath' -Default $OnPremFleetPath }
+if (-not $PSBoundParameters.ContainsKey('VmSize')) { $VmSize = Get-DemoSkinValue -Skin $skin -Path 'compute.vmSize' -Default $VmSize }
+if (-not $PSBoundParameters.ContainsKey('AutoShutdownTime')) { $AutoShutdownTime = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTime' -Default $AutoShutdownTime }
+if (-not $PSBoundParameters.ContainsKey('AutoShutdownTimezone')) { $AutoShutdownTimezone = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTimezone' -Default $AutoShutdownTimezone }
+if (-not $PSBoundParameters.ContainsKey('BudgetAmount')) { $BudgetAmount = [int](Get-DemoSkinValue -Skin $skin -Path 'cost.monthlyBudgetAmount' -Default $BudgetAmount) }
+if (-not $PSBoundParameters.ContainsKey('SkipSqlInstall') -and [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.skipSqlInstall' -Default $false)) { $SkipSqlInstall = [switch]::Present }
+if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
+    throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
+}
+
+$demoTags = Merge-DemoHashtable -Defaults ([ordered]@{
+    owner = 'demo'
+    purpose = 'arc-demo'
+    costcenter = 'demo'
+    env = 'demo'
+}) -Overrides (Get-DemoSkinValue -Skin $skin -Path 'tags' -Default @{})
+$arcOnboardingTags = ConvertTo-DemoTagString -Tags $demoTags
+$demoTitle = Get-DemoSkinValue -Skin $skin -Path 'labels.demoTitle' -Default 'Arc Demo'
+$workbookTitle = Get-DemoSkinValue -Skin $skin -Path 'labels.workbookTitle' -Default "$demoTitle — Estate Overview"
 
 function New-CountBasedOnPremFleet {
     param(
@@ -166,23 +198,24 @@ function New-CountBasedOnPremFleet {
 }
 
 function Get-ArcMachineTagArgs {
-    param([Parameter(Mandatory)]$Machine)
+    param(
+        [Parameter(Mandatory)]$Machine,
+        [System.Collections.IDictionary]$BaseTags = @{}
+    )
 
-    $tags = [ordered]@{
-        owner           = 'demo'
-        purpose         = 'arc-demo'
-        costcenter      = 'demo'
-        env             = 'demo'
-        role            = $Machine.role
-        osType          = $Machine.osType
-        osTier          = $Machine.osTier
-        monitorTier     = $Machine.monitorTier
-        esuEligible     = ([string]$Machine.esuEligible).ToLowerInvariant()
-        updateManager   = 'assessment'
-        defender        = 'plan2'
-        machineConfig   = 'enabled'
-        inventory       = 'arc'
+    $tags = [ordered]@{}
+    foreach ($key in $BaseTags.Keys) {
+        $tags[$key] = $BaseTags[$key]
     }
+    $tags['role'] = $Machine.role
+    $tags['osType'] = $Machine.osType
+    $tags['osTier'] = $Machine.osTier
+    $tags['monitorTier'] = $Machine.monitorTier
+    $tags['esuEligible'] = ([string]$Machine.esuEligible).ToLowerInvariant()
+    $tags['updateManager'] = 'assessment'
+    $tags['defender'] = 'plan2'
+    $tags['machineConfig'] = 'enabled'
+    $tags['inventory'] = 'arc'
 
     return @($tags.GetEnumerator() | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value })
 }
@@ -224,6 +257,9 @@ if ($existingBudgetStart) {
 
 $onPremFleet = $null
 if ($OnPremFleetPath) {
+    if (-not [System.IO.Path]::IsPathRooted($OnPremFleetPath)) {
+        $OnPremFleetPath = Join-Path $repoRoot $OnPremFleetPath
+    }
     $resolvedFleetPath = (Resolve-Path -Path $OnPremFleetPath).Path
     $onPremFleet = @((Get-Content -Path $resolvedFleetPath -Raw | ConvertFrom-Json -Depth 20))
     Write-Step "Using on-prem fleet config from $resolvedFleetPath ($($onPremFleet.Count) entries)"
@@ -237,6 +273,8 @@ $templateParameters = @{
     arcResourceGroup        = @{ value = $arcRg }
     infraResourceGroup      = @{ value = $infraRg }
     namePrefix              = @{ value = $NamePrefix }
+    tags                    = @{ value = $demoTags }
+    demoTitle               = @{ value = $demoTitle }
     deployArcOnPrem         = @{ value = $DeployArcOnPrem }
     deployAzureVMs          = @{ value = $DeployAzureVMs }
     deployContainerApps     = @{ value = $DeployContainerApps }
@@ -336,7 +374,7 @@ if (-not $ctReady) {
 }
 $ctDcrBody = @{
     location = $Location
-    tags = @{ owner='demo'; purpose='arc-demo'; costcenter='demo'; env='demo' }
+    tags = $demoTags
     properties = @{
         description = 'Change Tracking & Inventory DCR'
         dataSources = @{
@@ -439,7 +477,7 @@ Start-Process msiexec.exe -Wait -ArgumentList "/i `$env:TEMP\acm.msi /qn"
   --service-principal-id $spnAppId --service-principal-secret '$spnSecret' ``
   --resource-group $arcRg --tenant-id $TenantId --location $Location ``
   --subscription-id $SubscriptionId ``
-  --tags "owner=demo,purpose=arc-demo,costcenter=demo,env=demo"
+  --tags "$arcOnboardingTags"
 "@
 $lnxOnboard = @"
 set -e
@@ -451,7 +489,7 @@ sudo MSFT_ARC_TEST=true azcmagent connect \
   --service-principal-id $spnAppId --service-principal-secret '$spnSecret' \
   --resource-group $arcRg --tenant-id $TenantId --location $Location \
   --subscription-id $SubscriptionId \
-  --tags "owner=demo,purpose=arc-demo,costcenter=demo,env=demo"
+  --tags "$arcOnboardingTags"
 "@
 $winFile = Join-Path $libDir 'arc-win.ps1'
 $lnxFile = Join-Path $libDir 'arc-lnx.sh'
@@ -497,7 +535,7 @@ Write-Ok 'All Arc machines Connected'
 
 Write-Step 'Tagging Arc machines with OS, monitoring, and control-plane metadata...'
 foreach ($machine in $deployedFleet) {
-    $tagArgs = Get-ArcMachineTagArgs -Machine $machine
+    $tagArgs = Get-ArcMachineTagArgs -Machine $machine -BaseTags $demoTags
     az connectedmachine update -g $arcRg -n $($machine.name) --tags $tagArgs --only-show-errors -o none
 }
 Write-Ok 'Arc machine tags updated'
@@ -690,7 +728,7 @@ function Publish-Workbook {
     $wbGuid = [guid]::NewGuid().ToString()
     $wbBody = @{
         location = $Location
-        tags = @{ owner = 'demo'; purpose = 'arc-demo'; costcenter = 'demo'; env = 'demo'; workbookTag = $tag }
+        tags = Merge-DemoHashtable -Defaults $demoTags -Overrides @{ workbookTag = $tag }
         kind = 'shared'
         properties = @{
             displayName    = $DisplayName
@@ -709,7 +747,7 @@ function Publish-Workbook {
 
 # Custom one-pager
 $customWb = Join-Path $repoRoot 'workbooks\arc-demo-overview.workbook.json'
-$wbId = Publish-Workbook -FilePath $customWb -DisplayName 'Arc Demo — Estate Overview'
+$wbId = Publish-Workbook -FilePath $customWb -DisplayName $workbookTitle
 
 # Nic Seilaz's workbook collection (vendored snapshot)
 $nseilazDir = Join-Path $repoRoot 'workbooks\nseilaz'
