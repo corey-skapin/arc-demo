@@ -38,7 +38,7 @@
 ### 2. Estate connectivity workbook  (~2 min) — *exec lens*
 - Open **Arc — Compliance, Security & Governance** (from Nic's library) for the heavyweight scorecard view, or **Arc Demo — Estate Overview** (our custom one-pager) for a quick at-a-glance.
 - Walk through tiles top-to-bottom:
-  - "8 hosts beating, mix of Windows/Linux"
+  - "8 hosts beating, mix of Windows/Linux and WS2016/2019/2022 by default"
   - "Tagging hygiene — half my fleet is missing ownership tags. *In your environment, that's hundreds of unattributed servers.*"
   - "Top 25 applications across the estate — *this is the start of an app-rationalisation conversation*."
 - Key line: **"This is what a head of platform wants to see Monday morning. Not blades, not agents, not policies."**
@@ -57,6 +57,7 @@
 ### 5. Inventory & change tracking  (~3 min) — *ops lens*
 - Open **Arc — Asset Inventory** (Nic's library) for software-across-the-estate, then KQL `ConfigurationChange | where TimeGenerated > ago(7d) | summarize Changes=count() by Computer, ConfigChangeType`.
 - *"Software-installed, service-changed, file-changed, registry-changed — all event-driven, like cloud. Customers replacing SCOM love this."*
+- For a legacy-OS mix, pivot to the Arc server tags (`osTier`, `monitorTier`, `esuEligible`): *"WS2012-era hosts stay in the Arc control plane for inventory, Defender, Machine Configuration, Update Manager assessment where available, and ESU discussion, but we deliberately do not push AMA/VM Insights/Change Tracking to unsupported OS tiers."*
 
 ### 6. SQL on Arc  (~3 min) — *DBA lens*
 - Open **Arc — SQL Estate Dashboard** (from Nic's library) for the cross-estate view, then **Azure Arc → SQL Server instances → win-sql-01** for the drill-down.

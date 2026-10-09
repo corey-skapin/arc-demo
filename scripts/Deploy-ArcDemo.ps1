@@ -13,10 +13,10 @@
       4. Arc onboarding service principal
       5. Arc agent install on each VM (Windows via Arc ext path,
          Linux via Azure VM ext path — see AGENTS.md Gotcha 2)
-      6. AMA install + DCR associations (DCRA against the Arc resource ID —
-         see AGENTS.md Gotcha 3)
-      7. Dependency Agent (Windows only — Ubuntu 22.04 kernel unsupported)
-      8. Change Tracking extension
+      6. AMA install + DCR associations for Monitor-supported fleet entries
+         only (DCRA against the Arc resource ID — see AGENTS.md Gotcha 3)
+      7. Dependency Agent for VM Insights-supported Windows entries only
+      8. Change Tracking extension for Change Tracking-supported entries only
       9. (Optional) SQL Server 2022 Developer install on the 2 SQL hosts
      10. WindowsAgent.SqlServer extension to Arc-enable SQL
      11. Workbook upload
@@ -53,12 +53,18 @@
     Pass through the optional AKS workload toggle. Default false until the
     workload module is implemented.
 
+.PARAMETER OnPremFleetPath
+    Optional path to a JSON file containing the on-prem simulated fleet array.
+    See docs/legacy-os-fleet.md for the schema. If omitted, main.bicep uses
+    its default mixed WS2016/2019/2022 + Ubuntu fleet.
+
 .PARAMETER WindowsVmCount
-    Number of Windows VMs. Default 5. The FIRST 2 become the SQL hosts (so set
-    >= 2 if you want SQL).
+    Deprecated compatibility input. If supplied without OnPremFleetPath, the
+    script generates a count-based WS2022 fleet. Prefer OnPremFleetPath.
 
 .PARAMETER LinuxVmCount
-    Number of Linux (Ubuntu 22.04) VMs. Default 3.
+    Deprecated compatibility input. If supplied without OnPremFleetPath, the
+    script generates a count-based Ubuntu 22.04 fleet. Prefer OnPremFleetPath.
 
 .PARAMETER VmSize
     VM SKU. Default Standard_B2as_v2 (2 vCPU / 8 GiB AMD burstable). Probe
@@ -95,6 +101,7 @@ param(
     [bool]$DeployAzureVMs = $false,
     [bool]$DeployContainerApps = $false,
     [bool]$DeployAks = $false,
+    [string]$OnPremFleetPath = '',
     [ValidateRange(1, 20)][int]$WindowsVmCount = 5,
     [ValidateRange(0, 20)][int]$LinuxVmCount = 3,
     [string]$VmSize = 'Standard_B2as_v2',
@@ -107,6 +114,79 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+
+function New-CountBasedOnPremFleet {
+    param(
+        [int]$WindowsVmCount,
+        [int]$LinuxVmCount
+    )
+
+    $fleet = @()
+    for ($i = 0; $i -lt $WindowsVmCount; $i++) {
+        $isSql = $i -lt 2
+        $fleet += @{
+            name                   = if ($isSql) { 'win-sql-0{0}' -f ($i + 1) } else { 'win-app-0{0}' -f ($i - 1) }
+            role                   = if ($isSql) { 'sql' } else { 'app' }
+            osType                 = 'Windows'
+            osTier                 = 'WS2022'
+            imagePublisher         = 'MicrosoftWindowsServer'
+            imageOffer             = 'WindowsServer'
+            imageSku               = '2022-datacenter-azure-edition'
+            imageVersion           = 'latest'
+            deploymentMode         = 'azure-vm'
+            monitorTier            = 'full-monitor'
+            supportsAzureMonitor   = $true
+            supportsVmInsights     = $true
+            supportsChangeTracking = $true
+            supportsSql            = $isSql
+            esuEligible            = $false
+        }
+    }
+
+    for ($i = 0; $i -lt $LinuxVmCount; $i++) {
+        $fleet += @{
+            name                   = 'lnx-app-0{0}' -f ($i + 1)
+            role                   = 'app'
+            osType                 = 'Linux'
+            osTier                 = 'Ubuntu22.04'
+            imagePublisher         = 'Canonical'
+            imageOffer             = '0001-com-ubuntu-server-jammy'
+            imageSku               = '22_04-lts-gen2'
+            imageVersion           = 'latest'
+            deploymentMode         = 'azure-vm'
+            monitorTier            = 'full-monitor-no-vmi-map'
+            supportsAzureMonitor   = $true
+            supportsVmInsights     = $false
+            supportsChangeTracking = $true
+            supportsSql            = $false
+            esuEligible            = $false
+        }
+    }
+
+    return $fleet
+}
+
+function Get-ArcMachineTagArgs {
+    param([Parameter(Mandatory)]$Machine)
+
+    $tags = [ordered]@{
+        owner           = 'demo'
+        purpose         = 'arc-demo'
+        costcenter      = 'demo'
+        env             = 'demo'
+        role            = $Machine.role
+        osType          = $Machine.osType
+        osTier          = $Machine.osTier
+        monitorTier     = $Machine.monitorTier
+        esuEligible     = ([string]$Machine.esuEligible).ToLowerInvariant()
+        updateManager   = 'assessment'
+        defender        = 'plan2'
+        machineConfig   = 'enabled'
+        inventory       = 'arc'
+    }
+
+    return @($tags.GetEnumerator() | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value })
+}
 
 # Phase 1: pre-flight
 $principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId
@@ -143,33 +223,46 @@ if ($existingBudgetStart) {
     $existingBudgetStart = (Get-Date).ToUniversalTime().ToString('yyyy-MM-01')
 }
 
+$onPremFleet = $null
+if ($OnPremFleetPath) {
+    $resolvedFleetPath = (Resolve-Path -Path $OnPremFleetPath).Path
+    $onPremFleet = @((Get-Content -Path $resolvedFleetPath -Raw | ConvertFrom-Json -Depth 20))
+    Write-Step "Using on-prem fleet config from $resolvedFleetPath ($($onPremFleet.Count) entries)"
+} elseif ($PSBoundParameters.ContainsKey('WindowsVmCount') -or $PSBoundParameters.ContainsKey('LinuxVmCount')) {
+    Write-Warn 'WindowsVmCount/LinuxVmCount are deprecated; generating a count-based WS2022/Ubuntu fleet. Prefer -OnPremFleetPath for OS-mix demos.'
+    $onPremFleet = @(New-CountBasedOnPremFleet -WindowsVmCount $WindowsVmCount -LinuxVmCount $LinuxVmCount)
+}
+
+$templateParameters = @{
+    location                = @{ value = $Location }
+    arcResourceGroup        = @{ value = $arcRg }
+    infraResourceGroup      = @{ value = $infraRg }
+    namePrefix              = @{ value = $NamePrefix }
+    deployArcOnPrem         = @{ value = $DeployArcOnPrem }
+    deployAzureVMs          = @{ value = $DeployAzureVMs }
+    deployContainerApps     = @{ value = $DeployContainerApps }
+    deployAks               = @{ value = $DeployAks }
+    existingNatGatewayId    = @{ value = $existingNatGwId }
+    existingBudgetStartDate = @{ value = $existingBudgetStart }
+    tenantId                = @{ value = $TenantId }
+    deployerPrincipalId     = @{ value = $principalId }
+    keyVaultName            = @{ value = $kvName }
+    adminUsername           = @{ value = 'azureuser' }
+    adminPassword           = @{ value = $adminPwd }
+    vmSize                  = @{ value = $VmSize }
+    autoShutdownTime        = @{ value = $AutoShutdownTime }
+    autoShutdownTimezone    = @{ value = $AutoShutdownTimezone }
+    adminEmail              = @{ value = $AdminEmail }
+    budgetAmount            = @{ value = $BudgetAmount }
+}
+if ($null -ne $onPremFleet) {
+    $templateParameters.onPremFleet = @{ value = $onPremFleet }
+}
+
 @{
     '$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
     contentVersion = '1.0.0.0'
-    parameters = @{
-        location              = @{ value = $Location }
-        arcResourceGroup      = @{ value = $arcRg }
-        infraResourceGroup    = @{ value = $infraRg }
-        namePrefix            = @{ value = $NamePrefix }
-        deployArcOnPrem       = @{ value = $DeployArcOnPrem }
-        deployAzureVMs        = @{ value = $DeployAzureVMs }
-        deployContainerApps   = @{ value = $DeployContainerApps }
-        deployAks             = @{ value = $DeployAks }
-        existingNatGatewayId    = @{ value = $existingNatGwId }
-        existingBudgetStartDate = @{ value = $existingBudgetStart }
-        tenantId              = @{ value = $TenantId }
-        deployerPrincipalId   = @{ value = $principalId }
-        keyVaultName          = @{ value = $kvName }
-        adminUsername         = @{ value = 'azureuser' }
-        adminPassword         = @{ value = $adminPwd }
-        windowsVmCount        = @{ value = $WindowsVmCount }
-        linuxVmCount          = @{ value = $LinuxVmCount }
-        vmSize                = @{ value = $VmSize }
-        autoShutdownTime      = @{ value = $AutoShutdownTime }
-        autoShutdownTimezone  = @{ value = $AutoShutdownTimezone }
-        adminEmail            = @{ value = $AdminEmail }
-        budgetAmount          = @{ value = $BudgetAmount }
-    }
+    parameters = $templateParameters
 } | ConvertTo-Json -Depth 12 | ForEach-Object {
     # Use raw .NET write so the file is created even when the script is invoked with
     # -WhatIf. Set-Content respects ShouldProcess (because CmdletBinding declares
@@ -202,13 +295,29 @@ Write-Ok 'Bicep deployment complete'
 
 $workspaceId = $outputs.workspaceId.value
 $workspaceCustomerId = $outputs.workspaceCustomerId.value
-$vmNames     = @(@($outputs.vmNames.value) | Where-Object { $_ })
+$deployedFleet = @(@($outputs.vmFleet.value) | Where-Object { $_ -and $_.deployed -eq $true })
+$vmNames     = @($deployedFleet | Select-Object -ExpandProperty name)
 $dcrCoreId   = $outputs.dcrCoreId.value
 $dcrVmiId    = $outputs.dcrVmiId.value
 $dcrCtId     = $outputs.dcrCtId.value
-$winVms = @($vmNames | Where-Object { $_ -like 'win-*' })
-$lnxVms = @($vmNames | Where-Object { $_ -like 'lnx-*' })
-$sqlVms = @($vmNames | Where-Object { $_ -like 'win-sql-*' })
+$winVms = @($deployedFleet | Where-Object { $_.osType -eq 'Windows' } | Select-Object -ExpandProperty name)
+$lnxVms = @($deployedFleet | Where-Object { $_.osType -eq 'Linux' } | Select-Object -ExpandProperty name)
+$monitorFleet = @($deployedFleet | Where-Object { $_.supportsAzureMonitor -eq $true })
+$monitorVms = @($monitorFleet | Select-Object -ExpandProperty name)
+$monitorWindowsVms = @($monitorFleet | Where-Object { $_.osType -eq 'Windows' } | Select-Object -ExpandProperty name)
+$monitorLinuxVms = @($monitorFleet | Where-Object { $_.osType -eq 'Linux' } | Select-Object -ExpandProperty name)
+$vmInsightsFleet = @($deployedFleet | Where-Object { $_.supportsVmInsights -eq $true })
+$vmInsightsWindowsVms = @($vmInsightsFleet | Where-Object { $_.osType -eq 'Windows' } | Select-Object -ExpandProperty name)
+$changeTrackingFleet = @($deployedFleet | Where-Object { $_.supportsChangeTracking -eq $true })
+$changeTrackingWindowsVms = @($changeTrackingFleet | Where-Object { $_.osType -eq 'Windows' } | Select-Object -ExpandProperty name)
+$changeTrackingLinuxVms = @($changeTrackingFleet | Where-Object { $_.osType -eq 'Linux' } | Select-Object -ExpandProperty name)
+$sqlVms = @($deployedFleet | Where-Object { $_.supportsSql -eq $true } | Select-Object -ExpandProperty name)
+$arcOnlyVms = @($deployedFleet | Where-Object { $_.supportsAzureMonitor -ne $true } | Select-Object -ExpandProperty name)
+
+if ($deployedFleet.Count -gt 0) {
+    $fleetSummary = $deployedFleet | Group-Object osTier | ForEach-Object { '{0}={1}' -f $_.Name, $_.Count }
+    Write-Step "On-prem fleet: $($deployedFleet.Count) deployed entries ($($fleetSummary -join ', ')); $($monitorVms.Count) Monitor-supported, $($arcOnlyVms.Count) Arc-control-plane-only"
+}
 
 # Phase 2.5: Create Change Tracking DCR (must wait for solution to provision tables)
 Write-Header 'Phase 2.5 — Change Tracking DCR (post-Bicep)'
@@ -353,14 +462,15 @@ $lnxFile = Join-Path $libDir 'arc-lnx.sh'
 # Phase 5: Arc onboarding (parallel, skips already-Connected machines)
 Write-Header 'Phase 5 — Arc onboarding (parallel)'
 $alreadyArc = (az connectedmachine list -g $arcRg --query "[].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-$toOnboard = $vmNames | Where-Object { $_ -notin $alreadyArc }
-if (-not $toOnboard) {
+$toOnboardFleet = @($deployedFleet | Where-Object { $_.name -notin $alreadyArc })
+if (-not $toOnboardFleet) {
     Write-Ok 'All VMs already Arc-onboarded — skipping'
 } else {
-    Write-Step "Onboarding $($toOnboard.Count) of $($vmNames.Count) VMs..."
+    Write-Step "Onboarding $($toOnboardFleet.Count) of $($vmNames.Count) VMs..."
     $jobs = @()
-    foreach ($vm in $toOnboard) {
-        $isWin = $vm -like 'win-*'
+    foreach ($machine in $toOnboardFleet) {
+        $vm = $machine.name
+        $isWin = $machine.osType -eq 'Windows'
         $jobs += Start-Job -Name "onboard-$vm" -ScriptBlock {
             param($vm, $isWin, $infraRg, $f)
             $cmdId = if ($isWin) { 'RunPowerShellScript' } else { 'RunShellScript' }
@@ -386,13 +496,20 @@ $ok = Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Arc Connected
 if (-not $ok) { throw 'Timed out waiting for all Arc machines to be Connected' }
 Write-Ok 'All Arc machines Connected'
 
+Write-Step 'Tagging Arc machines with OS, monitoring, and control-plane metadata...'
+foreach ($machine in $deployedFleet) {
+    $tagArgs = Get-ArcMachineTagArgs -Machine $machine
+    az connectedmachine update -g $arcRg -n $($machine.name) --tags $tagArgs --only-show-errors -o none
+}
+Write-Ok 'Arc machine tags updated'
+
 Remove-Item $libDir -Recurse -Force
 
 # Phase 6: AMA (Windows via Arc, Linux via Azure VM) + DCR associations to Arc resource
 Write-Header 'Phase 6 — Azure Monitor Agent + DCR associations'
 
 $jobs = @()
-foreach ($vm in $winVms) {
+foreach ($vm in $monitorWindowsVms) {
     $jobs += Start-Job -ScriptBlock {
         param($vm, $rg)
         az connectedmachine extension create -g $rg --machine-name $vm `
@@ -401,7 +518,7 @@ foreach ($vm in $winVms) {
           --only-show-errors -o tsv 2>&1 | Out-Null
     } -ArgumentList $vm, $arcRg
 }
-foreach ($vm in $lnxVms) {
+foreach ($vm in $monitorLinuxVms) {
     $jobs += Start-Job -ScriptBlock {
         param($vm, $rg)
         az vm extension set -g $rg --vm-name $vm -n AzureMonitorLinuxAgent `
@@ -409,31 +526,41 @@ foreach ($vm in $lnxVms) {
           --only-show-errors -o tsv 2>&1 | Out-Null
     } -ArgumentList $vm, $infraRg
 }
-Write-Step "Installing AMA on $($vmNames.Count) machines (parallel)..."
-$jobs | Wait-Job -Timeout 1800 | Out-Null
-$jobs | ForEach-Object { Remove-Job $_ -Force }
-Write-Ok 'AMA installs submitted'
+if ($jobs.Count -gt 0) {
+    Write-Step "Installing AMA on $($monitorVms.Count) Monitor-supported machines (parallel)..."
+    $jobs | Wait-Job -Timeout 1800 | Out-Null
+    $jobs | ForEach-Object { Remove-Job $_ -Force }
+    Write-Ok 'AMA installs submitted'
+} else {
+    Write-Warn 'No Monitor-supported machines in the deployed fleet — skipping AMA installs'
+}
 
-Write-Step 'Associating DCRs (core + VMI + CT) with each Arc resource...'
-foreach ($vm in $vmNames) {
+$dcraCount = 0
+Write-Step 'Associating DCRs only with Monitor-supported Arc resources...'
+foreach ($machine in $monitorFleet) {
+    $vm = $machine.name
     $resId = "/subscriptions/$SubscriptionId/resourceGroups/$arcRg/providers/Microsoft.HybridCompute/machines/$vm"
     foreach ($pair in @(
-        @{ name = "dcra-core-$vm"; id = $dcrCoreId }
-        @{ name = "dcra-vmi-$vm";  id = $dcrVmiId }
-        @{ name = "dcra-ct-$vm";   id = $dcrCtId }
-    )) {
+        @{ name = "dcra-core-$vm"; id = $dcrCoreId; enabled = $machine.supportsAzureMonitor }
+        @{ name = "dcra-vmi-$vm";  id = $dcrVmiId; enabled = $machine.supportsVmInsights }
+        @{ name = "dcra-ct-$vm";   id = $dcrCtId; enabled = $machine.supportsChangeTracking }
+    ) | Where-Object { $_.enabled -eq $true }) {
         $body = @{ properties = @{ dataCollectionRuleId = $pair.id } }
         Invoke-AzRest -Method Put `
             -Url "https://management.azure.com$resId/providers/Microsoft.Insights/dataCollectionRuleAssociations/$($pair.name)?api-version=2022-06-01" `
             -Body $body | Out-Null
+        $dcraCount++
     }
 }
-Write-Ok "DCRAs created for $($vmNames.Count) machines × 3 rules"
+Write-Ok "DCRAs created: $dcraCount associations across $($monitorVms.Count) Monitor-supported machines"
+if ($arcOnlyVms.Count -gt 0) {
+    Write-Ok "Arc-control-plane-only machines skipped for AMA/DCR/VM Insights/Change Tracking: $($arcOnlyVms -join ', ')"
+}
 
-# Phase 7: Dependency Agent (Windows only — Ubuntu kernel unsupported)
-Write-Header 'Phase 7 — Dependency Agent (Windows only)'
+# Phase 7: Dependency Agent (Windows VM Insights-supported only)
+Write-Header 'Phase 7 — Dependency Agent (VM Insights-supported Windows only)'
 $jobs = @()
-foreach ($vm in $winVms) {
+foreach ($vm in $vmInsightsWindowsVms) {
     $jobs += Start-Job -ScriptBlock {
         param($vm, $rg)
         az connectedmachine extension create -g $rg --machine-name $vm `
@@ -442,14 +569,18 @@ foreach ($vm in $winVms) {
           --only-show-errors -o tsv 2>&1 | Out-Null
     } -ArgumentList $vm, $arcRg
 }
-$jobs | Wait-Job -Timeout 1800 | Out-Null
-$jobs | ForEach-Object { Remove-Job $_ -Force }
-Write-Ok 'Dependency Agent installed on Windows VMs'
+if ($jobs.Count -gt 0) {
+    $jobs | Wait-Job -Timeout 1800 | Out-Null
+    $jobs | ForEach-Object { Remove-Job $_ -Force }
+    Write-Ok 'Dependency Agent installed on VM Insights-supported Windows VMs'
+} else {
+    Write-Warn 'No VM Insights-supported Windows machines — skipping Dependency Agent'
+}
 
-# Phase 8: Change Tracking extension (both OSes)
+# Phase 8: Change Tracking extension (supported OSes only)
 Write-Header 'Phase 8 — Change Tracking extension'
 $jobs = @()
-foreach ($vm in $winVms) {
+foreach ($vm in $changeTrackingWindowsVms) {
     $jobs += Start-Job -ScriptBlock {
         param($vm, $rg)
         az connectedmachine extension create -g $rg --machine-name $vm `
@@ -458,7 +589,7 @@ foreach ($vm in $winVms) {
           --only-show-errors -o tsv 2>&1 | Out-Null
     } -ArgumentList $vm, $arcRg
 }
-foreach ($vm in $lnxVms) {
+foreach ($vm in $changeTrackingLinuxVms) {
     $jobs += Start-Job -ScriptBlock {
         param($vm, $rg)
         az connectedmachine extension create -g $rg --machine-name $vm `
@@ -467,13 +598,17 @@ foreach ($vm in $lnxVms) {
           --only-show-errors -o tsv 2>&1 | Out-Null
     } -ArgumentList $vm, $arcRg
 }
-$jobs | Wait-Job -Timeout 1800 | Out-Null
-$jobs | ForEach-Object { Remove-Job $_ -Force }
-Write-Ok 'Change Tracking extension installed'
+if ($jobs.Count -gt 0) {
+    $jobs | Wait-Job -Timeout 1800 | Out-Null
+    $jobs | ForEach-Object { Remove-Job $_ -Force }
+    Write-Ok 'Change Tracking extension installed on supported machines'
+} else {
+    Write-Warn 'No Change Tracking-supported machines — skipping extension'
+}
 
 # Phase 9: SQL install
 if ($SkipSqlInstall) {
-    Write-Warn 'SkipSqlInstall set — skipping SQL Server install on win-sql-* hosts'
+    Write-Warn 'SkipSqlInstall set — skipping SQL Server install on fleet entries with supportsSql=true'
 } elseif ($sqlVms) {
     Write-Header "Phase 9 — Installing SQL Server 2022 Developer on $($sqlVms.Count) hosts (~20 min)"
     $sqlScriptPath = Join-Path $env:TEMP "sql-install-$(Get-Random).ps1"
@@ -592,7 +727,7 @@ foreach ($wb in $nseilazSet) {
 
 # Phase 12: validation
 Write-Header 'Phase 12 — Validation'
-if ($DeployArcOnPrem -and $vmNames.Count -gt 0) {
+if ($DeployArcOnPrem -and $monitorVms.Count -gt 0) {
 Write-Step 'Waiting up to 10 min for first Heartbeats...'
 $lawCustId = $workspaceCustomerId
 $ok = Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Heartbeat' -Condition {
@@ -603,13 +738,13 @@ $ok = Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Heartbeat' -C
         $r = Invoke-RestMethod -Method Post -Headers $hdr -Body $body `
           -Uri "https://api.loganalytics.io/v1/workspaces/$lawCustId/query"
         $hosts = if ($r.tables[0].rows) { $r.tables[0].rows[0][0] } else { 0 }
-        return $hosts -ge $vmNames.Count
+        return $hosts -ge $monitorVms.Count
     } catch { return $false }
 }
-if ($ok) { Write-Ok "Heartbeat received from all $($vmNames.Count) hosts" }
+if ($ok) { Write-Ok "Heartbeat received from all $($monitorVms.Count) Monitor-supported hosts" }
 else { Write-Warn "Heartbeat not yet from all hosts — check portal, may need a few more minutes" }
 } else {
-    Write-Warn 'DeployArcOnPrem is false or no VM outputs were returned — skipping Arc Heartbeat validation'
+    Write-Warn 'DeployArcOnPrem is false or no Monitor-supported VM outputs were returned — skipping Arc Heartbeat validation'
 }
 
 Write-Header '🎉 Deploy complete'

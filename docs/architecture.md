@@ -17,8 +17,8 @@ flowchart TB
             WB[Workbook<br/>Estate Overview]
             AG[Action Group<br/>email]
             AR[Alert rule<br/>heartbeat missing >10m]
-            ARC1[/Arc machine<br/>win-app-01..03/]
-            ARC2[/Arc machine<br/>win-sql-01..02/]
+            ARC1[/Arc machine<br/>win-app-01..03<br/>WS2016/2019/2022/]
+            ARC2[/Arc machine<br/>win-sql-01..02<br/>WS2019/2022/]
             ARC3[/Arc machine<br/>lnx-app-01..03/]
             SQL1[/Arc SQL instance/]
         end
@@ -28,8 +28,8 @@ flowchart TB
             NSG[NSG nsg-arc-demo]
             NAT[NAT Gateway<br/>+ public IP]
             KV[(Key Vault<br/>admin password)]
-            VM1[Azure VM<br/>win-app-01..03]
-            VM2[Azure VM<br/>win-sql-01..02]
+            VM1[Azure VM<br/>win-app-01..03<br/>config-driven image]
+            VM2[Azure VM<br/>win-sql-01..02<br/>config-driven image]
             VM3[Azure VM<br/>lnx-app-01..03]
             SCHED[8× auto-shutdown<br/>schedule @ 19:00]
         end
@@ -85,14 +85,16 @@ Keeping them separate makes the demo flow read correctly in the portal (the cust
 ## Data flow
 
 1. **Azure VMs** boot and the deploy script installs the **Connected Machine Agent** (`azcmagent`) with `MSFT_ARC_TEST=true` (officially supported for demo scenarios) so it registers a **Microsoft.HybridCompute/machines** resource in `rg-arc-demo`.
-2. The deploy script then installs three extensions on each Arc machine:
-   - **AzureMonitorAgent** (or **AzureMonitorWindowsAgent**) — collects perf, events, syslog.
-   - **DependencyAgentWindows** (Windows only — Ubuntu kernel unsupported) — feeds the VM Insights Map.
-   - **ChangeTracking-Windows** / **ChangeTracking-Linux** — tracks file/software/registry/service changes.
-3. Each Arc machine has **three DCR associations** (core / VM Insights / Change Tracking). The DCRs route to the same workspace.
-4. **Defender for Servers Plan 2** is enabled at subscription scope; it auto-deploys the MDE extension and (for SQL hosts) the Defender for SQL extension.
-5. **MCSB + NIST 800-53 r5** policy initiatives are assigned at subscription scope — their results power the regulatory compliance scorecard in Defender for Cloud (~12h to first populate).
-6. The **Estate Overview workbook** pulls all of the above into one persona-ordered dashboard.
+2. The deploy script tags every Arc machine with OS tier, Monitor tier, ESU eligibility, inventory, Update Manager assessment, Defender, and Machine Configuration metadata.
+3. For fleet entries with `supportsAzureMonitor=true`, the deploy script installs **AzureMonitorAgent** (or **AzureMonitorWindowsAgent**) and associates the core DCR.
+4. For entries with `supportsVmInsights=true`, it associates the VM Insights DCR and installs **DependencyAgentWindows**. Pre-2016 Windows and unvalidated Linux tiers are excluded.
+5. For entries with `supportsChangeTracking=true`, it associates the Change Tracking DCR and installs the Change Tracking extension.
+6. **Defender for Servers Plan 2** is enabled at subscription scope; it auto-deploys the MDE extension and (for SQL hosts) the Defender for SQL extension.
+7. **MCSB + NIST 800-53 r5** policy initiatives are assigned at subscription scope — their results power the regulatory compliance scorecard in Defender for Cloud (~12h to first populate).
+8. The **Estate Overview workbook** pulls all of the above into one persona-ordered dashboard.
+
+The fleet schema and legacy OS treatment are documented in
+[`legacy-os-fleet.md`](legacy-os-fleet.md).
 
 ## Networking
 

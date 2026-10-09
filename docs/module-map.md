@@ -18,10 +18,11 @@ The deployment intentionally splits resources into two groups:
   infrastructure: VNet, NSG, Key Vault, simulated on-prem Azure VMs, VM NICs,
   auto-shutdown schedules, and active-state NAT Gateway/public IP.
 
-Current fleet shape is hard-coded from counts in `bicep/main.bicep:147-166`:
-5 Windows Server 2022 VMs (first two named `win-sql-01..02`, remaining app
-hosts) plus 3 Ubuntu 22.04 app hosts. `scripts/Deploy-ArcDemo.ps1` then performs
-all imperative lifecycle work after Bicep completes.
+Current fleet shape is config-driven by the `onPremFleet` array in
+`bicep/main.bicep`: Windows Server image tiers, Linux image tiers, role, SQL
+eligibility, Monitor support, and ESU surfacing are data, not name/count logic.
+`scripts/Deploy-ArcDemo.ps1` then performs all imperative lifecycle work after
+Bicep completes and gates Monitor payloads from the fleet metadata.
 
 ## Bicep entry point and modules
 
@@ -112,8 +113,9 @@ all imperative lifecycle work after Bicep completes.
 - `keyVaultName` required (`main.bicep:31-32`).
 - `adminUsername` = `azureuser` (`main.bicep:34-35`).
 - `adminPassword` secure required (`main.bicep:37-39`).
-- `windowsVmCount` = `5`, allowed 1-20 (`main.bicep:41-44`).
-- `linuxVmCount` = `3`, allowed 0-20 (`main.bicep:46-49`).
+- `onPremFleet` = default mixed WS2016/WS2019/WS2022 + Ubuntu fleet; each
+  entry carries role, OS image, Monitor support, SQL support, deployment mode,
+  and ESU eligibility metadata.
 - `vmSize` = `Standard_B2as_v2` (`main.bicep:51-52`).
 - `autoShutdownTime` = `1900` (`main.bicep:54-55`).
 - `autoShutdownTimezone` = `Cen. Australia Standard Time` (`main.bicep:57-58`).
@@ -148,7 +150,8 @@ creates an ephemeral ARM deployment parameter JSON file at
 - `scripts/Deploy-ArcDemo.ps1` (`Deploy-ArcDemo.ps1:73-86`):
   - Required: `SubscriptionId`, `TenantId`, `AdminEmail`.
   - Defaults: `Location = australiaeast`, `NamePrefix = arc-demo`,
-    `WindowsVmCount = 5`, `LinuxVmCount = 3`,
+    `OnPremFleetPath = ''` (use Bicep's default fleet), deprecated
+    compatibility counts `WindowsVmCount = 5`, `LinuxVmCount = 3`,
     `VmSize = Standard_B2as_v2`, `AutoShutdownTime = 1900`,
     `AutoShutdownTimezone = Cen. Australia Standard Time`,
     `BudgetAmount = 200`, `SkipSqlInstall = $false`.

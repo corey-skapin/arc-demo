@@ -38,15 +38,145 @@ param adminUsername string = 'azureuser'
 @secure()
 param adminPassword string
 
-@description('Number of Windows VMs (first 2 will host SQL)')
-@minValue(1)
-@maxValue(20)
-param windowsVmCount int = 5
-
-@description('Number of Linux VMs')
-@minValue(0)
-@maxValue(20)
-param linuxVmCount int = 3
+@description('On-premises-simulated Arc fleet. Each object defines the VM name, role, OS image, monitoring support, SQL support, ESU eligibility, and deployment mode.')
+param onPremFleet array = [
+  {
+    name: 'win-sql-01'
+    role: 'sql'
+    osType: 'Windows'
+    osTier: 'WS2022'
+    imagePublisher: 'MicrosoftWindowsServer'
+    imageOffer: 'WindowsServer'
+    imageSku: '2022-datacenter-azure-edition'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor'
+    supportsAzureMonitor: true
+    supportsVmInsights: true
+    supportsChangeTracking: true
+    supportsSql: true
+    esuEligible: false
+  }
+  {
+    name: 'win-sql-02'
+    role: 'sql'
+    osType: 'Windows'
+    osTier: 'WS2019'
+    imagePublisher: 'MicrosoftWindowsServer'
+    imageOffer: 'WindowsServer'
+    imageSku: '2019-datacenter-gensecond'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor'
+    supportsAzureMonitor: true
+    supportsVmInsights: true
+    supportsChangeTracking: true
+    supportsSql: true
+    esuEligible: false
+  }
+  {
+    name: 'win-app-01'
+    role: 'app'
+    osType: 'Windows'
+    osTier: 'WS2016'
+    imagePublisher: 'MicrosoftWindowsServer'
+    imageOffer: 'WindowsServer'
+    imageSku: '2016-Datacenter'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor'
+    supportsAzureMonitor: true
+    supportsVmInsights: true
+    supportsChangeTracking: true
+    supportsSql: false
+    esuEligible: true
+  }
+  {
+    name: 'win-app-02'
+    role: 'app'
+    osType: 'Windows'
+    osTier: 'WS2019'
+    imagePublisher: 'MicrosoftWindowsServer'
+    imageOffer: 'WindowsServer'
+    imageSku: '2019-datacenter-gensecond'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor'
+    supportsAzureMonitor: true
+    supportsVmInsights: true
+    supportsChangeTracking: true
+    supportsSql: false
+    esuEligible: false
+  }
+  {
+    name: 'win-app-03'
+    role: 'app'
+    osType: 'Windows'
+    osTier: 'WS2022'
+    imagePublisher: 'MicrosoftWindowsServer'
+    imageOffer: 'WindowsServer'
+    imageSku: '2022-datacenter-azure-edition'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor'
+    supportsAzureMonitor: true
+    supportsVmInsights: true
+    supportsChangeTracking: true
+    supportsSql: false
+    esuEligible: false
+  }
+  {
+    name: 'lnx-app-01'
+    role: 'app'
+    osType: 'Linux'
+    osTier: 'Ubuntu22.04'
+    imagePublisher: 'Canonical'
+    imageOffer: '0001-com-ubuntu-server-jammy'
+    imageSku: '22_04-lts-gen2'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor-no-vmi-map'
+    supportsAzureMonitor: true
+    supportsVmInsights: false
+    supportsChangeTracking: true
+    supportsSql: false
+    esuEligible: false
+  }
+  {
+    name: 'lnx-app-02'
+    role: 'app'
+    osType: 'Linux'
+    osTier: 'Ubuntu22.04'
+    imagePublisher: 'Canonical'
+    imageOffer: '0001-com-ubuntu-server-jammy'
+    imageSku: '22_04-lts-gen2'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor-no-vmi-map'
+    supportsAzureMonitor: true
+    supportsVmInsights: false
+    supportsChangeTracking: true
+    supportsSql: false
+    esuEligible: false
+  }
+  {
+    name: 'lnx-app-03'
+    role: 'app'
+    osType: 'Linux'
+    osTier: 'Ubuntu22.04'
+    imagePublisher: 'Canonical'
+    imageOffer: '0001-com-ubuntu-server-jammy'
+    imageSku: '22_04-lts-gen2'
+    imageVersion: 'latest'
+    deploymentMode: 'azure-vm'
+    monitorTier: 'full-monitor-no-vmi-map'
+    supportsAzureMonitor: true
+    supportsVmInsights: false
+    supportsChangeTracking: true
+    supportsSql: false
+    esuEligible: false
+  }
+]
 
 @description('VM SKU')
 param vmSize string = 'Standard_B2as_v2'
@@ -156,42 +286,38 @@ module kvMod 'modules/keyvault.bicep' = {
   }
 }
 
-// Build the VM list. Windows first (so the first 2 become SQL hosts), then Linux.
-var winVms = [for i in range(0, windowsVmCount): {
-  name: i < 2 ? 'win-sql-0${i + 1}' : 'win-app-0${i - 1}'
-  role: i < 2 ? 'sql' : 'app'
-  osType: 'Windows'
-  publisher: 'MicrosoftWindowsServer'
-  offer: 'WindowsServer'
-  sku: '2022-datacenter-azure-edition'
-}]
+var requestedOnPremVms = [for vm in onPremFleet: union(vm, {
+  deployed: vm.deploymentMode == 'azure-vm'
+  arcControlPlaneCoverage: [
+    'inventory'
+    'update-manager-assessment'
+    'defender-for-servers'
+    'machine-configuration'
+    'esu-eligibility-surfacing'
+  ]
+})]
 
-var lnxVms = [for i in range(0, linuxVmCount): {
-  name: 'lnx-app-0${i + 1}'
-  role: 'app'
-  osType: 'Linux'
-  publisher: 'Canonical'
-  offer: '0001-com-ubuntu-server-jammy'
-  sku: '22_04-lts-gen2'
-}]
-
-var requestedOnPremVms = concat(winVms, lnxVms)
-var arcOnPremVms = deployArcOnPrem ? requestedOnPremVms : []
-
-module vmMods 'modules/vm.bicep' = [for vm in arcOnPremVms: {
+module vmMods 'modules/vm.bicep' = [for vm in requestedOnPremVms: if (deployArcOnPrem && vm.deployed) {
   name: 'vm-${vm.name}'
   scope: rgInfra
   params: {
     vmName: vm.name
     location: location
-    tags: union(tags, { role: vm.role, ostype: toLower(vm.osType) })
+    tags: union(tags, {
+      role: vm.role
+      ostype: toLower(vm.osType)
+      osTier: toLower(vm.osTier)
+      monitorTier: vm.monitorTier
+      esuEligible: vm.esuEligible ? 'true' : 'false'
+    })
     vmSize: vmSize
     subnetId: networkMod.outputs.subnetId
     adminUsername: adminUsername
     adminPassword: adminPassword
-    imagePublisher: vm.publisher
-    imageOffer: vm.offer
-    imageSku: vm.sku
+    imagePublisher: vm.imagePublisher
+    imageOffer: vm.imageOffer
+    imageSku: vm.imageSku
+    imageVersion: vm.imageVersion
     osType: vm.osType
     autoShutdownTime: autoShutdownTime
     autoShutdownTimezone: autoShutdownTimezone
@@ -258,13 +384,35 @@ module budgetMod 'modules/budget.bicep' = {
 
 // ----- Outputs -----
 
+var outputOnPremVms = deployArcOnPrem ? requestedOnPremVms : []
+var outputVmNames = [for vm in outputOnPremVms: vm.deployed ? vm.name : '']
+
 output arcResourceGroup string = rgArc.name
 output infraResourceGroup string = rgInfra.name
 output workspaceId string = workspaceMod.outputs.workspaceId
 output workspaceCustomerId string = workspaceMod.outputs.customerId
 output keyVaultName string = kvMod.outputs.vaultName
 output subnetId string = networkMod.outputs.subnetId
-output vmNames array = [for vm in arcOnPremVms: vm.name]
+output vmNames array = outputVmNames
+output vmFleet array = [for vm in outputOnPremVms: {
+  name: vm.name
+  role: vm.role
+  osType: vm.osType
+  osTier: vm.osTier
+  imagePublisher: vm.imagePublisher
+  imageOffer: vm.imageOffer
+  imageSku: vm.imageSku
+  imageVersion: vm.imageVersion
+  deploymentMode: vm.deploymentMode
+  deployed: vm.deployed
+  monitorTier: vm.monitorTier
+  supportsAzureMonitor: vm.supportsAzureMonitor
+  supportsVmInsights: vm.supportsVmInsights
+  supportsChangeTracking: vm.supportsChangeTracking
+  supportsSql: vm.supportsSql
+  esuEligible: vm.esuEligible
+  arcControlPlaneCoverage: vm.arcControlPlaneCoverage
+}]
 output dcrCoreId string = dcrsMod.outputs.dcrCoreId
 output dcrVmiId string = dcrsMod.outputs.dcrVmiId
 output dcrCtId string = dcrsMod.outputs.dcrCtId

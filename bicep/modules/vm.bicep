@@ -32,6 +32,9 @@ param imageOffer string
 @description('Image SKU')
 param imageSku string
 
+@description('Image version')
+param imageVersion string = 'latest'
+
 @description('OS type: Windows or Linux')
 @allowed(['Windows', 'Linux'])
 param osType string
@@ -78,7 +81,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
         publisher: imagePublisher
         offer: imageOffer
         sku: imageSku
-        version: 'latest'
+        version: imageVersion
       }
       osDisk: {
         // Disk name intentionally omitted so Azure auto-generates one. Hardcoding
@@ -109,4 +112,5 @@ resource shutdown 'Microsoft.DevTestLab/schedules@2018-09-15' = {
 }
 
 output vmId string = vm.id
+output vmName string = vm.name
 output principalId string = vm.identity.principalId

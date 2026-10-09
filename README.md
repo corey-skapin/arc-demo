@@ -7,10 +7,11 @@
 
 ## What you get
 
-8 Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` — fully supported for demo/test scenarios), wired into a Log Analytics workspace with Defender for Servers Plan 2, VM Insights, Change Tracking, MCSB + NIST policy initiatives, and a custom workbook tuned for the persona-first demo flow described in [`docs/runsheet.md`](docs/runsheet.md).
+8 config-driven Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` — fully supported for demo/test scenarios), wired into a Log Analytics workspace with Defender for Servers Plan 2, VM Insights, Change Tracking, MCSB + NIST policy initiatives, and a custom workbook tuned for the persona-first demo flow described in [`docs/runsheet.md`](docs/runsheet.md).
 
-- 5 × Windows Server 2022 (2 of which run **SQL Server 2022 Developer**, Arc-enabled with BPA)
+- 5 × Windows Server across WS2016/WS2019/WS2022 by default (2 of which run **SQL Server 2022 Developer**, Arc-enabled with BPA)
 - 3 × Ubuntu 22.04 LTS
+- Legacy Windows tiers such as WS2012R2 are supported in the fleet config as Arc-control-plane-only entries; see [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md)
 - VM SKU: `Standard_B2as_v2` (2 vCPU / 8 GiB AMD burstable, ~AUD 50/mo each)
 - Defender for Servers **Plan 2** at subscription scope
 - DevTest-Labs auto-shutdown at 19:00 local time
@@ -94,8 +95,9 @@ All scripts accept parameters. The most useful:
 | `-DeployAzureVMs` | `$false` | Toggle placeholder for the future Azure-native VM workload |
 | `-DeployContainerApps` | `$false` | Toggle placeholder for the future Container Apps workload |
 | `-DeployAks` | `$false` | Toggle placeholder for the future AKS workload |
-| `-WindowsVmCount` | `5` | Number of Windows VMs (2 reserved for SQL) |
-| `-LinuxVmCount` | `3` | Number of Linux VMs |
+| `-OnPremFleetPath` | *(empty)* | Optional JSON fleet array. Omit to use the default WS2016/2019/2022 + Ubuntu mix |
+| `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
+| `-LinuxVmCount` | `3` | Deprecated compatibility generator for an Ubuntu count-based fleet |
 | `-VmSize` | `Standard_B2as_v2` | VM SKU. Probe with `--validate` before changing |
 | `-AdminEmail` | *(required)* | Email for budget + alert notifications |
 | `-AutoShutdownTime` | `1900` | 24-hour HHMM in `AutoShutdownTimezone` |
@@ -111,6 +113,7 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | File | Purpose |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | What gets deployed and how it's wired together |
+| [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md) | Fleet schema, legacy OS image approach, and Monitor gating rules |
 | [`docs/runbook.md`](docs/runbook.md) | The original step-by-step build runbook |
 | [`docs/runsheet.md`](docs/runsheet.md) | Live demo walkthrough — what to click and what to say |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |
