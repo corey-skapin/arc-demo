@@ -4,6 +4,7 @@
 
 .DESCRIPTION
     - Recreates the NAT Gateway + public IP and attaches to the demo subnet.
+    - Restores optional Container Apps workload minimum replicas to 1.
     - Starts all VMs in parallel and waits until they're running.
     - Restarts the Arc agent (himds) and AMA on each VM so Connected status
       returns quickly without waiting for the default 5-min reconnect.
@@ -67,6 +68,20 @@ if (-not $attached) {
     az network vnet subnet update -g $infraRg --vnet-name $vnet -n $subnet --nat-gateway $natGw --only-show-errors -o none
     Write-Ok 'Attached NAT GW to subnet'
 } else { Write-Ok 'NAT GW already attached' }
+
+Write-Step 'Restoring optional Container Apps workload replicas...'
+$containerApps = (az containerapp list -g $infraRg --query "[?tags.workload=='container-app'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
+if ($containerApps) {
+    foreach ($app in $containerApps) {
+        az containerapp update -g $infraRg -n $app `
+            --set-env-vars SIMULATE_CRASH=false `
+            --min-replicas 1 --max-replicas 1 `
+            --only-show-errors -o none
+        Write-Ok "Restored $app to one replica"
+    }
+} else {
+    Write-Ok 'No Container Apps workload found'
+}
 
 # 2. Start VMs
 Write-Step 'Starting all VMs (parallel)...'

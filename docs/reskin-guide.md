@@ -48,6 +48,16 @@ Keep constant unless the lab requirement changes:
    .\scripts\Remove-ArcDemo.ps1 -SkinPath .\config\demo-skin.json -WhatIf
    ```
 
+## Off state vs cleanup
+
+`Hibernate-ArcDemo.ps1` is the weekend/off state. It deallocates VMs, deletes the
+NAT Gateway and public IP, resets any optional Container App fault, and scales
+Container Apps to zero-min replicas. It keeps the estate intact: resource groups,
+Arc records, workbooks, DCRs, alerts, disks, and Log Analytics remain.
+
+`Remove-ArcDemo.ps1` is cleanup deletion. Use it only when the demo should be
+permanently removed.
+
 ## Examples
 
 DTF/default: use `config\demo-skin.json` as-is, replacing only `notifications.email` and runtime subscription/tenant.

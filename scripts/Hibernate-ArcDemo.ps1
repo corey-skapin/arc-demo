@@ -5,6 +5,7 @@
 .DESCRIPTION
     - Deallocates all VMs in the infra RG.
     - Deletes the NAT Gateway and its public IP (saves ~AUD 55/mo).
+    - Resets demo Container Apps faults and scales Container Apps to zero.
     - Leaves Log Analytics, DCRs, workbook, alerts, Arc records and disks
       in place so the demo is intact and ready to wake up.
 
@@ -44,18 +45,37 @@ Write-Header "Hibernating Arc demo ($arcRg + $infraRg)"
 
 Write-Step 'Deallocating all VMs (parallel)...'
 $vms = (az vm list -g $infraRg --query "[].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-if (-not $vms) { Write-Warn "No VMs found in $infraRg — nothing to deallocate"; return }
-foreach ($v in $vms) {
-    if ($PSCmdlet.ShouldProcess($v, 'deallocate')) {
-        az vm deallocate -g $infraRg -n $v --no-wait --only-show-errors -o none
+if (-not $vms) {
+    Write-Warn "No VMs found in $infraRg — skipping VM deallocation"
+} else {
+    foreach ($v in $vms) {
+        if ($PSCmdlet.ShouldProcess($v, 'deallocate')) {
+            az vm deallocate -g $infraRg -n $v --no-wait --only-show-errors -o none
+        }
     }
+
+    Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'all VMs deallocated' -Condition {
+        $running = (az vm list -g $infraRg --show-details --query "[?powerState=='VM running'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
+        return $running.Count -eq 0
+    } | Out-Null
+    Write-Ok 'All VMs deallocated'
 }
 
-Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'all VMs deallocated' -Condition {
-    $running = (az vm list -g $infraRg --show-details --query "[?powerState=='VM running'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-    return $running.Count -eq 0
-} | Out-Null
-Write-Ok 'All VMs deallocated'
+Write-Step 'Scaling optional Container Apps workload to zero...'
+$containerApps = (az containerapp list -g $infraRg --query "[?tags.workload=='container-app'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
+if ($containerApps) {
+    foreach ($app in $containerApps) {
+        if ($PSCmdlet.ShouldProcess($app, 'set SIMULATE_CRASH=false and min replicas 0')) {
+            az containerapp update -g $infraRg -n $app `
+                --set-env-vars SIMULATE_CRASH=false `
+                --min-replicas 0 --max-replicas 1 `
+                --only-show-errors -o none
+            Write-Ok "Scaled $app to zero-min replicas"
+        }
+    }
+} else {
+    Write-Ok 'No Container Apps workload found'
+}
 
 # NAT GW must be deleted BEFORE the public IP (PIP delete fails if still allocated)
 Write-Step 'Detaching + deleting NAT Gateway...'

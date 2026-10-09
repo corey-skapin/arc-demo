@@ -85,15 +85,19 @@ When it finishes, open the workbook URL printed at the end (or navigate to **Azu
 
 Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor walkthrough with optional Azure-native workload beats.
 
-### Hibernate / activate
+### Off state / activate
 
 ```powershell
-# After a demo — drops to ~AUD 35/mo
-.\scripts\Hibernate-ArcDemo.ps1
+# After a demo — deallocates VMs, removes NAT, and scales optional Container Apps to zero
+.\scripts\Hibernate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
 
 # Before the next demo — back to demo-ready in ~5-8 min
-.\scripts\Activate-ArcDemo.ps1
+.\scripts\Activate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
 ```
+
+This is distinct from cleanup deletion: it preserves resource groups, Arc records,
+workbooks, DCRs, alerts, disks, and Log Analytics so the demo can be reactivated.
+Use `Remove-ArcDemo.ps1` only when you want to delete the estate permanently.
 
 ### Remove permanently
 
