@@ -90,6 +90,10 @@ All scripts accept parameters. The most useful:
 |---|---|---|
 | `-Location` | `australiaeast` | Azure region for all resources |
 | `-NamePrefix` | `arc-demo` | Used for RG / resource names (e.g. `rg-arc-demo`, `kv-arc-demo-xxxx`) |
+| `-DeployArcOnPrem` | `$true` | Deploy the on-prem-simulated Arc VM workload |
+| `-DeployAzureVMs` | `$false` | Toggle placeholder for the future Azure-native VM workload |
+| `-DeployContainerApps` | `$false` | Toggle placeholder for the future Container Apps workload |
+| `-DeployAks` | `$false` | Toggle placeholder for the future AKS workload |
 | `-WindowsVmCount` | `5` | Number of Windows VMs (2 reserved for SQL) |
 | `-LinuxVmCount` | `3` | Number of Linux VMs |
 | `-VmSize` | `Standard_B2as_v2` | VM SKU. Probe with `--validate` before changing |

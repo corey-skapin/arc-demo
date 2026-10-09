@@ -66,6 +66,18 @@ param budgetAmount int = 200
 @description('Name prefix for derived resource names (vnet, nsg, ag, alert)')
 param namePrefix string = 'arc-demo'
 
+@description('Deploy the on-premises-simulated Azure VMs and Arc-enable them through the deployment script.')
+param deployArcOnPrem bool = true
+
+@description('Deploy the optional Azure-native VM workload. Placeholder only until the workload module is implemented.')
+param deployAzureVMs bool = false
+
+@description('Deploy the optional Container Apps workload. Placeholder only until the workload module is implemented.')
+param deployContainerApps bool = false
+
+@description('Deploy the optional AKS workload. Placeholder only until the workload module is implemented.')
+param deployAks bool = false
+
 @description('Optional existing NAT Gateway resource ID to attach to the subnet. Pass through from the deploy script so re-runs preserve the Activate-ArcDemo NAT GW attachment. Leave empty on fresh deploys.')
 param existingNatGatewayId string = ''
 
@@ -163,9 +175,10 @@ var lnxVms = [for i in range(0, linuxVmCount): {
   sku: '22_04-lts-gen2'
 }]
 
-var allVms = concat(winVms, lnxVms)
+var requestedOnPremVms = concat(winVms, lnxVms)
+var arcOnPremVms = deployArcOnPrem ? requestedOnPremVms : []
 
-module vmMods 'modules/vm.bicep' = [for vm in allVms: {
+module vmMods 'modules/vm.bicep' = [for vm in arcOnPremVms: {
   name: 'vm-${vm.name}'
   scope: rgInfra
   params: {
@@ -184,6 +197,36 @@ module vmMods 'modules/vm.bicep' = [for vm in allVms: {
     autoShutdownTimezone: autoShutdownTimezone
   }
 }]
+
+module azureVmsMod 'modules/azure-vms.bicep' = if (deployAzureVMs) {
+  name: 'azure-vms-deploy'
+  scope: rgInfra
+  params: {
+    location: location
+    tags: tags
+    namePrefix: namePrefix
+  }
+}
+
+module containerAppsMod 'modules/container-apps.bicep' = if (deployContainerApps) {
+  name: 'container-apps-deploy'
+  scope: rgInfra
+  params: {
+    location: location
+    tags: tags
+    namePrefix: namePrefix
+  }
+}
+
+module aksMod 'modules/aks.bicep' = if (deployAks) {
+  name: 'aks-deploy'
+  scope: rgInfra
+  params: {
+    location: location
+    tags: tags
+    namePrefix: namePrefix
+  }
+}
 
 // ----- Subscription-scoped pieces -----
 
@@ -219,7 +262,7 @@ output workspaceId string = workspaceMod.outputs.workspaceId
 output workspaceCustomerId string = workspaceMod.outputs.customerId
 output keyVaultName string = kvMod.outputs.vaultName
 output subnetId string = networkMod.outputs.subnetId
-output vmNames array = [for vm in allVms: vm.name]
+output vmNames array = [for vm in arcOnPremVms: vm.name]
 output dcrCoreId string = dcrsMod.outputs.dcrCoreId
 output dcrVmiId string = dcrsMod.outputs.dcrVmiId
 output dcrCtId string = dcrsMod.outputs.dcrCtId

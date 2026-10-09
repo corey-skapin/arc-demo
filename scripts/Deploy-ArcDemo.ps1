@@ -38,6 +38,21 @@
     Used to derive resource group and resource names. Default: arc-demo.
     Two RGs will be created: rg-<prefix> and rg-<prefix>-infra.
 
+.PARAMETER DeployArcOnPrem
+    Deploy the on-premises-simulated Azure VMs and Arc-enable them. Default true.
+
+.PARAMETER DeployAzureVMs
+    Pass through the optional Azure-native VM workload toggle. Default false
+    until the workload module is implemented.
+
+.PARAMETER DeployContainerApps
+    Pass through the optional Container Apps workload toggle. Default false
+    until the workload module is implemented.
+
+.PARAMETER DeployAks
+    Pass through the optional AKS workload toggle. Default false until the
+    workload module is implemented.
+
 .PARAMETER WindowsVmCount
     Number of Windows VMs. Default 5. The FIRST 2 become the SQL hosts (so set
     >= 2 if you want SQL).
@@ -76,6 +91,10 @@ param(
     [Parameter(Mandatory)][string]$AdminEmail,
     [string]$Location = 'australiaeast',
     [string]$NamePrefix = 'arc-demo',
+    [bool]$DeployArcOnPrem = $true,
+    [bool]$DeployAzureVMs = $false,
+    [bool]$DeployContainerApps = $false,
+    [bool]$DeployAks = $false,
     [ValidateRange(1, 20)][int]$WindowsVmCount = 5,
     [ValidateRange(0, 20)][int]$LinuxVmCount = 3,
     [string]$VmSize = 'Standard_B2as_v2',
@@ -132,6 +151,10 @@ if ($existingBudgetStart) {
         arcResourceGroup      = @{ value = $arcRg }
         infraResourceGroup    = @{ value = $infraRg }
         namePrefix            = @{ value = $NamePrefix }
+        deployArcOnPrem       = @{ value = $DeployArcOnPrem }
+        deployAzureVMs        = @{ value = $DeployAzureVMs }
+        deployContainerApps   = @{ value = $DeployContainerApps }
+        deployAks             = @{ value = $DeployAks }
         existingNatGatewayId    = @{ value = $existingNatGwId }
         existingBudgetStartDate = @{ value = $existingBudgetStart }
         tenantId              = @{ value = $TenantId }
@@ -179,13 +202,13 @@ Write-Ok 'Bicep deployment complete'
 
 $workspaceId = $outputs.workspaceId.value
 $workspaceCustomerId = $outputs.workspaceCustomerId.value
-$vmNames     = $outputs.vmNames.value
+$vmNames     = @(@($outputs.vmNames.value) | Where-Object { $_ })
 $dcrCoreId   = $outputs.dcrCoreId.value
 $dcrVmiId    = $outputs.dcrVmiId.value
 $dcrCtId     = $outputs.dcrCtId.value
-$winVms = $vmNames | Where-Object { $_ -like 'win-*' }
-$lnxVms = $vmNames | Where-Object { $_ -like 'lnx-*' }
-$sqlVms = $vmNames | Where-Object { $_ -like 'win-sql-*' }
+$winVms = @($vmNames | Where-Object { $_ -like 'win-*' })
+$lnxVms = @($vmNames | Where-Object { $_ -like 'lnx-*' })
+$sqlVms = @($vmNames | Where-Object { $_ -like 'win-sql-*' })
 
 # Phase 2.5: Create Change Tracking DCR (must wait for solution to provision tables)
 Write-Header 'Phase 2.5 — Change Tracking DCR (post-Bicep)'
@@ -279,6 +302,7 @@ if (-not $attached) {
     Write-Ok 'NAT Gateway attached to subnet'
 } else { Write-Ok 'Subnet already has NAT GW' }
 
+if ($DeployArcOnPrem -and $vmNames.Count -gt 0) {
 # Phase 4: Arc onboarding SPN (idempotent)
 Write-Header 'Phase 4 — Arc onboarding service principal'
 $spnAppId = az ad sp list --display-name "sp-$NamePrefix-onboard" --query "[0].appId" -o tsv 2>$null
@@ -500,6 +524,10 @@ Get-Service MSSQLSERVER | Format-List Name, Status
     }
     Write-Ok 'WindowsAgent.SqlServer extension installed on SQL hosts'
 }
+} else {
+    Write-Header 'Phases 4-10 — Arc server workload'
+    Write-Warn 'DeployArcOnPrem is false or no VM outputs were returned — skipping Arc onboarding, Arc agent extensions, DCR associations, Dependency Agent, Change Tracking extension, and SQL phases'
+}
 
 # Phase 11: Workbooks (custom + Nic's library)
 Write-Header 'Phase 11 — Workbooks'
@@ -564,6 +592,7 @@ foreach ($wb in $nseilazSet) {
 
 # Phase 12: validation
 Write-Header 'Phase 12 — Validation'
+if ($DeployArcOnPrem -and $vmNames.Count -gt 0) {
 Write-Step 'Waiting up to 10 min for first Heartbeats...'
 $lawCustId = $workspaceCustomerId
 $ok = Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Heartbeat' -Condition {
@@ -579,6 +608,9 @@ $ok = Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Heartbeat' -C
 }
 if ($ok) { Write-Ok "Heartbeat received from all $($vmNames.Count) hosts" }
 else { Write-Warn "Heartbeat not yet from all hosts — check portal, may need a few more minutes" }
+} else {
+    Write-Warn 'DeployArcOnPrem is false or no VM outputs were returned — skipping Arc Heartbeat validation'
+}
 
 Write-Header '🎉 Deploy complete'
 $wbUrl = "https://portal.azure.com/#@$TenantId/resource$wbId"
