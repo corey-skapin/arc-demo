@@ -202,7 +202,7 @@ param deployArcOnPrem bool = true
 @description('Deploy the optional monitored Azure-native VM workload.')
 param deployAzureVMs bool = false
 
-@description('Deploy the optional Container Apps workload. Placeholder only until the workload module is implemented.')
+@description('Deploy the optional Container Apps workload with an inducible SIMULATE_CRASH fault and RestartCount alert.')
 param deployContainerApps bool = false
 
 @description('Deploy the optional AKS workload with Container Insights, a sample workload, and a pod restart alert.')
@@ -349,6 +349,7 @@ module containerAppsMod 'modules/container-apps.bicep' = if (deployContainerApps
     location: location
     tags: tags
     namePrefix: namePrefix
+    actionGroupId: alertsMod.outputs.actionGroupId
   }
 }
 
@@ -423,6 +424,10 @@ output vmFleet array = [for vm in outputOnPremVms: {
 }]
 output azureVmNames array = deployAzureVMs ? azureVmsMod!.outputs.vmNames : []
 output azureVmResourceIds array = deployAzureVMs ? azureVmsMod!.outputs.resourceIds : []
+output containerAppName string = deployContainerApps ? containerAppsMod!.outputs.containerAppName : ''
+output containerAppFqdn string = deployContainerApps ? containerAppsMod!.outputs.containerAppFqdn : ''
+output containerAppIds array = deployContainerApps ? containerAppsMod!.outputs.containerAppIds : []
+output containerAppAlertRuleId string = deployContainerApps ? containerAppsMod!.outputs.alertRuleId : ''
 output dcrCoreId string = dcrsMod.outputs.dcrCoreId
 output dcrVmiId string = dcrsMod.outputs.dcrVmiId
 output dcrCtId string = dcrsMod.outputs.dcrCtId

@@ -94,7 +94,7 @@ All scripts accept parameters. The most useful:
 | `-NamePrefix` | `arc-demo` | Used for RG / resource names (e.g. `rg-arc-demo`, `kv-arc-demo-xxxx`) |
 | `-DeployArcOnPrem` | `$true` | Deploy the on-prem-simulated Arc VM workload |
 | `-DeployAzureVMs` | `$false` | Deploy a monitored Azure-native Windows VM workload (not Arc-enabled) |
-| `-DeployContainerApps` | `$false` | Toggle placeholder for the future Container Apps workload |
+| `-DeployContainerApps` | `$false` | Deploy a tiny Azure Container App with a `SIMULATE_CRASH` fault toggle and RestartCount alert |
 | `-DeployAks` | `$false` | Toggle placeholder for the future AKS workload |
 | `-OnPremFleetPath` | *(empty)* | Optional JSON fleet array. Omit to use the default WS2016/2019/2022 + Ubuntu mix |
 | `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
@@ -115,6 +115,7 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | What gets deployed and how it's wired together |
 | [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md) | Fleet schema, legacy OS image approach, and Monitor gating rules |
+| [`docs/container-app-fault.md`](docs/container-app-fault.md) | Optional Container App fault/repair commands and alert mechanism |
 | [`docs/runbook.md`](docs/runbook.md) | The original step-by-step build runbook |
 | [`docs/runsheet.md`](docs/runsheet.md) | Live demo walkthrough — what to click and what to say |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |

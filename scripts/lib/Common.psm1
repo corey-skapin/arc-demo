@@ -117,7 +117,8 @@ function Test-Prerequisites {
         'Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
         'Microsoft.AzureArcData', 'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement',
         'Microsoft.Insights', 'Microsoft.Security', 'Microsoft.PolicyInsights',
-        'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.Storage', 'Microsoft.Logic'
+        'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.Storage', 'Microsoft.Logic',
+        'Microsoft.App'
     )
     Write-Step "Ensuring $($rps.Count) resource providers registered..."
     foreach ($rp in $rps) {

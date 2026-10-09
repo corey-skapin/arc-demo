@@ -32,6 +32,9 @@ flowchart TB
             VM2[Azure VM<br/>win-sql-01..02<br/>config-driven image]
             VM3[Azure VM<br/>lnx-app-01..03]
             NATIVEVM[Optional Azure-native VM<br/>az-arcdemo-01]
+            CA[Optional Container App<br/>ca-arc-demo-fault]
+            CAE[Container Apps env<br/>cae-arc-demo]
+            CAR[Metric alert<br/>RestartCount > 3]
             SCHED[8× auto-shutdown<br/>schedule @ 19:00]
         end
 
@@ -56,6 +59,9 @@ flowchart TB
 
     NATIVEVM -.->|AMA + DCR assoc| DCR1
     NATIVEVM -.->|VM Insights DCR assoc| DCR2
+    CA --> CAE
+    CA -. platform metric .-> CAR
+    CAR --> AG
 
     DCR1 --> LAW
     DCR2 --> LAW
@@ -97,6 +103,7 @@ Keeping them separate makes the demo flow read correctly in the portal (the cust
 7. **MCSB + NIST 800-53 r5** policy initiatives are assigned at subscription scope — their results power the regulatory compliance scorecard in Defender for Cloud (~12h to first populate).
 8. The **Estate Overview workbook** pulls all of the above into one persona-ordered dashboard.
 9. If `-DeployAzureVMs $true` is set, an extra Azure-native Windows VM is deployed in the infra resource group and monitored directly with AMA + DCR associations to the same workspace. It is not Arc-enabled, so it appears as a native Azure VM in Monitor.
+10. If `-DeployContainerApps $true` is set, a tiny Container App is deployed in the infra resource group with `SIMULATE_CRASH=false` by default. Flipping that environment variable creates a crash-looping revision; the `RestartCount` platform metric alert emails the same Action Group.
 
 The fleet schema and legacy OS treatment are documented in
 [`legacy-os-fleet.md`](legacy-os-fleet.md).

@@ -45,8 +45,8 @@
     Deploy a monitored Azure-native VM workload (not Arc-enabled). Default false.
 
 .PARAMETER DeployContainerApps
-    Pass through the optional Container Apps workload toggle. Default false
-    until the workload module is implemented.
+    Deploy the optional Container App workload with a SIMULATE_CRASH fault
+    switch and RestartCount alert. Default false.
 
 .PARAMETER DeployAks
     Pass through the optional AKS workload toggle. Default false until the
