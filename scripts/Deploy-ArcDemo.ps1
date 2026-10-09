@@ -225,8 +225,14 @@ $principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $Ten
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"
-$kvName  = New-KeyVaultName -Prefix "kv-$($NamePrefix -replace '-','')"
-$kvName  = $kvName.Substring(0, [Math]::Min(24, $kvName.Length))
+$kvPrefix = "kv-$($NamePrefix -replace '-','')"
+$kvName = az keyvault list -g $infraRg --query "[?starts_with(name, '$kvPrefix')].name | [0]" -o tsv 2>$null
+if ($kvName) {
+    Write-Step "Found existing Key Vault $kvName — preserving for idempotent redeploy"
+} else {
+    $kvName  = New-KeyVaultName -Prefix $kvPrefix
+    $kvName  = $kvName.Substring(0, [Math]::Min(24, $kvName.Length))
+}
 
 # Phase 2: generate password, deploy Bicep
 Write-Header 'Generating admin password + deploying Bicep'
@@ -471,6 +477,7 @@ New-Item -ItemType Directory -Path $libDir -Force | Out-Null
 $winOnboard = @"
 `$env:MSFT_ARC_TEST = 'true'
 [Environment]::SetEnvironmentVariable('MSFT_ARC_TEST','true','Machine')
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest -Uri https://aka.ms/AzureConnectedMachineAgent -OutFile `$env:TEMP\acm.msi -UseBasicParsing
 Start-Process msiexec.exe -Wait -ArgumentList "/i `$env:TEMP\acm.msi /qn"
 & "`$env:ProgramW6432\AzureConnectedMachineAgent\azcmagent.exe" connect ``
