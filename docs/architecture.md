@@ -31,6 +31,7 @@ flowchart TB
             VM1[Azure VM<br/>win-app-01..03<br/>config-driven image]
             VM2[Azure VM<br/>win-sql-01..02<br/>config-driven image]
             VM3[Azure VM<br/>lnx-app-01..03]
+            NATIVEVM[Optional Azure-native VM<br/>az-arcdemo-01]
             SCHED[8× auto-shutdown<br/>schedule @ 19:00]
         end
 
@@ -52,6 +53,9 @@ flowchart TB
     ARC3 -.->|DCR assoc| DCR1
     ARC1 -.->|DCR assoc| DCR2
     ARC1 -.->|DCR assoc| DCR3
+
+    NATIVEVM -.->|AMA + DCR assoc| DCR1
+    NATIVEVM -.->|VM Insights DCR assoc| DCR2
 
     DCR1 --> LAW
     DCR2 --> LAW
@@ -92,6 +96,7 @@ Keeping them separate makes the demo flow read correctly in the portal (the cust
 6. **Defender for Servers Plan 2** is enabled at subscription scope; it auto-deploys the MDE extension and (for SQL hosts) the Defender for SQL extension.
 7. **MCSB + NIST 800-53 r5** policy initiatives are assigned at subscription scope — their results power the regulatory compliance scorecard in Defender for Cloud (~12h to first populate).
 8. The **Estate Overview workbook** pulls all of the above into one persona-ordered dashboard.
+9. If `-DeployAzureVMs $true` is set, an extra Azure-native Windows VM is deployed in the infra resource group and monitored directly with AMA + DCR associations to the same workspace. It is not Arc-enabled, so it appears as a native Azure VM in Monitor.
 
 The fleet schema and legacy OS treatment are documented in
 [`legacy-os-fleet.md`](legacy-os-fleet.md).

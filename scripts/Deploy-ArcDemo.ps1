@@ -42,8 +42,7 @@
     Deploy the on-premises-simulated Azure VMs and Arc-enable them. Default true.
 
 .PARAMETER DeployAzureVMs
-    Pass through the optional Azure-native VM workload toggle. Default false
-    until the workload module is implemented.
+    Deploy a monitored Azure-native VM workload (not Arc-enabled). Default false.
 
 .PARAMETER DeployContainerApps
     Pass through the optional Container Apps workload toggle. Default false

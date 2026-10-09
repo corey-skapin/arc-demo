@@ -199,7 +199,7 @@ param namePrefix string = 'arc-demo'
 @description('Deploy the on-premises-simulated Azure VMs and Arc-enable them through the deployment script.')
 param deployArcOnPrem bool = true
 
-@description('Deploy the optional Azure-native VM workload. Placeholder only until the workload module is implemented.')
+@description('Deploy the optional monitored Azure-native VM workload.')
 param deployAzureVMs bool = false
 
 @description('Deploy the optional Container Apps workload. Placeholder only until the workload module is implemented.')
@@ -331,6 +331,14 @@ module azureVmsMod 'modules/azure-vms.bicep' = if (deployAzureVMs) {
     location: location
     tags: tags
     namePrefix: namePrefix
+    subnetId: networkMod.outputs.subnetId
+    adminUsername: adminUsername
+    adminPassword: adminPassword
+    vmSize: vmSize
+    autoShutdownTime: autoShutdownTime
+    autoShutdownTimezone: autoShutdownTimezone
+    dcrCoreId: dcrsMod.outputs.dcrCoreId
+    dcrVmiId: dcrsMod.outputs.dcrVmiId
   }
 }
 
@@ -413,6 +421,8 @@ output vmFleet array = [for vm in outputOnPremVms: {
   esuEligible: vm.esuEligible
   arcControlPlaneCoverage: vm.arcControlPlaneCoverage
 }]
+output azureVmNames array = deployAzureVMs ? azureVmsMod!.outputs.vmNames : []
+output azureVmResourceIds array = deployAzureVMs ? azureVmsMod!.outputs.resourceIds : []
 output dcrCoreId string = dcrsMod.outputs.dcrCoreId
 output dcrVmiId string = dcrsMod.outputs.dcrVmiId
 output dcrCtId string = dcrsMod.outputs.dcrCtId

@@ -12,6 +12,7 @@
 - 5 × Windows Server across WS2016/WS2019/WS2022 by default (2 of which run **SQL Server 2022 Developer**, Arc-enabled with BPA)
 - 3 × Ubuntu 22.04 LTS
 - Legacy Windows tiers such as WS2012R2 are supported in the fleet config as Arc-control-plane-only entries; see [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md)
+- Optional Azure-native Windows VM workload (`-DeployAzureVMs $true`) with Azure Monitor Agent and DCR associations to the shared workspace
 - VM SKU: `Standard_B2as_v2` (2 vCPU / 8 GiB AMD burstable, ~AUD 50/mo each)
 - Defender for Servers **Plan 2** at subscription scope
 - DevTest-Labs auto-shutdown at 19:00 local time
@@ -92,7 +93,7 @@ All scripts accept parameters. The most useful:
 | `-Location` | `australiaeast` | Azure region for all resources |
 | `-NamePrefix` | `arc-demo` | Used for RG / resource names (e.g. `rg-arc-demo`, `kv-arc-demo-xxxx`) |
 | `-DeployArcOnPrem` | `$true` | Deploy the on-prem-simulated Arc VM workload |
-| `-DeployAzureVMs` | `$false` | Toggle placeholder for the future Azure-native VM workload |
+| `-DeployAzureVMs` | `$false` | Deploy a monitored Azure-native Windows VM workload (not Arc-enabled) |
 | `-DeployContainerApps` | `$false` | Toggle placeholder for the future Container Apps workload |
 | `-DeployAks` | `$false` | Toggle placeholder for the future AKS workload |
 | `-OnPremFleetPath` | *(empty)* | Optional JSON fleet array. Omit to use the default WS2016/2019/2022 + Ubuntu mix |
