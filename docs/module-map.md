@@ -12,8 +12,9 @@ then shows a centrally managed Arc/Monitor operations plane.
 The deployment intentionally splits resources into two groups:
 
 - `rg-<prefix>` / default `rg-arc-demo`: customer-facing Arc and observability
-  resources: Arc server records, Arc SQL records, Log Analytics workspace, DCRs,
-  workbooks, alert rule, and action group.
+  resources: Arc server records, optional Arc SQL records only when the advanced
+  SQL path is explicitly enabled, Log Analytics workspace, DCRs, workbooks,
+  alert rule, and action group.
 - `rg-<prefix>-infra` / default `rg-arc-demo-infra`: hidden backing Azure lab
   infrastructure: VNet, NSG, Key Vault, simulated on-prem Azure VMs, VM NICs,
   auto-shutdown schedules, and active-state NAT Gateway/public IP.
@@ -150,7 +151,7 @@ creates an ephemeral ARM deployment parameter JSON file at
     compatibility counts `WindowsVmCount = 5`, `LinuxVmCount = 3`,
     `VmSize = Standard_B2as_v2`, `AutoShutdownTime = 1900`,
     `AutoShutdownTimezone = Cen. Australia Standard Time`,
-    `BudgetAmount = 200`, `SkipSqlInstall = $false`.
+    `BudgetAmount = 200`, `InstallSql = $false` (SQL is optional/advanced).
   - Inherits `-WhatIf` from `CmdletBinding(SupportsShouldProcess)` and uses
     `$WhatIfPreference` at lines 161-167 to run `az deployment sub what-if` and
     stop before changing resources.
@@ -211,9 +212,11 @@ creates an ephemeral ARM deployment parameter JSON file at
    (`Deploy-ArcDemo.ps1:409-423`).
 9. Install Change Tracking extensions for both OS families
    (`Deploy-ArcDemo.ps1:425-448`).
-10. Optionally install SQL Server 2022 Developer on `win-sql-*` hosts
+10. Optionally install SQL Server 2022 Developer on SQL-capable hosts only when
+    `-InstallSql` or `workloads.installSql=true` is used
     (`Deploy-ArcDemo.ps1:450-491`).
 11. Arc-enable SQL with `WindowsAgent.SqlServer`, BPA, and paid licensing flag
+    only on that explicit optional SQL path
     (`Deploy-ArcDemo.ps1:493-501`).
 12. Publish the custom workbook and five vendored Nic Seilaz workbooks
     (`Deploy-ArcDemo.ps1:504-563`).
@@ -294,8 +297,9 @@ polling (`Common.psm1:173-199`), and name/password helpers
 - Defender:
   - Defender for Servers Plan 2 is enabled at subscription scope by
     `defender.bicep:5-11`.
-  - Arc SQL host extension is installed after SQL setup and enables SQL
-    management/BPA (`Deploy-ArcDemo.ps1:493-501`).
+  - Arc SQL host extension is skipped by default; when the optional advanced SQL
+    path is explicitly enabled, it is installed after SQL setup and enables SQL
+    management/BPA.
 
 - Policy:
   - MCSB and NIST 800-53 Rev. 5 are subscription-scope assignments with
@@ -357,7 +361,8 @@ new workload toggles are false; do not add SRE dependencies.
    - AMA and DCR associations: `Deploy-ArcDemo.ps1:367-407`.
    - Dependency Agent: `Deploy-ArcDemo.ps1:409-423`.
    - Change Tracking extension: `Deploy-ArcDemo.ps1:425-448`.
-   - SQL install / Arc SQL extension: `Deploy-ArcDemo.ps1:450-501`.
+   - Optional SQL install / Arc SQL extension: skip by default; run only when
+     `-InstallSql` or `workloads.installSql=true` is used.
    - Heartbeat validation count: `Deploy-ArcDemo.ps1:565-581`.
    If `deployArcOnPrem = false`, these phases should skip cleanly rather than
    waiting on zero or missing Arc machines.
@@ -411,8 +416,8 @@ receive unsupported Azure Monitor Agent payloads.
    - Change Tracking extension at `Deploy-ArcDemo.ps1:425-448`.
    Legacy 2008/2012 entries must be excluded from these loops.
 
-7. Gate SQL install and Arc SQL extension by fleet role/capability instead of the
-   `win-sql-*` naming convention (`Deploy-ArcDemo.ps1:450-501`).
+7. Gate SQL install and Arc SQL extension by fleet role/capability plus the
+   explicit optional SQL toggle instead of the `win-sql-*` naming convention.
 
 8. Update docs and operator surfaces after implementation:
    - README parameter/customisation table at `README.md:85-100`.

@@ -18,8 +18,8 @@
          only (DCRA against the Arc resource ID — see AGENTS.md Gotcha 3)
       7. Dependency Agent for VM Insights-supported Windows entries only
       8. Change Tracking extension for Change Tracking-supported entries only
-      9. (Optional) SQL Server 2022 Developer install on the 2 SQL hosts
-     10. WindowsAgent.SqlServer extension to Arc-enable SQL
+      9. (Optional/advanced) SQL Server 2022 Developer install on SQL-capable hosts
+     10. (Optional/advanced) WindowsAgent.SqlServer extension to Arc-enable SQL
      11. Workbook upload
      12. Post-deploy validation (heartbeat, alert rule, workbook URL)
 
@@ -87,8 +87,15 @@
 .PARAMETER BudgetAmount
     Monthly budget threshold in subscription currency. Default 200.
 
+.PARAMETER InstallSql
+    Optional/advanced path. Install SQL Server 2022 Developer and the Arc SQL
+    extension on fleet entries with supportsSql=true. Skipped by default because
+    SQL is not required for the core Arc/Monitor/SRE story and live validation
+    previously hung during SQL setup.
+
 .PARAMETER SkipSqlInstall
-    Skip the SQL Server install step (~20 min saved). Useful for iteration.
+    Deprecated compatibility switch. The default path already skips SQL; keep
+    this only for older automation that explicitly passes it.
 
 .PARAMETER WhatIf
     Show the Bicep what-if output and stop.
@@ -117,6 +124,7 @@ param(
     [string]$AutoShutdownTimezone = 'Cen. Australia Standard Time',
     [int]$BudgetAmount = 200,
     [string]$SkinPath = '',
+    [switch]$InstallSql,
     [switch]$SkipSqlInstall
 )
 
@@ -137,7 +145,15 @@ if (-not $PSBoundParameters.ContainsKey('VmSize')) { $VmSize = Get-DemoSkinValue
 if (-not $PSBoundParameters.ContainsKey('AutoShutdownTime')) { $AutoShutdownTime = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTime' -Default $AutoShutdownTime }
 if (-not $PSBoundParameters.ContainsKey('AutoShutdownTimezone')) { $AutoShutdownTimezone = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTimezone' -Default $AutoShutdownTimezone }
 if (-not $PSBoundParameters.ContainsKey('BudgetAmount')) { $BudgetAmount = [int](Get-DemoSkinValue -Skin $skin -Path 'cost.monthlyBudgetAmount' -Default $BudgetAmount) }
-if (-not $PSBoundParameters.ContainsKey('SkipSqlInstall') -and [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.skipSqlInstall' -Default $false)) { $SkipSqlInstall = [switch]::Present }
+if ($PSBoundParameters.ContainsKey('InstallSql') -and $PSBoundParameters.ContainsKey('SkipSqlInstall')) {
+    throw 'Use only one of -InstallSql or -SkipSqlInstall. SQL is skipped by default; pass -InstallSql only for the optional advanced SQL path.'
+}
+$defaultInstallSql = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.installSql' -Default (-not [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.skipSqlInstall' -Default $true)))
+if ($PSBoundParameters.ContainsKey('SkipSqlInstall')) {
+    $InstallSql = -not [bool]$SkipSqlInstall
+} elseif (-not $PSBoundParameters.ContainsKey('InstallSql')) {
+    $InstallSql = [switch]$defaultInstallSql
+}
 if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
     throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
 }
@@ -894,11 +910,15 @@ if ($jobs.Count -gt 0) {
     Write-Warn 'No Change Tracking-supported machines — skipping extension'
 }
 
-# Phase 9: SQL install
-if ($SkipSqlInstall) {
-    Write-Warn 'SkipSqlInstall set — skipping SQL Server install on fleet entries with supportsSql=true'
+# Phase 9: Optional/advanced SQL install
+if (-not $InstallSql) {
+    if ($sqlVms) {
+        Write-Warn 'SQL optional/advanced path disabled — leaving SQL-capable hosts as Windows VMs. Pass -InstallSql or set workloads.installSql=true to install SQL Server and Arc SQL/BPA (not live-validated after the SQL setup hang).'
+    } else {
+        Write-Warn 'No SQL-capable machines — skipping SQL optional/advanced path'
+    }
 } elseif ($sqlVms) {
-    Write-Header "Phase 9 — Installing SQL Server 2022 Developer on $($sqlVms.Count) hosts (~20 min)"
+    Write-Header "Phase 9 — Optional/advanced SQL Server 2022 Developer install on $($sqlVms.Count) hosts (~20 min; not live-validated)"
     $sqlScriptPath = Join-Path $env:TEMP "sql-install-$(Get-Random).ps1"
     $sqlScript = @'
 $ErrorActionPreference = 'Stop'
@@ -946,6 +966,8 @@ Get-Service MSSQLSERVER | Format-List Name, Status
           --only-show-errors -o tsv | Out-Null
     }
     Write-Ok 'WindowsAgent.SqlServer extension installed on SQL hosts'
+} else {
+    Write-Warn 'InstallSql requested but no deployed fleet entries have supportsSql=true — skipping SQL optional/advanced path'
 }
 } else {
     Write-Header 'Phases 4-10 — Arc server workload'
@@ -1044,6 +1066,10 @@ Write-Host "  Infra RG:  https://portal.azure.com/#@$TenantId/resource/subscript
 Write-Host ''
 Write-Host "  Next steps:"
 Write-Host "    - Wait ~12h for MCSB/NIST compliance scores to populate."
-Write-Host "    - Wait ~30-60m for SQL Best Practice Assessment first run."
+if ($InstallSql) {
+    Write-Host "    - Wait ~30-60m for SQL Best Practice Assessment first run."
+} else {
+    Write-Host "    - SQL Server/Arc SQL/BPA was skipped by default; use -InstallSql only for the optional advanced path."
+}
 Write-Host "    - Use ./scripts/Hibernate-ArcDemo.ps1 between demos (~AUD 35/mo)."
 Write-Host ''

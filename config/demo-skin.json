@@ -17,7 +17,7 @@
     "deployAzureVMs": false,
     "deployContainerApps": false,
     "deployAks": false,
-    "skipSqlInstall": false,
+    "installSql": false,
     "onPremFleetPath": ""
   },
   "compute": {

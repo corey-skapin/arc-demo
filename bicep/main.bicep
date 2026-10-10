@@ -1,5 +1,5 @@
 // Main Bicep template for the Arc demo. Deploys EVERYTHING that can be done
-// declaratively. Imperative steps (Arc onboarding, SQL install, agent restarts,
+// declaratively. Imperative steps (Arc onboarding, optional SQL install, agent restarts,
 // DCR associations to Arc machines, post-deploy validation) are handled by
 // Deploy-ArcDemo.ps1 AFTER this template completes.
 
@@ -38,7 +38,7 @@ param adminUsername string = 'azureuser'
 @secure()
 param adminPassword string
 
-@description('On-premises-simulated Arc fleet. Each object defines the VM name, role, OS image, monitoring support, SQL support, ESU eligibility, and deployment mode.')
+@description('On-premises-simulated Arc fleet. Each object defines the VM name, role, OS image, monitoring support, optional SQL capability, ESU eligibility, and deployment mode.')
 param onPremFleet array = [
   {
     name: 'win-sql-01'

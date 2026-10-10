@@ -171,7 +171,7 @@ az group delete -n rg-skutest --yes --no-wait
 | Name | Size | Image | Role |
 |---|---|---|---|
 | win-app-01..03 | Standard_B2as_v2 | WS 2022 Datacenter Azure Ed. | app |
-| win-sql-01..02 | Standard_B2as_v2 | WS 2022 Datacenter Azure Ed. | sql (SQL installed in Phase 5) |
+| win-sql-01..02 | Standard_B2as_v2 | WS 2022 Datacenter Azure Ed. | SQL-capable Windows hosts; SQL install is optional/advanced |
 | lnx-app-01..03 | Standard_B2as_v2 | Ubuntu 22.04 LTS gen2 | app |
 
 ```powershell
@@ -466,7 +466,7 @@ Two sets of workbooks land in `rg-arc-demo`:
 - **Arc — Machine Intelligence Center** — 360° view of a single Arc machine.
 - **Arc — Asset Inventory** — estate-wide hardware/software roll-up.
 - **Arc — Governance & Compliance (experimental)** — deeper compliance drill-downs.
-- **Arc — SQL Estate Dashboard** — Arc-enabled SQL inventory + BPA.
+- **Arc — SQL Estate Dashboard** — optional Arc-enabled SQL inventory + BPA when the advanced SQL branch is enabled.
 
 All 6 are deployed as shared workbooks via REST PUT (idempotent — re-runs match on the `workbookTag` tag).
 
@@ -479,9 +479,29 @@ Built-in workbooks to pin alongside (no extra config):
 - **Azure Arc → Inventory**
 - **Azure Monitor → VM Insights** (Performance + Map tabs)
 
-## Phase 5 — SQL on Arc
+## Phase 5 — SQL on Arc (optional advanced / not default)
 
-### 5.1 Install SQL Server 2022 Developer on the 2 SQL hosts
+The default scripted demo **skips SQL Server, Arc SQL registration, and BPA**. The core Arc/Monitor/SRE story does not require SQL, and the SQL Server 2022 Developer setup hung during live validation. Keep `win-sql-01` and `win-sql-02` as ordinary Windows Arc servers unless you intentionally enable the advanced DBA branch with:
+
+```powershell
+.\scripts\Deploy-ArcDemo.ps1 `
+  -SubscriptionId <SUB> `
+  -TenantId <TENANT> `
+  -SkinPath .\config\demo-skin.json `
+  -InstallSql
+```
+
+Equivalent skin setting:
+
+```json
+"workloads": {
+  "installSql": true
+}
+```
+
+Treat the remaining Phase 5 steps as reference material until the SQL path is fixed and live-validated.
+
+### 5.1 Install SQL Server 2022 Developer on the 2 SQL-capable hosts
 Headless ISO download + silent setup via `RunPowerShellScript`. ~15-20 min per host.
 
 ```powershell
@@ -514,7 +534,7 @@ foreach ($vm in @('win-sql-01','win-sql-02')) {
 ```
 
 ### 5.2 Install WindowsAgent.SqlServer extension to Arc-enable SQL
-Auto-discovers MSSQL instances and registers them as `Microsoft.AzureArcData/sqlServerInstances`. Enables Best Practice Assessment in the same call. Defender for SQL extension auto-deploys alongside because Defender for Servers Plan 2 is on.
+Auto-discovers MSSQL instances and registers them as `Microsoft.AzureArcData/sqlServerInstances`. Enables Best Practice Assessment in the same call. Defender for SQL extension auto-deploys alongside because Defender for Servers Plan 2 is on. This only runs when `-InstallSql` is explicitly enabled.
 
 ```powershell
 foreach ($vm in @('win-sql-01','win-sql-02')) {
@@ -531,6 +551,8 @@ foreach ($vm in @('win-sql-01','win-sql-02')) {
 - Best Practice Assessment first run takes 30-60 min after extension reports healthy.
 
 Portal: **Azure Arc → SQL Server instances** then drill into each for BPA / Migration / Backup tiles.
+
+Current status: optional/advanced and **not live-validated** after the SQL setup hang; do not use this as part of the default customer run.
 
 ---
 
@@ -619,7 +641,7 @@ Saved as `Scratchpad\arc-demo-teardown.ps1`. Deletes both RGs, both policy assig
 | Resource groups | `rg-arc-demo`, `rg-arc-demo-infra` | australiaeast |
 | Azure VMs | 5 × Win Server 2022, 3 × Ubuntu 22.04 (`Standard_B2as_v2`) | rg-arc-demo-infra |
 | Arc machines | 8 × `Microsoft.HybridCompute/machines` | rg-arc-demo |
-| Arc SQL instances | `win-sql-01`, `win-sql-02` | rg-arc-demo |
+| Arc SQL instances | Optional: `win-sql-01`, `win-sql-02` only after `-InstallSql` | rg-arc-demo |
 | Log Analytics | `law-arc-demo` | rg-arc-demo |
 | DCRs | `dcr-arc-demo`, `dcr-vminsights`, `dcr-changetracking` | rg-arc-demo |
 | Solutions | VMInsights, ChangeTracking | rg-arc-demo |

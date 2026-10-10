@@ -10,7 +10,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 | `azure.namePrefix` | Resource name prefix: `rg-<prefix>`, `law-<prefix>`, alerts, NAT GW, optional workloads. | `arc-demo` |
 | `azure.location` | Azure region. | `australiaeast` |
 | `notifications.email` | Budget and Action Group email receiver. | `you@contoso.com` placeholder |
-| `workloads.*` | Act-1 and optional workload toggles. | Arc on-prem simulation on; optional Azure VM/Container App/AKS off |
+| `workloads.*` | Act-1 and optional workload toggles. | Arc on-prem simulation on; optional Azure VM/Container App/AKS/SQL off |
 | `compute.vmSize` | VM SKU for Arc-simulated and optional native VMs. | `Standard_B2as_v2` |
 | `operations.*` | Auto-shutdown schedule. | 19:00 Cen. Australia Standard Time |
 | `cost.monthlyBudgetAmount` | Subscription budget threshold. | `200` |
@@ -21,7 +21,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 
 Change per customer:
 - `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
-- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all.
+- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all live-validated workloads. Leave `workloads.installSql` as `false` unless you intentionally want the optional advanced SQL branch.
 - `workloads.onPremFleetPath` for a custom OS mix.
 
 Keep constant unless the lab requirement changes:
@@ -62,7 +62,7 @@ permanently removed.
 
 DTF/default: use `config\demo-skin.json` as-is, replacing only `notifications.email` and runtime subscription/tenant.
 
-Dummy customer: compare with `config\dummy-customer.demo-skin.json`; it changes the prefix to `contoso-arc`, workbook title to `Contoso — Hybrid Estate Overview`, turns on Azure VM + Container App, and skips SQL install.
+Dummy customer: compare with `config\dummy-customer.demo-skin.json`; it changes the prefix to `contoso-arc`, workbook title to `Contoso — Hybrid Estate Overview`, turns on Azure VM + Container App, and leaves the optional advanced SQL branch disabled.
 
 ## Remaining constants
 

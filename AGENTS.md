@@ -12,7 +12,7 @@
 A scripted deployment of an **Azure Arc + Azure Monitor** demo environment. It stands up:
 
 - 8 config-driven Azure VMs (Windows Server mix + Ubuntu 22.04 by default) that are then registered as **Arc-enabled servers** (using `MSFT_ARC_TEST=true` — see "Why we Arc-enable Azure VMs" below).
-- 2 of the Windows VMs run SQL Server 2022 Developer, **Arc-enabled** for Best Practice Assessment.
+- 2 of the Windows VMs are SQL-capable hosts. SQL Server 2022 Developer, Arc SQL registration, and BPA are optional/advanced and skipped by default; enable only with `-InstallSql` or `workloads.installSql=true`.
 - A Log Analytics workspace, Data Collection Rules, VM Insights and Change Tracking solutions for supported OS tiers only, Defender for Servers Plan 2, and a custom workbook modelled on a persona-first demo flow.
 - Policy initiatives (MCSB + NIST SP 800-53 Rev 5) for the compliance scorecard tile.
 - A scheduled query alert + Action Group → email for the "alert routing" demo tile.

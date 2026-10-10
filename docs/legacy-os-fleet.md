@@ -20,7 +20,7 @@ tiers that cannot be reliably sourced as Azure Marketplace images.
 | `supportsAzureMonitor` | Enables AMA install and the core DCR association. Set `false` for pre-2016 Windows tiers. |
 | `supportsVmInsights` | Enables VM Insights DCR + Windows Dependency Agent. Set `true` only for supported Windows tiers. |
 | `supportsChangeTracking` | Enables Change Tracking DCR + extension. Set `false` for legacy Windows tiers that cannot run AMA. |
-| `supportsSql` | Marks SQL hosts for SQL Server install and Arc SQL extension. |
+| `supportsSql` | Marks SQL-capable hosts. SQL Server install, Arc SQL extension, and BPA still run only when the optional advanced SQL path is explicitly enabled with `-InstallSql` or `workloads.installSql=true`. |
 | `esuEligible` | Surfaces the ESU discussion in Arc machine tags; it does not buy or configure ESU. |
 
 The deploy script also tags every Arc machine with `osTier`, `monitorTier`,

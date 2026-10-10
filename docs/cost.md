@@ -13,7 +13,7 @@
 
 ## Active state — line items
 
-Assumes the default config (8 VMs, B2as_v2, auto-shutdown at 19:00 local time, leaving roughly 10 hours/day of running time on weekdays and ~5 hours/day on weekends).
+Assumes the default config (8 VMs, B2as_v2, auto-shutdown at 19:00 local time, leaving roughly 10 hours/day of running time on weekdays and ~5 hours/day on weekends). SQL Server/Arc SQL/BPA is skipped by default.
 Optional workloads are shown separately and are not included in the default total.
 
 | Item | Qty | Unit | ~AUD/mo |
@@ -27,6 +27,7 @@ Optional workloads are shown separately and are not included in the default tota
 | NAT public IP (Standard, static) | 1 | ~AUD 5 | **~5** |
 | Action Group / Alert / Workbook / Policy / Workspace | — | free at rest | **0** |
 | Optional Container App workload | 1 tiny consumption app | only when `-DeployContainerApps $true` | **low / usage-based** |
+| Optional advanced SQL branch | 2 SQL-capable hosts | only when `-InstallSql` is explicitly used; not live-validated after setup hang | **not included** |
 | Key Vault (one secret) | 1 | < AUD 1 | **~1** |
 | **Total active** | | | **~AUD 210/mo** |
 

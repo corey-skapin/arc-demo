@@ -137,6 +137,10 @@ The `Test-Prerequisites.ps1` script does this check for you.
 
 ## SQL Best Practice Assessment hasn't run yet
 
+This applies only when the optional advanced SQL path was explicitly enabled with
+`-InstallSql` or `workloads.installSql=true`. The default demo skips SQL Server,
+Arc SQL registration, and BPA.
+
 **Symptom** — Arc SQL instance is registered, Defender shows protected, but the BPA tile in the Arc SQL portal blade is empty.
 
 **Cause** — First BPA scan can take 30-60 min after the `WindowsAgent.SqlServer` extension reaches `Succeeded`.

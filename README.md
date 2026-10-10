@@ -12,7 +12,7 @@ A **standalone Azure Arc + Azure Monitor lab**. It does **not** require Azure SR
 Default deployment:
 
 - 8 config-driven Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` — fully supported for demo/test scenarios)
-- 5 × Windows Server across WS2016/WS2019/WS2022 by default (2 of which run **SQL Server 2022 Developer**, Arc-enabled with BPA)
+- 5 × Windows Server across WS2016/WS2019/WS2022 by default, including 2 SQL-capable Windows hosts (`win-sql-01/02`) that remain plain Windows VMs unless the optional advanced SQL path is explicitly enabled
 - 3 × Ubuntu 22.04 LTS
 - Log Analytics workspace, DCRs, Defender for Servers Plan 2, VM Insights, Change Tracking, MCSB + NIST policy initiatives, heartbeat alert, Action Group, and a custom workbook tuned for [`docs/runsheet.md`](docs/runsheet.md)
 
@@ -64,7 +64,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 # Check you've got what you need
 .\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
 
-# Deploy default Act-1 Arc/Monitor estate (~25-30 min end-to-end)
+# Deploy default Act-1 Arc/Monitor estate. SQL Server/Arc SQL/BPA is skipped by default.
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUB> `
   -TenantId <TENANT> `
@@ -80,6 +80,8 @@ az account set --subscription <SUBSCRIPTION_ID>
 ```
 
 When it finishes, open the workbook URL printed at the end (or navigate to **Azure Arc → Workbooks → "Arc Demo — Estate Overview"** in the portal).
+
+> **Optional advanced SQL path:** SQL Server 2022 Developer install, Arc SQL registration, and BPA are not required for the core Arc/Monitor/SRE story and are currently **not live-validated** after a setup hang. Only enable them for a DBA-specific branch by passing `-InstallSql` (or setting `workloads.installSql` to `true` in the skin) and allow extra time/risk.
 
 ### Use it
 
@@ -122,13 +124,14 @@ All scripts accept parameters. The most useful:
 | `-DeployContainerApps` | `$false` | Deploy a tiny Azure Container App with a `SIMULATE_CRASH` fault toggle and RestartCount alert |
 | `-DeployAks` | `$false` | Deploy AKS with Container Insights, crash-loop sample workload, and pod-restart alert |
 | `-OnPremFleetPath` | *(empty)* | Optional JSON fleet array. Omit to use the default WS2016/2019/2022 + Ubuntu mix |
+| `-InstallSql` | `$false` | Optional advanced path: install SQL Server 2022 Developer, Arc SQL extension, and BPA on SQL-capable hosts. Not required for the default story and currently not live-validated |
 | `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
 | `-LinuxVmCount` | `3` | Deprecated compatibility generator for an Ubuntu count-based fleet |
 | `-VmSize` | `Standard_B2as_v2` | VM SKU. Probe with `--validate` before changing |
 | `-AdminEmail` | skin `notifications.email` | Email for budget + alert notifications |
 | `-AutoShutdownTime` | `1900` | 24-hour HHMM in `AutoShutdownTimezone` |
 | `-AutoShutdownTimezone` | `Cen. Australia Standard Time` | .NET timezone ID for shutdown |
-| `-SkipSqlInstall` | `$false` | Set to skip SQL installation (saves ~20 min) |
+| `-SkipSqlInstall` | *(compatibility)* | Deprecated compatibility switch; SQL is already skipped by default |
 
 Example using only the skin for customer defaults:
 

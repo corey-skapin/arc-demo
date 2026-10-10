@@ -2,7 +2,7 @@
 
 > Story-first walkthrough for a standalone Azure Arc + Azure Monitor demo. No Azure SRE Agent dependency. The later `sre-agent` repo is optional and can consume the alerts produced here.
 >
-> Total time: **20-30 min** with optional workload beats, or **12-15 min** if you skip SQL and optional faults.
+> Total time: **12-15 min** for the default Arc/Monitor path, or **20-30 min** with optional workload beats. SQL Server/Arc SQL/BPA is an optional advanced branch and is skipped by default.
 
 ## 0. Lab shape and workload toggles
 
@@ -22,8 +22,9 @@ These defaults come from `config\demo-skin.json`. To retarget for another custom
 | Arc estate + Azure-native VM comparison | `-DeployAzureVMs $true` |
 | Arc estate + Container App fault alert | `-DeployContainerApps $true` |
 | Arc estate + AKS crash-loop alert | `-DeployAks $true` |
-| Everything available today | `-DeployAzureVMs $true -DeployContainerApps $true -DeployAks $true` |
+| Everything live-validated today | `-DeployAzureVMs $true -DeployContainerApps $true -DeployAks $true` |
 | Azure-native scenarios only | `-DeployArcOnPrem $false -DeployAzureVMs $true -DeployContainerApps $true` |
+| Optional advanced DBA branch | `-InstallSql` (SQL Server + Arc SQL/BPA; not currently live-validated after setup hang) |
 
 Example deploy:
 
@@ -71,7 +72,7 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    - **Machine Configuration** / Guest Configuration view for Arc servers.
    - **Azure Update Manager → Machines** filtered to the demo RG.
    - **Defender for Cloud → Recommendations** and **Regulatory compliance**.
-   - **Azure Arc → SQL Server instances** if SQL install was not skipped.
+   - **Azure Arc → SQL Server instances** only if the optional advanced SQL path was enabled with `-InstallSql`.
    - **rg-arc-demo → Alerts** and **Action group**.
    - If deployed: Container App, AKS cluster, and Azure-native VM in `rg-arc-demo-infra`.
 4. Sanity-check Monitor-supported hosts are reporting:
@@ -164,13 +165,13 @@ ConfigurationChange
 
 Key line: "2016+ gets the full Monitor story; pre-2016 stays Arc-control-plane-only by design."
 
-### 3.8 SQL on Arc (optional, 2 min)
+### 3.8 SQL on Arc (optional advanced, 2 min)
 
-If SQL was installed, open **Azure Arc → SQL Server instances**.
+Skip this beat in the default demo. Only use it when the lab was deployed with `-InstallSql` or `workloads.installSql=true`; the path is currently **not live-validated** after the SQL setup hang.
 
 - Show `win-sql-01` / `win-sql-02`.
 - Mention BPA and SQL inventory as the DBA hook.
-- Skip this beat if `-SkipSqlInstall` was used.
+- If SQL was not explicitly enabled, keep these hosts in the story as ordinary Windows/Arc servers.
 
 ### 3.9 Alerts and action group (2 min)
 
