@@ -28,12 +28,6 @@ param autoShutdownTime string
 @description('.NET timezone ID for auto-shutdown.')
 param autoShutdownTimezone string
 
-@description('Core Data Collection Rule resource ID that sends AMA performance and event data to the shared Log Analytics workspace.')
-param dcrCoreId string
-
-@description('VM Insights Data Collection Rule resource ID that sends InsightsMetrics and dependency data to the shared Log Analytics workspace.')
-param dcrVmiId string
-
 var safePrefix = toLower(replace(namePrefix, '_', '-'))
 var shortPrefix = take(replace(safePrefix, '-', ''), 9)
 var azureVms = [
@@ -113,32 +107,8 @@ resource dependencyAgentWindows 'Microsoft.Compute/virtualMachines/extensions@20
   ]
 }]
 
-resource dcrCoreAssociations 'Microsoft.Insights/dataCollectionRuleAssociations@2022-06-01' = [for (vm, i) in azureVms: {
-  name: 'dcra-core-${vm.name}'
-  scope: nativeVmResources[i]
-  properties: {
-    dataCollectionRuleId: dcrCoreId
-    description: 'Core Arc demo logs and performance for Azure-native VM ${vm.name}.'
-  }
-  dependsOn: [
-    vmMods
-  ]
-}]
-
-resource dcrVmiAssociations 'Microsoft.Insights/dataCollectionRuleAssociations@2022-06-01' = [for (vm, i) in azureVms: if (vm.supportsVmInsights) {
-  name: 'dcra-vmi-${vm.name}'
-  scope: nativeVmResources[i]
-  properties: {
-    dataCollectionRuleId: dcrVmiId
-    description: 'VM Insights data for Azure-native VM ${vm.name}.'
-  }
-  dependsOn: [
-    dependencyAgentWindows
-  ]
-}]
-
-var coreDcrAssociationIds = [for (vm, i) in azureVms: dcrCoreAssociations[i].id]
-var vmiDcrAssociationIds = [for (vm, i) in azureVms: vm.supportsVmInsights ? dcrVmiAssociations[i].id : '']
+var coreDcrAssociationIds = [for (vm, i) in azureVms: '${nativeVmResources[i].id}/providers/Microsoft.Insights/dataCollectionRuleAssociations/dcra-core-${vm.name}']
+var vmiDcrAssociationIds = [for (vm, i) in azureVms: vm.supportsVmInsights ? '${nativeVmResources[i].id}/providers/Microsoft.Insights/dataCollectionRuleAssociations/dcra-vmi-${vm.name}' : '']
 
 output vmNames array = [for vm in azureVms: vm.name]
 output resourceIds array = [for (vm, i) in azureVms: vmMods[i].outputs.vmId]

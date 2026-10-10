@@ -301,6 +301,12 @@ foreach ($vm in $lnxVms) {
 ```
 
 ### 3.2 Create DCR (perf counters + Win events + Linux syslog)
+
+> Maintained script path: `Deploy-ArcDemo.ps1` now defers this core DCR until
+> after Phase 4.1's VM Insights / Change Tracking solutions have provisioned
+> their tables. If you run these manual snippets, create the DCRs after table
+> readiness rather than immediately after workspace creation.
+
 CLI's `az monitor data-collection rule create --rule-file` rejects the standard ARM payload — use `az rest` instead:
 
 ```powershell
@@ -432,8 +438,16 @@ Put-Solution "ChangeTracking(law-arc-demo)" "OMSGallery/ChangeTracking"
 - **Windows via Arc** — works fine.
 - **Linux** — `DependencyAgentLinux` does NOT support Ubuntu 22.04 kernel ≥ 6.8 (current Azure ships 6.8.0-1052-azure). Skip on Linux; Map view will cover the 5 Windows VMs which is enough for the demo. Delete the failed extension via `az vm extension delete -n DependencyAgentLinux`.
 
-### 4.3 Create VM Insights + Change Tracking DCRs
-Two DCRs, both via REST PUT:
+### 4.3 Create DCRs after table readiness
+
+The maintained `scripts\Deploy-ArcDemo.ps1` path creates all DCRs **after** the
+workspace solutions are deployed and the required Log Analytics tables are
+visible. This avoids the clean-first-deploy race where a brand-new workspace
+reports `Succeeded` before tables such as `Perf`, `InsightsMetrics`, or
+`ConfigurationData` are accepted by the DCR API.
+
+Three DCRs are upserted via REST PUT with deterministic names:
+- `dcr-arc-demo` — core AMA performance counters, Windows events, and Linux syslog.
 - `dcr-vminsights` — streams `Microsoft-InsightsMetrics` (perf counter `\VmInsights\DetailedMetrics`) + `Microsoft-ServiceMap` (DependencyAgent extension).
 - `dcr-changetracking` — Windows + Linux variants of the CT extension in one DCR. Streams: `Microsoft-ConfigurationChange`, `Microsoft-ConfigurationChangeV2`, `Microsoft-ConfigurationData`. Toggles for files / software / registry (Win only) / services / inventory.
 

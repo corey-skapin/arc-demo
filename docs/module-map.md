@@ -31,7 +31,7 @@ Bicep completes and gates Monitor payloads from the fleet metadata.
   - Creates the two resource groups at lines 75-85.
   - Wires modules in this order:
     - `workspaceMod` at lines 89-97.
-    - `dcrsMod` at lines 99-108.
+    - `dcrsMod` at lines 99-102 (deterministic DCR ID outputs only; DCR resources are created post-Bicep by the deploy script).
     - `alertsMod` at lines 110-120.
     - `networkMod` at lines 124-133.
     - `kvMod` at lines 135-145.
@@ -49,16 +49,12 @@ Bicep completes and gates Monitor payloads from the fleet metadata.
   - Outputs workspace resource ID, workspace name, and customer ID at lines 60-62.
 
 - `bicep/modules/dcrs.bicep`
-  - Deploys `dcr-arc-demo` at lines 18-79 with:
-    - Windows/Linux performance counters at lines 25-44.
-    - Windows Application/System/Security event logs at lines 45-55.
-    - Linux syslog facilities and levels at lines 56-63.
-    - Data flows to the Log Analytics workspace at lines 65-77.
-  - Deploys `dcr-vminsights` at lines 81-117 with `InsightsMetrics` and
-    `ServiceMap` streams for VM Insights.
-  - Declares `dcr-changetracking` as an existing resource at lines 119-121;
-    the actual DCR is created imperatively in `Deploy-ArcDemo.ps1:190-254`
-    after Change Tracking tables are available.
+  - Outputs deterministic IDs for `dcr-arc-demo`, `dcr-vminsights`, and
+    `dcr-changetracking` without creating the resources in the initial Bicep
+    deployment.
+  - `Deploy-ArcDemo.ps1` creates/updates all three DCRs after the workspace
+    solutions have provisioned their required Log Analytics tables, which avoids
+    first-run table-readiness failures on clean prefixes.
 
 - `bicep/modules/alerts.bicep`
   - Deploys email Action Group `ag-<prefix>` at lines 18-33.
@@ -201,8 +197,8 @@ creates an ephemeral ARM deployment parameter JSON file at
 2. Generate admin password, build ephemeral parameter file, preserve existing NAT
    Gateway/budget start, deploy `bicep/main.bicep`, and capture outputs
    (`Deploy-ArcDemo.ps1:100-188`).
-3. Create Change Tracking DCR after workspace/table readiness
-   (`Deploy-ArcDemo.ps1:190-254`).
+3. Create Core, VM Insights, and Change Tracking DCRs after workspace/table
+   readiness.
 4. Create/attach NAT Gateway and public IP (`Deploy-ArcDemo.ps1:256-280`).
 5. Create or reset Arc onboarding service principal
    (`Deploy-ArcDemo.ps1:282-296`).
@@ -275,11 +271,11 @@ polling (`Common.psm1:173-199`), and name/password helpers
 
 - DCRs and agents:
   - Core DCR collects perf counters, Windows events, and Linux syslog
-    (`dcrs.bicep:18-79`).
+    (created post-Bicep by `Deploy-ArcDemo.ps1`).
   - VM Insights DCR collects `InsightsMetrics` and `ServiceMap`
-    (`dcrs.bicep:81-117`).
-  - Change Tracking DCR is created by REST after tables are ready
-    (`Deploy-ArcDemo.ps1:190-254`).
+    (created post-Bicep by `Deploy-ArcDemo.ps1`).
+  - Change Tracking DCR is created by the same post-Bicep REST phase after
+    tables are ready.
   - DCR associations are deliberately created against Arc resource IDs for every
     current host (`Deploy-ArcDemo.ps1:393-407`).
   - AMA is Windows-via-Arc and Linux-via-Azure-VM-extension because the Ubuntu

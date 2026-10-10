@@ -7,8 +7,9 @@
     after a partial failure picks up where it left off.
 
       1. Pre-flight checks (PS, az, bicep, signed-in tenant, RBAC)
-      2. Bicep main.bicep deployment (RGs, network, KV, LAW, DCRs, VMs,
+      2. Bicep main.bicep deployment (RGs, network, KV, LAW, VMs,
          alerts, Defender, policies, budget)
+      2.5 Data Collection Rules after Log Analytics table readiness
       3. NAT Gateway (deployed separately so Hibernate can tear it down)
       4. Arc onboarding service principal
       5. Arc agent install on each VM (Windows via Arc ext path,
@@ -225,6 +226,278 @@ function Get-ArcMachineTagArgs {
     return @($tags.GetEnumerator() | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value })
 }
 
+function Get-LogAnalyticsTableNames {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$WorkspaceId)
+
+    $names = @()
+    $url = "https://management.azure.com${WorkspaceId}/tables?api-version=2022-10-01"
+    do {
+        $response = Invoke-AzRest -Method Get -Url $url
+        $names += @($response.value | ForEach-Object { $_.name } | Where-Object { $_ })
+        $url = $response.nextLink
+    } while ($url)
+
+    return @($names | Sort-Object -Unique)
+}
+
+function Wait-LogAnalyticsTables {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WorkspaceId,
+        [Parameter(Mandatory)][string[]]$TableNames,
+        [Parameter(Mandatory)][string]$Label,
+        [int]$TimeoutSeconds = 300
+    )
+
+    $script:MissingLawTables = @($TableNames)
+    $ready = Wait-Until -TimeoutSeconds $TimeoutSeconds -IntervalSeconds 30 -Message "$Label tables" -Condition {
+        $tables = @(Get-LogAnalyticsTableNames -WorkspaceId $WorkspaceId)
+        $script:MissingLawTables = @($TableNames | Where-Object { $_ -notin $tables })
+        return $script:MissingLawTables.Count -eq 0
+    }
+
+    if ($ready) {
+        Write-Ok "$Label tables ready: $($TableNames -join ', ')"
+    } else {
+        Write-Warn "$Label tables not all visible yet after $TimeoutSeconds seconds: $($script:MissingLawTables -join ', ')"
+    }
+
+    return $ready
+}
+
+function Invoke-DcrPutWithRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DisplayName,
+        [Parameter(Mandatory)][string]$DcrId,
+        [Parameter(Mandatory)][hashtable]$Body,
+        [Parameter(Mandatory)][string]$WorkspaceId,
+        [string[]]$RequiredTables = @(),
+        [int]$TableTimeoutSeconds = 300,
+        [int]$PutTimeoutSeconds = 1200
+    )
+
+    if ($RequiredTables.Count -gt 0) {
+        Wait-LogAnalyticsTables -WorkspaceId $WorkspaceId -TableNames $RequiredTables -Label $DisplayName -TimeoutSeconds $TableTimeoutSeconds | Out-Null
+    }
+
+    $deadline = (Get-Date).AddSeconds($PutTimeoutSeconds)
+    $attempt = 0
+    do {
+        $attempt++
+        try {
+            $null = Invoke-AzRest -Method Put `
+                -Url "https://management.azure.com${DcrId}?api-version=2023-03-11" `
+                -Body $Body
+            Write-Ok "$DisplayName DCR upserted"
+            return
+        } catch {
+            $detail = @($_.ErrorDetails.Message, $_.Exception.Message) |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -First 1
+            if ((Get-Date) -ge $deadline) {
+                throw "Timed out creating $DisplayName DCR after $attempt attempts. Last error: $detail"
+            }
+            $sleepSeconds = [Math]::Min(60, 10 * $attempt)
+            Write-Warn "$DisplayName DCR PUT attempt $attempt failed; retrying in $sleepSeconds seconds. Last error: $detail"
+            Start-Sleep -Seconds $sleepSeconds
+        }
+    } while ((Get-Date) -lt $deadline)
+}
+
+function Set-DataCollectionRuleAssociation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ScopeResourceId,
+        [Parameter(Mandatory)][string]$AssociationName,
+        [Parameter(Mandatory)][string]$DcrId,
+        [string]$Description = ''
+    )
+
+    $properties = @{ dataCollectionRuleId = $DcrId }
+    if ($Description) {
+        $properties.description = $Description
+    }
+    $body = @{ properties = $properties }
+    Invoke-AzRest -Method Put `
+        -Url "https://management.azure.com$ScopeResourceId/providers/Microsoft.Insights/dataCollectionRuleAssociations/$AssociationName?api-version=2022-06-01" `
+        -Body $body | Out-Null
+}
+
+function New-CoreDcrBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Tags,
+        [Parameter(Mandatory)][string]$WorkspaceId,
+        [Parameter(Mandatory)][string]$WorkspaceName
+    )
+
+    return @{
+        location = $Location
+        tags = $Tags
+        properties = @{
+            description = 'Core perf + events + syslog for the Arc demo fleet'
+            dataSources = @{
+                performanceCounters = @(
+                    @{
+                        name = 'perfCounters'
+                        streams = @('Microsoft-Perf')
+                        samplingFrequencyInSeconds = 60
+                        counterSpecifiers = @(
+                            '\Processor Information(_Total)\% Processor Time'
+                            '\Memory\% Committed Bytes In Use'
+                            '\Memory\Available MBytes'
+                            '\LogicalDisk(_Total)\% Free Space'
+                            '\Network Interface(*)\Bytes Total/sec'
+                            '\Processor(*)\% Processor Time'
+                            '\Memory(*)\AvailableMemory'
+                            '\Memory(*)\PercentUsedMemory'
+                            '\Logical Disk(*)\FreeSpacePercentage'
+                            '\Network(*)\TotalBytesTransmitted'
+                            '\Network(*)\TotalBytesReceived'
+                        )
+                    }
+                )
+                windowsEventLogs = @(
+                    @{
+                        name = 'winEvents'
+                        streams = @('Microsoft-Event')
+                        xPathQueries = @(
+                            'Application!*[System[(Level=1 or Level=2 or Level=3)]]'
+                            'System!*[System[(Level=1 or Level=2 or Level=3)]]'
+                            'Security!*[System[(band(Keywords,4503599627370496))]]'
+                        )
+                    }
+                )
+                syslog = @(
+                    @{
+                        name = 'linuxSyslog'
+                        streams = @('Microsoft-Syslog')
+                        facilityNames = @('auth', 'authpriv', 'cron', 'daemon', 'kern', 'syslog', 'user')
+                        logLevels = @('Info', 'Notice', 'Warning', 'Error', 'Critical', 'Alert', 'Emergency')
+                    }
+                )
+            }
+            destinations = @{
+                logAnalytics = @(
+                    @{
+                        name = $WorkspaceName
+                        workspaceResourceId = $WorkspaceId
+                    }
+                )
+            }
+            dataFlows = @(
+                @{ streams = @('Microsoft-Perf'); destinations = @($WorkspaceName) }
+                @{ streams = @('Microsoft-Event'); destinations = @($WorkspaceName) }
+                @{ streams = @('Microsoft-Syslog'); destinations = @($WorkspaceName) }
+            )
+        }
+    }
+}
+
+function New-VmInsightsDcrBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Tags,
+        [Parameter(Mandatory)][string]$WorkspaceId
+    )
+
+    return @{
+        location = $Location
+        tags = $Tags
+        properties = @{
+            description = 'VM Insights DCR (perf + map)'
+            dataSources = @{
+                performanceCounters = @(
+                    @{
+                        name = 'VMInsightsPerfCounters'
+                        streams = @('Microsoft-InsightsMetrics')
+                        samplingFrequencyInSeconds = 60
+                        counterSpecifiers = @('\VmInsights\DetailedMetrics')
+                    }
+                )
+                extensions = @(
+                    @{
+                        name = 'DependencyAgentDataSource'
+                        streams = @('Microsoft-ServiceMap')
+                        extensionName = 'DependencyAgent'
+                    }
+                )
+            }
+            destinations = @{
+                logAnalytics = @(
+                    @{
+                        name = 'VMInsightsPerf-Logs-Dest'
+                        workspaceResourceId = $WorkspaceId
+                    }
+                )
+            }
+            dataFlows = @(
+                @{ streams = @('Microsoft-InsightsMetrics'); destinations = @('VMInsightsPerf-Logs-Dest') }
+                @{ streams = @('Microsoft-ServiceMap'); destinations = @('VMInsightsPerf-Logs-Dest') }
+            )
+        }
+    }
+}
+
+function New-ChangeTrackingDcrBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Tags,
+        [Parameter(Mandatory)][string]$WorkspaceId
+    )
+
+    return @{
+        location = $Location
+        tags = $Tags
+        properties = @{
+            description = 'Change Tracking & Inventory DCR'
+            dataSources = @{
+                extensions = @(
+                    @{
+                        name = 'CTDataSource-Windows'
+                        streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
+                        extensionName = 'ChangeTracking-Windows'
+                        extensionSettings = @{
+                            enableFiles = $true; enableSoftware = $true; enableRegistry = $true
+                            enableServices = $true; enableInventory = $true
+                            registrySettings = @{ registryCollectionFrequency = 3000; registryInfo = @() }
+                            fileSettings = @{ fileCollectionFrequency = 2700 }
+                            softwareSettings = @{ softwareCollectionFrequency = 1800 }
+                            inventorySettings = @{ inventoryCollectionFrequency = 36000 }
+                            servicesSettings = @{ serviceCollectionFrequency = 1800 }
+                        }
+                    }
+                    @{
+                        name = 'CTDataSource-Linux'
+                        streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
+                        extensionName = 'ChangeTracking-Linux'
+                        extensionSettings = @{
+                            enableFiles = $true; enableSoftware = $true; enableRegistry = $false
+                            enableServices = $true; enableInventory = $true
+                            fileSettings = @{ fileCollectionFrequency = 900; fileInfo = @() }
+                            softwareSettings = @{ softwareCollectionFrequency = 300 }
+                            inventorySettings = @{ inventoryCollectionFrequency = 36000 }
+                            servicesSettings = @{ serviceCollectionFrequency = 300 }
+                        }
+                    }
+                )
+            }
+            destinations = @{
+                logAnalytics = @(@{ name = 'Microsoft-CT-Dest'; workspaceResourceId = $WorkspaceId })
+            }
+            dataFlows = @(@{
+                streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
+                destinations = @('Microsoft-CT-Dest')
+            })
+        }
+    }
+}
+
 # Phase 1: pre-flight
 $principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId
 
@@ -326,7 +599,7 @@ if ($WhatIfPreference) {
     Write-Step 'Running Bicep what-if...'
     az deployment sub what-if --name $deploymentName --location $Location `
         --template-file $bicepFile --parameters @$paramFile --only-show-errors
-    Remove-Item $paramFile -Force
+    [System.IO.File]::Delete($paramFile)
     return
 }
 
@@ -334,17 +607,20 @@ Write-Step "Deploying main.bicep (deployment: $deploymentName)..."
 az deployment sub create --name $deploymentName --location $Location `
     --template-file $bicepFile --parameters @$paramFile --only-show-errors -o none
 if ($LASTEXITCODE -ne 0) {
-    Remove-Item $paramFile -Force -ErrorAction SilentlyContinue
+    if ([System.IO.File]::Exists($paramFile)) { [System.IO.File]::Delete($paramFile) }
     throw "Bicep deployment failed. Inspect with: az deployment sub show --name $deploymentName"
 }
 $outputs = az deployment sub show --name $deploymentName --query properties.outputs -o json | ConvertFrom-Json
-Remove-Item $paramFile -Force
+[System.IO.File]::Delete($paramFile)
 Write-Ok 'Bicep deployment complete'
 
 $workspaceId = $outputs.workspaceId.value
+$workspaceName = ($workspaceId -split '/')[-1]
 $workspaceCustomerId = $outputs.workspaceCustomerId.value
 $deployedFleet = @(@($outputs.vmFleet.value) | Where-Object { $_ -and $_.deployed -eq $true })
 $vmNames     = @($deployedFleet | Select-Object -ExpandProperty name)
+$azureVmNames = @($outputs.azureVmNames.value | Where-Object { $_ })
+$azureVmResourceIds = @($outputs.azureVmResourceIds.value | Where-Object { $_ })
 $dcrCoreId   = $outputs.dcrCoreId.value
 $dcrVmiId    = $outputs.dcrVmiId.value
 $dcrCtId     = $outputs.dcrCtId.value
@@ -367,71 +643,34 @@ if ($deployedFleet.Count -gt 0) {
     Write-Step "On-prem fleet: $($deployedFleet.Count) deployed entries ($($fleetSummary -join ', ')); $($monitorVms.Count) Monitor-supported, $($arcOnlyVms.Count) Arc-control-plane-only"
 }
 
-# Phase 2.5: Create Change Tracking DCR (must wait for solution to provision tables)
-Write-Header 'Phase 2.5 — Change Tracking DCR (post-Bicep)'
-Write-Step 'Waiting for ChangeTracking tables to appear in workspace (up to 5 min)...'
-$ctReady = Wait-Until -TimeoutSeconds 300 -IntervalSeconds 30 -Message 'CT tables' -Condition {
-    $token = Get-LawQueryToken
-    $hdr = @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
-    $q = @{ query = "ConfigurationData | take 1" } | ConvertTo-Json
-    try {
-        $null = Invoke-RestMethod -Method Post -Headers $hdr -Body $q `
-          -Uri "https://api.loganalytics.io/v1/workspaces/$workspaceCustomerId/query"
-        return $true
-    } catch { return $false }
-}
-if (-not $ctReady) {
-    Write-Warn 'Tables not yet visible — attempting DCR PUT anyway (may take longer to become queryable)'
-}
-$ctDcrBody = @{
-    location = $Location
-    tags = $demoTags
-    properties = @{
-        description = 'Change Tracking & Inventory DCR'
-        dataSources = @{
-            extensions = @(
-                @{
-                    name = 'CTDataSource-Windows'
-                    streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
-                    extensionName = 'ChangeTracking-Windows'
-                    extensionSettings = @{
-                        enableFiles = $true; enableSoftware = $true; enableRegistry = $true
-                        enableServices = $true; enableInventory = $true
-                        registrySettings = @{ registryCollectionFrequency = 3000; registryInfo = @() }
-                        fileSettings = @{ fileCollectionFrequency = 2700 }
-                        softwareSettings = @{ softwareCollectionFrequency = 1800 }
-                        inventorySettings = @{ inventoryCollectionFrequency = 36000 }
-                        servicesSettings = @{ serviceCollectionFrequency = 1800 }
-                    }
-                }
-                @{
-                    name = 'CTDataSource-Linux'
-                    streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
-                    extensionName = 'ChangeTracking-Linux'
-                    extensionSettings = @{
-                        enableFiles = $true; enableSoftware = $true; enableRegistry = $false
-                        enableServices = $true; enableInventory = $true
-                        fileSettings = @{ fileCollectionFrequency = 900; fileInfo = @() }
-                        softwareSettings = @{ softwareCollectionFrequency = 300 }
-                        inventorySettings = @{ inventoryCollectionFrequency = 36000 }
-                        servicesSettings = @{ serviceCollectionFrequency = 300 }
-                    }
-                }
-            )
-        }
-        destinations = @{
-            logAnalytics = @(@{ name = 'Microsoft-CT-Dest'; workspaceResourceId = $workspaceId })
-        }
-        dataFlows = @(@{
-            streams = @('Microsoft-ConfigurationChange', 'Microsoft-ConfigurationChangeV2', 'Microsoft-ConfigurationData')
-            destinations = @('Microsoft-CT-Dest')
-        })
+# Phase 2.5: Create all DCRs after Log Analytics/solution tables are ready.
+Write-Header 'Phase 2.5 — Data Collection Rules (post-Bicep)'
+$coreDcrBody = New-CoreDcrBody -Location $Location -Tags $demoTags -WorkspaceId $workspaceId -WorkspaceName $workspaceName
+$vmiDcrBody = New-VmInsightsDcrBody -Location $Location -Tags $demoTags -WorkspaceId $workspaceId
+$ctDcrBody = New-ChangeTrackingDcrBody -Location $Location -Tags $demoTags -WorkspaceId $workspaceId
+
+Invoke-DcrPutWithRetry -DisplayName 'Core' -DcrId $dcrCoreId -Body $coreDcrBody -WorkspaceId $workspaceId -RequiredTables @('Perf', 'Event', 'Syslog')
+Invoke-DcrPutWithRetry -DisplayName 'VM Insights' -DcrId $dcrVmiId -Body $vmiDcrBody -WorkspaceId $workspaceId -RequiredTables @('InsightsMetrics')
+Invoke-DcrPutWithRetry -DisplayName 'Change Tracking' -DcrId $dcrCtId -Body $ctDcrBody -WorkspaceId $workspaceId -RequiredTables @('ConfigurationData')
+
+if ($DeployAzureVMs -and $azureVmResourceIds.Count -gt 0) {
+    Write-Header 'Phase 2.6 — Azure-native VM DCR associations'
+    for ($i = 0; $i -lt $azureVmResourceIds.Count; $i++) {
+        $nativeVmName = $azureVmNames[$i]
+        $nativeVmId = $azureVmResourceIds[$i]
+        Set-DataCollectionRuleAssociation `
+            -ScopeResourceId $nativeVmId `
+            -AssociationName "dcra-core-$nativeVmName" `
+            -DcrId $dcrCoreId `
+            -Description "Core Arc demo logs and performance for Azure-native VM $nativeVmName."
+        Set-DataCollectionRuleAssociation `
+            -ScopeResourceId $nativeVmId `
+            -AssociationName "dcra-vmi-$nativeVmName" `
+            -DcrId $dcrVmiId `
+            -Description "VM Insights data for Azure-native VM $nativeVmName."
     }
+    Write-Ok "Azure-native VM DCRAs created: $($azureVmResourceIds.Count * 2)"
 }
-$null = Invoke-AzRest -Method Put `
-    -Url "https://management.azure.com${dcrCtId}?api-version=2023-03-11" `
-    -Body $ctDcrBody
-Write-Ok "Change Tracking DCR created"
 
 # Phase 3: NAT Gateway (separate so Hibernate can delete it)
 Write-Header 'Phase 3 — NAT Gateway'

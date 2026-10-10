@@ -29,6 +29,23 @@ az group delete -n rg-skutest --yes --no-wait
 
 Then re-deploy with `-VmSize <working-sku>`.
 
+## Clean deploy fails while creating DCRs with missing Log Analytics tables
+
+**Symptom** — A first deployment into a clean subscription/prefix fails during
+Data Collection Rule creation with a `BadRequest`, `table not found`, or stream
+mapping error for `Perf`, `Event`, `Syslog`, `InsightsMetrics`, or
+`ConfigurationData`.
+
+**Cause** — A brand-new Log Analytics workspace and the VM Insights / Change
+Tracking solutions can report `Succeeded` before their standard tables are
+queryable by the DCR API.
+
+**Fix** — Current `Deploy-ArcDemo.ps1` avoids the race by keeping DCRs out of
+the initial Bicep deployment, waiting for the required tables, and then
+upserting `dcr-arc-demo`, `dcr-vminsights`, and `dcr-changetracking` with
+bounded retries. Re-run the deploy script; the DCR names and DCRA names are
+deterministic, so reruns update existing resources instead of duplicating them.
+
 ## Arc machines show `Disconnected` shortly after deploy
 
 **Symptom** — Arc Connected immediately after onboarding, then `Disconnected` after the first overnight auto-shutdown.

@@ -244,12 +244,6 @@ module workspaceMod 'modules/workspace.bicep' = {
 module dcrsMod 'modules/dcrs.bicep' = {
   name: 'dcrs-deploy'
   scope: rgArc
-  params: {
-    location: location
-    tags: tags
-    workspaceId: workspaceMod.outputs.workspaceId
-    workspaceName: workspaceMod.outputs.workspaceName
-  }
 }
 
 module alertsMod 'modules/alerts.bicep' = {
@@ -341,8 +335,6 @@ module azureVmsMod 'modules/azure-vms.bicep' = if (deployAzureVMs) {
     vmSize: vmSize
     autoShutdownTime: autoShutdownTime
     autoShutdownTimezone: autoShutdownTimezone
-    dcrCoreId: dcrsMod.outputs.dcrCoreId
-    dcrVmiId: dcrsMod.outputs.dcrVmiId
   }
 }
 
