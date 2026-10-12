@@ -88,10 +88,11 @@
     Monthly budget threshold in subscription currency. Default 200.
 
 .PARAMETER InstallSql
-    Optional/advanced path. Install SQL Server 2022 Developer and the Arc SQL
-    extension on fleet entries with supportsSql=true. Skipped by default because
-    SQL is not required for the core Arc/Monitor/SRE story and live validation
-    previously hung during SQL setup.
+    Optional/advanced experimental path. Install SQL Server 2022 Developer and the
+    Arc SQL extension on fleet entries with supportsSql=true. Skipped by default
+    because SQL is not required for the core Arc/Monitor/SRE story, live validation
+    previously hung during SQL setup, and SQL Server enabled by Azure Arc should be
+    validated on a real non-Azure SQL host rather than this Azure-VM-backed demo.
 
 .PARAMETER SkipSqlInstall
     Deprecated compatibility switch. The default path already skips SQL; keep
@@ -913,12 +914,13 @@ if ($jobs.Count -gt 0) {
 # Phase 9: Optional/advanced SQL install
 if (-not $InstallSql) {
     if ($sqlVms) {
-        Write-Warn 'SQL optional/advanced path disabled — leaving SQL-capable hosts as Windows VMs. Pass -InstallSql or set workloads.installSql=true to install SQL Server and Arc SQL/BPA (not live-validated after the SQL setup hang).'
+        Write-Warn 'SQL optional/advanced path disabled — leaving SQL-capable hosts as Windows VMs. For supported Arc SQL validation, use a real non-Azure SQL host; see docs/sql-arc-spike.md.'
     } else {
         Write-Warn 'No SQL-capable machines — skipping SQL optional/advanced path'
     }
 } elseif ($sqlVms) {
-    Write-Header "Phase 9 — Optional/advanced SQL Server 2022 Developer install on $($sqlVms.Count) hosts (~20 min; not live-validated)"
+    Write-Header "Phase 9 — Experimental SQL Server 2022 Developer install on $($sqlVms.Count) Azure-VM-backed hosts (~20 min; not a supported Arc SQL validation target)"
+    Write-Warn 'This path is retained for experimentation only. SQL Server enabled by Azure Arc should be validated on a real non-Azure SQL host; see docs/sql-arc-spike.md.'
     $sqlScriptPath = Join-Path $env:TEMP "sql-install-$(Get-Random).ps1"
     $sqlScript = @'
 $ErrorActionPreference = 'Stop'

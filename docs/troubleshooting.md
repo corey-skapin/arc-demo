@@ -137,9 +137,11 @@ The `Test-Prerequisites.ps1` script does this check for you.
 
 ## SQL Best Practice Assessment hasn't run yet
 
-This applies only when the optional advanced SQL path was explicitly enabled with
-`-InstallSql` or `workloads.installSql=true`. The default demo skips SQL Server,
-Arc SQL registration, and BPA.
+This applies only to a **separate, supported SQL lab** using a real non-Azure SQL
+Server host. The default Azure-only demo skips SQL Server, Arc SQL registration,
+and BPA because SQL Server enabled by Azure Arc does not support SQL Server
+running in Azure Virtual Machines as the validation target. See
+[`sql-arc-spike.md`](sql-arc-spike.md).
 
 **Symptom** — Arc SQL instance is registered, Defender shows protected, but the BPA tile in the Arc SQL portal blade is empty.
 
