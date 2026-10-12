@@ -67,6 +67,7 @@ az account set --subscription <SUBSCRIPTION_ID>
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
   -SkinPath .\config\demo-skin.json `
+  -AdminEmail <EMAIL> `
   -DeployAzureVMs $true `
   -DeployContainerApps $true
 ```
