@@ -22,7 +22,8 @@ Inputs:
   - Azure-native VM: <yes/no>
   - Container App fault alert: <yes/no>
   - AKS crash-loop: <yes/no>
-  - SQL/Arc SQL: no for this Azure-only lab
+  - SQL workload simulation: <yes/no, only if deliberately added>
+  - SQL Server enabled by Azure Arc: no for this Azure-only lab
 
 Do:
 1. Confirm Azure CLI is signed in to the specified tenant and subscription.
@@ -35,7 +36,7 @@ Do:
 
 Do not:
 - Hard-code subscription, tenant, or private email values into source.
-- Enable SQL/Arc SQL in this Azure-only lab unless explicitly asked after reading docs/sql-arc-spike.md.
+- Claim SQL Server enabled by Azure Arc in this Azure-only lab.
 - Delete the lab unless asked to run scripts/Remove-ArcDemo.ps1.
 ```
 
@@ -94,9 +95,10 @@ approval. Portal clicks are only for presenting the demo, not for deployment.
 
 ## SQL stance
 
-Do not enable SQL by default. `docs/sql-arc-spike.md` documents the support
-boundary: Arc-enabled SQL Server is a strong follow-on for real non-Azure SQL
-hosts, but this Azure-VM-backed simulation is not the supported validation target.
+Do not enable SQL by default. `docs/sql-arc-spike.md` documents the distinction:
+SQL Server on an Azure VM is acceptable as a workload simulation, but SQL Server
+enabled by Azure Arc should be validated on a real non-Azure SQL host and is not a
+claim for this Azure-only lab.
 
 ## Hibernation
 

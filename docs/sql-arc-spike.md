@@ -2,20 +2,30 @@
 
 ## Decision
 
-Do **not** include Arc-enabled SQL Server as a default or customer-facing validated
-beat in this Azure-only lab.
+Do **not** include **SQL Server enabled by Azure Arc** as a default or
+customer-facing validated beat in this Azure-only lab.
+
+It is still valid to install SQL Server on an Azure VM as a **workload simulation**
+if we need SQL-shaped events, services, or operational signals. The unsupported
+claim is narrower: do not present SQL Server running on an Azure VM as a supported
+validation target for the **SQL Server enabled by Azure Arc** product experience.
 
 The SQL story is important, but there are two separate cases:
 
 | Case | Status | Demo stance |
 |---|---|---|
 | Real non-Azure server, for example customer Hyper-V/VMware/on-prem VM connected with Azure Arc | Supported by Microsoft docs when prerequisites are met | Good customer conversation and future lab path |
-| This repo's simulated on-prem hosts, which are Azure VMs Arc-enabled with `MSFT_ARC_TEST=true` | Not a supportable Arc SQL validation target because SQL Server in Azure Virtual Machines is listed as unsupported for SQL Server enabled by Azure Arc | Do not sell as validated; keep skipped by default |
+| SQL Server installed on an Azure VM in this repo | Valid as a local workload simulation | Good for SQL-shaped service/app/Event Log/Monitor signals if implemented reliably |
+| SQL Server enabled by Azure Arc on this repo's Azure-VM-backed hosts | Not a supportable Arc SQL validation target because SQL Server in Azure Virtual Machines is listed as unsupported for SQL Server enabled by Azure Arc | Do not sell as validated; keep skipped by default |
 
 The current script previously attempted to install SQL Server 2022 Developer on
-the Azure-VM-backed Arc hosts and then add `WindowsAgent.SqlServer`. That failed
-in live testing with a setup hang and is not the right shareable path because the
-underlying lab host type is still an Azure VM.
+the Azure-VM-backed Arc hosts and then add `WindowsAgent.SqlServer`. That combines
+two different ideas: useful workload simulation and unsupported Arc SQL validation.
+Future work should split them:
+
+1. **SQL workload simulation** - acceptable in this repo if reliable.
+2. **SQL Server enabled by Azure Arc** - out of scope for this repo because the
+   hosts are Azure VMs.
 
 ## What the official docs say
 
@@ -38,6 +48,10 @@ This means the DTF/customer scenario remains valid because DTF-style Hyper-V or
 VMware-hosted SQL servers are non-Azure machines. The all-Azure demo simulation is
 the part that should not claim supported Arc SQL validation.
 
+Corey's current intent is **not** to stand up a non-Azure VM for this demo. The
+real Arc SQL path should remain a customer PoC / future sidecar note, not a
+dependency for the reusable demo.
+
 ## Current repo implementation
 
 `scripts\Deploy-ArcDemo.ps1` has an optional `-InstallSql` path:
@@ -50,8 +64,9 @@ the part that should not claim supported Arc SQL validation.
    - `LicenseType=Paid`
    - `AzureBestPracticesAssessment.IsEnabled=true`
 
-That path is skipped by default. It is not currently a reliable or supportable
-shareable branch for this Azure-only lab.
+That path is skipped by default. As written, it is not currently a reliable or
+supportable shareable branch for this Azure-only lab because it tries to do both
+SQL workload installation and Arc SQL extension registration.
 
 Preserved logs under `logs\add-sql2016-*.log` do not contain a clean SQL setup
 failure. They mostly show earlier deployment idempotency failures such as
@@ -61,7 +76,22 @@ complete in the demo window.
 
 ## Supported ways to tell the SQL story
 
-### Option A - customer-realistic SQL branch
+### Option A - SQL workload simulation inside this Azure-only lab
+
+Use this if we need a SQL-flavoured operational signal without claiming Arc SQL:
+
+- Install SQL Server Developer/Express, LocalDB, or a lightweight SQL-shaped worker
+  on `win-sql-01`.
+- Emit Windows Application events, service state, and optional perf signals.
+- Alert on the workload signal through Azure Monitor.
+- Let SRE Agent diagnose the incident as a SQL workload on an Arc-enabled server
+  simulation.
+- Do **not** install or claim `WindowsAgent.SqlServer`.
+- Do **not** show **Azure Arc > SQL Server** as validated evidence.
+
+This is the recommended path for this demo if a SQL beat is needed.
+
+### Option B - customer-realistic Arc SQL branch
 
 Use this when the customer has, or the SE can provide, a real non-Azure Windows
 Server 2016+ machine with SQL Server 2014+ installed.
@@ -90,9 +120,11 @@ Server 2016+ machine with SQL Server 2014+ installed.
 5. Validate in **Azure Arc > SQL Server**.
 6. Wait 30-60 minutes before expecting Best Practices Assessment results.
 
-This is the right path for a customer-owned Hyper-V/VMware SQL Server estate.
+This is the right path for a customer-owned Hyper-V/VMware SQL Server estate, but
+it is out of scope for Corey's reusable Azure-only demo unless a customer PoC
+provides the real host.
 
-### Option B - keep this demo Azure-only and skip SQL
+### Option C - keep this demo Azure-only and skip SQL
 
 Use this for the shareable SE demo kit.
 
@@ -102,9 +134,9 @@ Use this for the shareable SE demo kit.
 - Use the Arc inventory, Defender, Update Manager, Machine Configuration, Monitor,
   and alerting beats.
 - Mention that Arc-enabled SQL Server requires a real non-Azure SQL host for a
-  supported lab validation.
+  supported lab validation. Do not make that a prerequisite for this demo.
 
-### Option C - future separate SQL lab
+### Option D - future separate SQL lab
 
 Create a small separate SQL-specific lab that uses a non-Azure VM target:
 
@@ -115,18 +147,17 @@ Create a small separate SQL-specific lab that uses a non-Azure VM target:
 - Install `WindowsAgent.SqlServer`.
 - Validate inventory, Defender for SQL, BPA, and any SRE diagnostic hooks.
 
-This should be a separate repo/task, not bolted onto the default Azure-only Arc
-demo.
+This is not planned for the current demo. Note it as an option only.
 
 ## Customer-safe wording
 
 Use:
 
 > Arc-enabled SQL Server is a strong follow-on for real on-prem SQL estates. This
-> Azure-only lab keeps SQL disabled because the Arc SQL product does not support
-> SQL Server running in Azure VMs as the validation target. For a customer PoC, we
-> should connect one of their real non-Azure SQL hosts or build a separate
-> non-Azure SQL lab.
+> Azure-only lab can simulate SQL workload signals on an Arc-enabled server, but
+> it does not validate SQL Server enabled by Azure Arc because that product path
+> does not support SQL Server running in Azure VMs as the validation target. For a
+> customer PoC, we should connect one of their real non-Azure SQL hosts.
 
 Avoid:
 
@@ -136,11 +167,13 @@ Avoid:
 
 > This demo validates Arc-enabled SQL Server on the simulated on-prem VMs.
 
+Also avoid:
+
+> We cannot install SQL Server on an Azure VM.
+
 ## Open work if SQL becomes a must-have live beat
 
-1. Stand up a real non-Azure SQL Server 2016+ host.
-2. Confirm network access to Arc and Arc Data Processing endpoints.
-3. Run the documented `WindowsAgent.SqlServer` extension install.
-4. Validate SQL Server - Azure Arc resource creation.
-5. Capture BPA timing and Defender behavior.
-6. Add a separate SQL-specific runbook once that path is proven.
+1. Decide whether the demo needs SQL-shaped workload signals.
+2. If yes, build a SQL workload simulation that does not use `WindowsAgent.SqlServer`.
+3. If a customer later wants true Arc SQL, use their real non-Azure SQL host and run
+   the documented `WindowsAgent.SqlServer` extension install there.

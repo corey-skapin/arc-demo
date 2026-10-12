@@ -21,6 +21,7 @@ Optional workloads, independently toggleable in any combination:
 - Azure-native Windows VM (`-DeployAzureVMs $true`) with AMA + DCR associations to the shared workspace
 - Container App (`-DeployContainerApps $true`) with a `SIMULATE_CRASH` fault toggle and `RestartCount` alert
 - AKS (`-DeployAks $true`) with Container Insights, a sample crash-loop workload, and pod restart alert
+- LOB Arc bridge sample source under `samples/lob-arc-app` for the companion SRE Agent hybrid diagnostics scenario
 
 Legacy Windows tiers such as WS2012R2/WS2008R2 are represented as Arc-control-plane-only entries: inventory/tags, ESU discussion, Update Manager/Defender/Machine Configuration surfaces where available, but no AMA/VM Insights/Change Tracking payloads on unsupported OS versions. See [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md).
 
@@ -81,7 +82,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 
 When it finishes, open the workbook URL printed at the end (or navigate to **Azure Arc → Workbooks → "Arc Demo — Estate Overview"** in the portal).
 
-> **Optional advanced SQL path:** Arc-enabled SQL Server is a strong customer follow-on for real non-Azure SQL hosts, but it is **not validated or supportable on this Azure-VM-backed demo simulation**. Keep SQL skipped by default. See [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md) before using `-InstallSql`.
+> **Optional SQL stance:** Installing SQL Server on an Azure VM is fine for workload simulation, but this Azure-VM-backed demo should not claim **SQL Server enabled by Azure Arc** validation. Keep SQL skipped by default until a SQL workload simulation is deliberately added. See [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md).
 
 ### Use it
 
@@ -124,7 +125,7 @@ All scripts accept parameters. The most useful:
 | `-DeployContainerApps` | `$false` | Deploy a tiny Azure Container App with a `SIMULATE_CRASH` fault toggle and RestartCount alert |
 | `-DeployAks` | `$false` | Deploy AKS with Container Insights, crash-loop sample workload, and pod-restart alert |
 | `-OnPremFleetPath` | *(empty)* | Optional JSON fleet array. Omit to use the default WS2016/2019/2022 + Ubuntu mix |
-| `-InstallSql` | `$false` | Optional advanced path retained for experimentation only. Arc-enabled SQL Server should be validated on a real non-Azure SQL host; see `docs/sql-arc-spike.md` |
+| `-InstallSql` | `$false` | Experimental legacy path. Do not use for Arc SQL claims. Future SQL work should split workload simulation from true Arc SQL validation; see `docs/sql-arc-spike.md` |
 | `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
 | `-LinuxVmCount` | `3` | Deprecated compatibility generator for an Ubuntu count-based fleet |
 | `-VmSize` | `Standard_B2as_v2` | VM SKU. Probe with `--validate` before changing |
@@ -183,6 +184,7 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | [`docs/ai-deploy-handbook.md`](docs/ai-deploy-handbook.md) | Prompt and checklist for AI-assisted deployment by another SE |
 | [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md) | Decision record for SQL Server / Arc SQL support, blockers, and supported alternatives |
 | [`AGENTS.md`](AGENTS.md) | Operating manual for AI coding assistants |
+| [`samples/lob-arc-app`](samples/lob-arc-app) | Public LOB app source used by the SRE Agent T11 code-context demo |
 
 ## Inspiration & credits
 

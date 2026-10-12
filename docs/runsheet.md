@@ -24,7 +24,7 @@ These defaults come from `config\demo-skin.json`. To retarget for another custom
 | Arc estate + AKS crash-loop alert | `-DeployAks $true` |
 | Everything live-validated today | `-DeployAzureVMs $true -DeployContainerApps $true -DeployAks $true` |
 | Azure-native scenarios only | `-DeployArcOnPrem $false -DeployAzureVMs $true -DeployContainerApps $true` |
-| Optional advanced DBA branch | Do not use in the default Azure-only lab. Arc-enabled SQL Server needs a real non-Azure SQL host for supported validation; see [`sql-arc-spike.md`](sql-arc-spike.md). |
+| Optional SQL workload beat | Future option: SQL Server on an Azure VM can simulate workload signals, but do not claim SQL Server enabled by Azure Arc in this Azure-only lab; see [`sql-arc-spike.md`](sql-arc-spike.md). |
 
 Example deploy:
 
@@ -167,15 +167,15 @@ Key line: "2016+ gets the full Monitor story; pre-2016 stays Arc-control-plane-o
 
 ### 3.8 SQL on Arc (optional customer follow-on, 2 min)
 
-Skip this beat in the default Azure-only demo. The repo's Arc hosts are simulated
-with Azure VMs, and SQL Server enabled by Azure Arc does not support SQL Server
-running in Azure Virtual Machines as the validation target. See
-[`sql-arc-spike.md`](sql-arc-spike.md) for the exact support boundary and the
-recommended real non-Azure SQL lab path.
+Skip this beat in the default Azure-only demo until a SQL workload simulation is
+added. Installing SQL Server on an Azure VM is valid for simulating SQL-shaped
+signals, but SQL Server enabled by Azure Arc does not support SQL Server running
+in Azure Virtual Machines as the validation target. See [`sql-arc-spike.md`](sql-arc-spike.md)
+for the exact support boundary.
 
 - Show `win-sql-01` / `win-sql-02`.
 - Position BPA, Defender for SQL, and SQL inventory as the DBA hook for a real
-  customer/on-prem SQL host.
+  customer/on-prem SQL host only.
 - Keep these hosts in the story as ordinary Windows/Arc servers unless a separate
   supported SQL lab has been validated.
 
