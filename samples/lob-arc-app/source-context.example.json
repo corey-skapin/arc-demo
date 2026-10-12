@@ -1,0 +1,6 @@
+{
+  "repositoryUrl": "https://github.com/corey-skapin/arc-demo",
+  "branch": "main",
+  "commit": "<commit-sha-used-for-the-live-demo>",
+  "sourcePath": "samples/lob-arc-app/LobArcBridgeApp.ps1"
+}
