@@ -180,6 +180,7 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |
 | [`docs/cost.md`](docs/cost.md) | Detailed cost breakdown by state |
 | [`docs/reskin-guide.md`](docs/reskin-guide.md) | Skin variables schema, swap-list, and retargeting steps |
+| [`docs/ai-deploy-handbook.md`](docs/ai-deploy-handbook.md) | Prompt and checklist for AI-assisted deployment by another SE |
 | [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md) | Decision record for SQL Server / Arc SQL support, blockers, and supported alternatives |
 | [`AGENTS.md`](AGENTS.md) | Operating manual for AI coding assistants |
 
