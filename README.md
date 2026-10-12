@@ -22,6 +22,7 @@ Optional workloads, independently toggleable in any combination:
 - Container App (`-DeployContainerApps $true`) with a `SIMULATE_CRASH` fault toggle and `RestartCount` alert
 - AKS (`-DeployAks $true`) with Container Insights, a sample crash-loop workload, and pod restart alert
 - LOB Arc bridge sample source under `samples/lob-arc-app` for the companion SRE Agent hybrid diagnostics scenario
+- SQL-shaped workload simulator under `samples/sql-workload` for DBA-relevant Arc/Monitor signals without claiming Arc-enabled SQL Server
 
 Legacy Windows tiers such as WS2012R2/WS2008R2 are represented as Arc-control-plane-only entries: inventory/tags, ESU discussion, Update Manager/Defender/Machine Configuration surfaces where available, but no AMA/VM Insights/Change Tracking payloads on unsupported OS versions. See [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md).
 
@@ -183,8 +184,10 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | [`docs/reskin-guide.md`](docs/reskin-guide.md) | Skin variables schema, swap-list, and retargeting steps |
 | [`docs/ai-deploy-handbook.md`](docs/ai-deploy-handbook.md) | Prompt and checklist for AI-assisted deployment by another SE |
 | [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md) | Decision record for SQL Server / Arc SQL support, blockers, and supported alternatives |
+| [`docs/sql-workload-simulation.md`](docs/sql-workload-simulation.md) | Optional SQL-shaped workload signal on an Arc-enabled Windows server |
 | [`AGENTS.md`](AGENTS.md) | Operating manual for AI coding assistants |
 | [`samples/lob-arc-app`](samples/lob-arc-app) | Public LOB app source used by the SRE Agent T11 code-context demo |
+| [`samples/sql-workload`](samples/sql-workload) | SQL-shaped Application Event simulator for the optional DBA beat |
 
 ## Inspiration & credits
 

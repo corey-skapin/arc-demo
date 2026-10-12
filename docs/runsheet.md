@@ -165,19 +165,18 @@ ConfigurationChange
 
 Key line: "2016+ gets the full Monitor story; pre-2016 stays Arc-control-plane-only by design."
 
-### 3.8 SQL on Arc (optional customer follow-on, 2 min)
+### 3.8 SQL workload simulation (optional DBA beat, 2 min)
 
-Skip this beat in the default Azure-only demo until a SQL workload simulation is
-added. Installing SQL Server on an Azure VM is valid for simulating SQL-shaped
-signals, but SQL Server enabled by Azure Arc does not support SQL Server running
-in Azure Virtual Machines as the validation target. See [`sql-arc-spike.md`](sql-arc-spike.md)
-for the exact support boundary.
+Skip this beat in the default Azure-only demo unless you have deployed the SQL
+workload simulator. This is a SQL-shaped workload signal from an Arc-enabled
+Windows server, not SQL Server enabled by Azure Arc. See
+[`sql-workload-simulation.md`](sql-workload-simulation.md) and
+[`sql-arc-spike.md`](sql-arc-spike.md).
 
-- Show `win-sql-01` / `win-sql-02`.
-- Position BPA, Defender for SQL, and SQL inventory as the DBA hook for a real
-  customer/on-prem SQL host only.
-- Keep these hosts in the story as ordinary Windows/Arc servers unless a separate
-  supported SQL lab has been validated.
+- Show `win-sql-01`.
+- Show `ArcSqlWorkloadDemo` Application events in Log Analytics.
+- Position BPA, Defender for SQL, and SQL inventory as a future/customer-real SQL
+  host follow-on, not as a claim in this Azure-only lab.
 
 ### 3.9 Alerts and action group (2 min)
 

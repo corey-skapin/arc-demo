@@ -22,7 +22,7 @@ Inputs:
   - Azure-native VM: <yes/no>
   - Container App fault alert: <yes/no>
   - AKS crash-loop: <yes/no>
-  - SQL workload simulation: <yes/no, only if deliberately added>
+  - SQL workload simulation: <yes/no, optional DBA signal after Arc deploy>
   - SQL Server enabled by Azure Arc: no for this Azure-only lab
 
 Do:
@@ -87,6 +87,7 @@ time/cost. Keep `-InstallSql` off for this Azure-only lab.
 | Workbook exists | Azure Arc > Workbooks > `Arc Demo - Estate Overview` or skin title |
 | Action Group exists | `az monitor action-group show -g rg-arc-demo -n ag-arc-demo` |
 | Container App optional alert | `alert-arc-demo-containerapp-restarts` in `rg-arc-demo-infra` |
+| SQL workload simulation optional | `docs/sql-workload-simulation.md` commands run against `win-sql-01` |
 
 ## Manual steps
 
