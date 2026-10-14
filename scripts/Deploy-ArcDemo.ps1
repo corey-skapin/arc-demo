@@ -983,6 +983,44 @@ Get-Service MSSQLSERVER | Format-List Name, Status
 # Phase 11: Workbooks (custom + Nic's library)
 Write-Header 'Phase 11 — Workbooks'
 
+function Set-WorkbookWorkspaceDefaults {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SerializedData,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultWorkspaceId
+    )
+
+    $workbook = $SerializedData | ConvertFrom-Json -Depth 100
+    foreach ($item in @($workbook.items)) {
+        if ($item.type -ne 9 -or -not $item.content -or -not $item.content.parameters) {
+            continue
+        }
+
+        foreach ($parameter in @($item.content.parameters)) {
+            $name = [string]$parameter.name
+            $label = [string]$parameter.label
+            $isWorkspaceParameter = $parameter.type -eq 5 -and (
+                $name -in @('LogAnalyticsWorkspace', 'p_ws') -or
+                $label -like '*Log Analytics Workspace*'
+            )
+            if (-not $isWorkspaceParameter) {
+                continue
+            }
+
+            if (-not $parameter.typeSettings) {
+                $parameter | Add-Member -NotePropertyName typeSettings -NotePropertyValue ([pscustomobject]@{}) -Force
+            }
+            $parameter.typeSettings | Add-Member -NotePropertyName showDefault -NotePropertyValue $true -Force
+            $parameter | Add-Member -NotePropertyName defaultValue -NotePropertyValue $DefaultWorkspaceId -Force
+            $parameter | Add-Member -NotePropertyName value -NotePropertyValue $DefaultWorkspaceId -Force
+        }
+    }
+
+    return ($workbook | ConvertTo-Json -Depth 100)
+}
+
 function Publish-Workbook {
     param(
         [string]$FilePath,
@@ -996,6 +1034,7 @@ function Publish-Workbook {
     $wbContent = Get-Content $FilePath -Raw
     # Strip any incoming $schema-incompatible chars
     $wbContent = $wbContent.TrimStart([char]0xFEFF)
+    $wbContent = Set-WorkbookWorkspaceDefaults -SerializedData $wbContent -DefaultWorkspaceId $workspaceId.ToLower()
     $tag = ($DisplayName -replace '[^A-Za-z0-9]', '-').ToLower()
     # Look for an existing workbook with this tag. Re-runs update the workbook
     # content so fixed queries and story changes reach existing demo labs.
