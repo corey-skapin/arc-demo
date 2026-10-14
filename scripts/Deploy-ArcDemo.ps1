@@ -997,14 +997,15 @@ function Publish-Workbook {
     # Strip any incoming $schema-incompatible chars
     $wbContent = $wbContent.TrimStart([char]0xFEFF)
     $tag = ($DisplayName -replace '[^A-Za-z0-9]', '-').ToLower()
-    # Look for an existing workbook with this tag (idempotent re-runs)
+    # Look for an existing workbook with this tag. Re-runs update the workbook
+    # content so fixed queries and story changes reach existing demo labs.
     $existing = az resource list -g $arcRg --resource-type Microsoft.Insights/workbooks `
         --query "[?tags.workbookTag=='$tag'].id" -o tsv 2>$null
-    if ($existing) {
-        Write-Ok "Workbook '$DisplayName' already exists — skipping"
-        return $existing
+    $workbookId = if ($existing) {
+        (($existing -split "`n") | Where-Object { $_ } | Select-Object -First 1)
+    } else {
+        "/subscriptions/$SubscriptionId/resourceGroups/$arcRg/providers/Microsoft.Insights/workbooks/$([guid]::NewGuid().ToString())"
     }
-    $wbGuid = [guid]::NewGuid().ToString()
     $wbBody = @{
         location = $Location
         tags = Merge-DemoHashtable -Defaults $demoTags -Overrides @{ workbookTag = $tag }
@@ -1018,9 +1019,10 @@ function Publish-Workbook {
         }
     }
     $r = Invoke-AzRest -Method Put `
-        -Url "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$arcRg/providers/Microsoft.Insights/workbooks/${wbGuid}?api-version=2023-06-01" `
+        -Url "https://management.azure.com${workbookId}?api-version=2023-06-01" `
         -Body $wbBody
-    Write-Ok "Workbook created: $($r.properties.displayName)"
+    $action = if ($existing) { 'updated' } else { 'created' }
+    Write-Ok "Workbook ${action}: $($r.properties.displayName)"
     return $r.id
 }
 

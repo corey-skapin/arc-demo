@@ -35,7 +35,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "Perf\n| where TimeGenerated > ago(24h) and CounterName has 'Processor Time' and InstanceName == '_Total'\n| summarize AvgCPU = avg(CounterValue), MaxCPU = max(CounterValue), P95 = percentile(CounterValue, 95) by Computer\n| order by AvgCPU desc",
+        "query": "Perf\n| where TimeGenerated > ago(24h) and CounterName has 'Processor Time' and InstanceName in ('_Total', 'total')\n| summarize AvgCPU = avg(CounterValue), MaxCPU = max(CounterValue), P95 = percentile(CounterValue, 95) by Computer\n| order by AvgCPU desc",
         "size": 0,
         "title": "Per-host CPU utilisation (24h)",
         "queryType": 0,

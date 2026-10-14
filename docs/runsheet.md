@@ -82,6 +82,9 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    | summarize LastHeartbeat=max(TimeGenerated) by Computer, OSType
    | order by Computer asc
    ```
+   In workbook and Logs pickers, use **`law-arc-demo` in `rg-arc-demo`**. Do not
+   use the `McapsGovernance` / `mcaps...-la` workspace; that is a subscription
+   governance workspace and is not part of this demo.
 
 ## 3. Live flow
 
