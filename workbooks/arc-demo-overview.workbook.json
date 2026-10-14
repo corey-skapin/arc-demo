@@ -95,9 +95,9 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "Syslog\n| where TimeGenerated > ago(24h) and SeverityLevel in ('err','crit','alert','emerg')\n| summarize Events = count() by Computer, Facility, SeverityLevel\n| order by Events desc",
+        "query": "Syslog\n| where TimeGenerated > ago(24h)\n| summarize Events = count(), LastSeen = max(TimeGenerated) by Computer, Facility, SeverityLevel\n| extend SeverityRank = case(\n    SeverityLevel in ('emerg', 'alert', 'crit', 'err'), 1,\n    SeverityLevel == 'warning', 2,\n    SeverityLevel == 'notice', 3,\n    SeverityLevel == 'info', 4,\n    5\n)\n| order by SeverityRank asc, Events desc",
         "size": 0,
-        "title": "Linux syslog errors (24h)",
+        "title": "Linux syslog activity (24h)",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
         "visualization": "table"
