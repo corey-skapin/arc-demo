@@ -67,12 +67,12 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    ```
 3. Open tabs:
    - **Arc Demo — Estate Overview** workbook.
-   - **Azure Arc → Servers** filtered to `rg-arc-demo`.
-   - **Azure Arc → Servers → Inventory**.
-   - **Machine Configuration** / Guest Configuration view for Arc servers.
+   - Azure portal search: **Servers - Azure Arc**, filtered to resource group `rg-arc-demo`.
+   - **Resource Graph Explorer** for tag and inventory queries.
+   - **Machine configuration** or **Azure Policy → Compliance**, filtered to the demo Arc machines if the tenant exposes those blades.
    - **Azure Update Manager → Machines** filtered to the demo RG.
    - **Defender for Cloud → Recommendations** and **Regulatory compliance**.
-   - **Azure Arc → SQL Server instances** only if the optional advanced SQL path was enabled with `-InstallSql`.
+   - Portal search: **SQL Server instances - Azure Arc** only if the optional advanced SQL path was enabled with `-InstallSql`.
    - **rg-arc-demo → Alerts** and **Action group**.
    - If deployed: Container App, AKS cluster, and Azure-native VM in `rg-arc-demo-infra`.
 4. Sanity-check Monitor-supported hosts are reporting:
@@ -103,7 +103,10 @@ Open **Arc Demo — Estate Overview**.
 
 ### 3.3 Inventory and Resource Graph (2 min)
 
-Open **Azure Arc → Servers** and **Inventory**.
+Open Azure portal search: **Servers - Azure Arc**, then filter to resource group
+`rg-arc-demo`. This Arc server list is the current portal inventory view; there
+is no separate **Inventory** blade in the current Azure Arc portal experience.
+Use **Resource Graph Explorer** for the tag-based inventory query below.
 
 - Show tags: `osTier`, `monitorTier`, `esuEligible`, `inventory=arc`, `updateManager=assessment`, `defender=plan2`, `machineConfig=enabled`.
 - For 2008/2012-era entries, explain: "No AMA. Still useful in the Azure control plane for inventory, governance, ESU planning, Defender/Update Manager/Machine Configuration surfaces where supported."
@@ -119,7 +122,10 @@ resources
 
 ### 3.4 Machine Configuration / TLS 1.2 beat (2 min)
 
-Open Machine Configuration / Guest Configuration for an Arc server, then the compliance workbook if needed.
+Open **Machine configuration** if it is available in the portal, or use
+**Azure Policy → Compliance** filtered to the demo assignments and Arc machines.
+Use the compliance workbook if the tenant hides or delays the Machine
+configuration blade.
 
 Talk track:
 

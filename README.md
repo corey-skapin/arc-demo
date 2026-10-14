@@ -81,7 +81,9 @@ az account set --subscription <SUBSCRIPTION_ID>
   -DeployContainerApps $true
 ```
 
-When it finishes, open the workbook URL printed at the end (or navigate to **Azure Arc → Workbooks → "Arc Demo — Estate Overview"** in the portal).
+When it finishes, open the workbook URL printed at the end, or search for
+**Workbooks** in the Azure portal and select **Arc Demo - Estate Overview** in
+`rg-arc-demo`.
 
 > **Optional SQL stance:** Installing SQL Server on an Azure VM is fine for workload simulation, but this Azure-VM-backed demo should not claim **SQL Server enabled by Azure Arc** validation. Keep SQL skipped by default until a SQL workload simulation is deliberately added. See [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md).
 

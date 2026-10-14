@@ -476,7 +476,8 @@ Wait 10–15 min after CT extension installs for first data. Then in Azure Porta
 Built-in workbooks to pin alongside (no extra config):
 - **Defender for Cloud → Regulatory compliance** (MCSB + NIST scorecards — ~12 h to first populate)
 - **Defender for Cloud → Microsoft Defender Vulnerability Management** (CVSS-scored vulns from MDE)
-- **Azure Arc → Inventory**
+- **Servers - Azure Arc** resource list, filtered to the demo resource group. Use
+  **Resource Graph Explorer** for tag and inventory queries.
 - **Azure Monitor → VM Insights** (Performance + Map tabs)
 
 ## Phase 5 — SQL on Arc (optional advanced / not default)
@@ -550,7 +551,7 @@ foreach ($vm in @('win-sql-01','win-sql-02')) {
 - `azureDefenderStatus` should read `Protected` (Defender for SQL is included with Defender Plan 2).
 - Best Practice Assessment first run takes 30-60 min after extension reports healthy.
 
-Portal: **Azure Arc → SQL Server instances** then drill into each for BPA / Migration / Backup tiles.
+Portal search: **SQL Server instances - Azure Arc**, then drill into each for BPA / Migration / Backup tiles.
 
 Current status: optional/advanced and **not live-validated** after the SQL setup hang; do not use this as part of the default customer run.
 
