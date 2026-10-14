@@ -146,7 +146,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "SqlAssessment_CL\r\n| where TimeGenerated {TimeRange}\r\n| extend asmt = parse_csv(RawData)\r\n| extend\r\n    AsmtId=tostring(asmt[1]),\r\n    CheckId=tostring(asmt[2]),\r\n    Severity=case(\r\n        asmt[8] == 30, \"High\", \r\n        asmt[8] == 20, \"Medium\", \r\n        asmt[8] == 10, \"Low\", \r\n        asmt[8] == 2, \"Critical\",\r\n        asmt[8] == 1, \"Warning\",\r\n        \"Information\"\r\n    ),\r\n    Sev = toint(asmt[8])\r\n| join kind=inner\r\n    (\r\n    SqlAssessment_CL\r\n    | extend asmt = parse_csv(RawData)\r\n    | extend AsmtId=tostring(asmt[1])   \r\n    | summarize arg_max(TimeGenerated, *) by _ResourceId\r\n    | project AsmtId\r\n    ) on AsmtId\r\n| where Sev > 0\r\n| summarize IssueCount = count() by Severity, Sev\r\n| order by Sev desc\r\n| project Severity, IssueCount",
+        "query": "datatable(Severity:string, IssueCount:long)\r\n[\r\n  \"No SQL BPA data collected in this lab\", 0\r\n]",
         "size": 1,
         "title": "Issues by Severity",
         "queryType": 0,
@@ -187,7 +187,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "SqlAssessment_CL\r\n| where TimeGenerated {TimeRange}\r\n| extend asmt = parse_csv(RawData)\r\n| extend\r\n    AsmtId=tostring(asmt[1]),\r\n    CheckId=tostring(asmt[2]),\r\n    DisplayString=tostring(asmt[3]),\r\n    Severity=case(\r\n        asmt[8] == 30, \"High\", \r\n        asmt[8] == 20, \"Medium\", \r\n        asmt[8] == 10, \"Low\", \r\n        asmt[8] == 2, \"Critical\",\r\n        asmt[8] == 1, \"Warning\",\r\n        \"Information\"\r\n    ),\r\n    Sev = toint(asmt[8])\r\n| join kind=inner\r\n    (\r\n    SqlAssessment_CL\r\n    | extend asmt = parse_csv(RawData)\r\n    | extend AsmtId=tostring(asmt[1])   \r\n    | summarize arg_max(TimeGenerated, *) by _ResourceId\r\n    | project AsmtId\r\n    ) on AsmtId\r\n| where Sev > 0\r\n| summarize \r\n    AffectedServers = dcount(_ResourceId),\r\n    TotalIssues = count() \r\n    by CheckId, DisplayString, Severity, Sev\r\n| top 10 by AffectedServers desc\r\n| project Issue = DisplayString, Severity, AffectedServers, TotalIssues\r\n| order by AffectedServers desc",
+        "query": "datatable(Issue:string, Severity:string, AffectedServers:long, TotalIssues:long)\r\n[\r\n  \"No SQL BPA data collected in this lab\", \"Information\", 0, 0\r\n]",
         "size": 1,
         "title": "Top 10 Most Common Issues",
         "queryType": 0,
