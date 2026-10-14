@@ -602,31 +602,32 @@ az vm deallocate -g rg-arc-demo-infra -n win-app-01
 ### 7.1 Cost Management budget (AUD 200/mo)
 Subscription-scoped budget filtered to both demo RGs. Email alerts at 50/80/100% actual + 100% forecast go to the runtime `-AdminEmail` recipient.
 
-### 7.2 Demo run-sheet
-Saved as `Scratchpad\arc-demo-runsheet.md` — the persona-ordered click path for live demos.
+### 7.2 Demo runsheet
+Current live-demo click path: [`docs/runsheet.md`](runsheet.md).
 
 ### 7.3 Hibernate / Activate cycle
 The demo is designed to be parked between customer engagements and woken up on demand.
 
 | Script | What it does | Cost impact |
 |---|---|---|
-| **`arc-demo-hibernate.ps1`** | Deallocates all 8 VMs, deletes NAT GW + public IP. Keeps LAW, DCRs, alerts, Arc records, OS disks. | Drops from ~AUD 210/mo (active) to **~AUD 35/mo** hibernated |
-| **`arc-demo-activate.ps1`** | Recreates NAT GW + PIP, starts all VMs, restarts Arc + AMA agents, polls until Connected + Heartbeat. `-SkipValidate` for quicker prep-the-night-before runs. | Restores ~AUD 210/mo run-rate |
+| **`scripts\Hibernate-ArcDemo.ps1`** | Deallocates all 8 VMs, deletes NAT GW + public IP, and scales optional Container Apps to zero. Keeps LAW, DCRs, alerts, Arc records, OS disks. | Drops from ~AUD 210/mo (active) to **~AUD 35/mo** hibernated |
+| **`scripts\Activate-ArcDemo.ps1`** | Recreates NAT GW + PIP, restores optional Container Apps replicas, starts all VMs, restarts Arc + AMA agents, polls until Connected + Heartbeat. `-SkipValidate` for quicker prep-the-night-before runs. | Restores ~AUD 210/mo run-rate |
 
 Activate from cold:
 ```powershell
-.\arc-demo-activate.ps1
+.\scripts\Activate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
 # ~5-8 min end-to-end to demo-ready
 ```
 
 Hibernate after a demo:
 ```powershell
-.\arc-demo-hibernate.ps1
+.\scripts\Hibernate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
 # ~2-3 min to fully torn down to cheap state
 ```
 
 ### 7.4 Tear-down script (full nuke)
-Saved as `Scratchpad\arc-demo-teardown.ps1`. Deletes both RGs, both policy assignments, the budget, the onboarding SPN, and reverts Defender for Servers to Free. Supports `-WhatIf`.
+Use `scripts\Remove-ArcDemo.ps1`. It deletes the demo RGs and supporting
+subscription-scope resources created by the deployment. Supports `-WhatIf`.
 
 ### 7.5 Cost states summary
 | State | Monthly cost (AUD) | Notes |

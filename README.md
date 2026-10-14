@@ -177,7 +177,7 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md) | Fleet schema, legacy OS image approach, and Monitor gating rules |
 | [`docs/container-app-fault.md`](docs/container-app-fault.md) | Optional Container App fault/repair commands and alert mechanism |
 | [`docs/aks-break-scenario.md`](docs/aks-break-scenario.md) | Optional AKS crash-loop/repair commands and alert mechanism |
-| [`docs/runbook.md`](docs/runbook.md) | The original step-by-step build runbook |
+| [`docs/runbook.md`](docs/runbook.md) | Historical deep build notes; use README + `docs/runsheet.md` for the current handoff path |
 | [`docs/runsheet.md`](docs/runsheet.md) | Live demo walkthrough — what to click and what to say |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |
 | [`docs/cost.md`](docs/cost.md) | Detailed cost breakdown by state |
