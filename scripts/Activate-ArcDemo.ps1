@@ -8,6 +8,7 @@
     - Starts all VMs in parallel and waits until they're running.
     - Restarts the Arc agent (himds) and AMA on each VM so Connected status
       returns quickly without waiting for the default 5-min reconnect.
+    - Starts Azure Update Manager on-demand patch assessments after Arc reconnects.
     - Validates Arc Connected + Heartbeat (unless -SkipValidate).
 
 .PARAMETER NamePrefix
@@ -22,6 +23,9 @@
 .PARAMETER SkipValidate
     Don't poll for Heartbeat at the end. Useful for prep-the-night-before runs.
 
+.PARAMETER SkipPatchAssessment
+    Don't run Azure Update Manager on-demand patch assessments during activation.
+
 .EXAMPLE
     .\Activate-ArcDemo.ps1
 #>
@@ -30,7 +34,8 @@ param(
     [string]$NamePrefix = 'arc-demo',
     [string]$Location = 'australiaeast',
     [string]$SkinPath = '',
-    [switch]$SkipValidate
+    [switch]$SkipValidate,
+    [switch]$SkipPatchAssessment
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,11 +120,6 @@ foreach ($j in $jobs) {
     Remove-Job $j -Force
 }
 
-if ($SkipValidate) {
-    Write-Header '✅ Activated (validation skipped)'
-    return
-}
-
 # 4. Wait for Arc Connected
 Write-Step 'Waiting for all Arc machines to report Connected...'
 Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Arc Connected' -Condition {
@@ -128,7 +128,68 @@ Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Arc Connected' -Con
 } | Out-Null
 Write-Ok 'All Arc machines Connected'
 
-# 5. Heartbeat
+# 5. Update Manager patch assessment
+if (-not $SkipPatchAssessment) {
+    Write-Step 'Starting Update Manager on-demand patch assessments...'
+    $arcMachineRecords = @(az connectedmachine list -g $arcRg `
+            --query "[?status=='Connected'].{name:name,id:id}" `
+            -o json --only-show-errors | ConvertFrom-Json)
+    $patchTargets = @($arcMachineRecords | Where-Object { $vms -contains $_.name })
+    if ($patchTargets.Count -lt $vms.Count) {
+        throw "Found $($patchTargets.Count) connected Arc machine records for $($vms.Count) VMs; cannot run patch assessments for the full demo fleet"
+    }
+
+    $patchJobs = @()
+    foreach ($target in $patchTargets) {
+        $patchJobs += Start-Job -Name "patch-$($target.name)" -ScriptBlock {
+            param($machineName, $machineId)
+            $output = az connectedmachine assess-patches --ids $machineId --no-wait --only-show-errors -o none 2>&1
+            [pscustomobject]@{
+                Name     = $machineName
+                ExitCode = $LASTEXITCODE
+                Output   = ($output | Out-String).Trim()
+            }
+        } -ArgumentList $target.name, $target.id
+    }
+
+    $patchJobs | Wait-Job -Timeout 300 | Out-Null
+    $runningPatchJobs = @($patchJobs | Where-Object { $_.State -eq 'Running' })
+    if ($runningPatchJobs) {
+        $timedOutNames = ($runningPatchJobs | Select-Object -ExpandProperty Name) -join ', '
+        $runningPatchJobs | Stop-Job
+        $patchJobs | Remove-Job -Force
+        throw "Timed out submitting Update Manager patch assessments: $timedOutNames"
+    }
+
+    foreach ($job in $patchJobs) {
+        $result = Receive-Job $job
+        Remove-Job $job -Force
+        if ($job.State -ne 'Completed' -or -not $result) {
+            $details = if ($result.Output) { ": $($result.Output)" } else { '' }
+            throw "Patch assessment submission failed for $($job.Name)$details"
+        }
+        if ($result.ExitCode -ne 0) {
+            if ($result.Output -match 'OperationConflict') {
+                Write-Warn "Patch assessment operation already in progress for $($result.Name)"
+                continue
+            }
+            $details = if ($result.Output) { ": $($result.Output)" } else { '' }
+            throw "Patch assessment submission failed for $($result.Name)$details"
+        }
+        Write-Ok "Patch assessment submitted for $($result.Name)"
+    }
+    Write-Warn 'Update Manager assessment runs asynchronously; allow several minutes for portal data to refresh'
+}
+else {
+    Write-Ok 'Update Manager patch assessment skipped'
+}
+
+if ($SkipValidate) {
+    Write-Header '✅ Activated (Heartbeat validation skipped)'
+    return
+}
+
+# 6. Heartbeat
 Write-Step 'Waiting for Heartbeat from all hosts...'
 $lawCustId = az monitor log-analytics workspace show -g $arcRg -n "law-$NamePrefix" --query customerId -o tsv 2>$null
 Wait-Until -TimeoutSeconds 600 -IntervalSeconds 45 -Message 'Heartbeat' -Condition {

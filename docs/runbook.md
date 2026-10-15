@@ -619,7 +619,7 @@ The demo is designed to be parked between customer engagements and woken up on d
 | Script | What it does | Cost impact |
 |---|---|---|
 | **`scripts\Hibernate-ArcDemo.ps1`** | Deallocates all 8 VMs, deletes NAT GW + public IP, and scales optional Container Apps to zero. Keeps LAW, DCRs, alerts, Arc records, OS disks. | Drops from ~AUD 210/mo (active) to **~AUD 35/mo** hibernated |
-| **`scripts\Activate-ArcDemo.ps1`** | Recreates NAT GW + PIP, restores optional Container Apps replicas, starts all VMs, restarts Arc + AMA agents, polls until Connected + Heartbeat. `-SkipValidate` for quicker prep-the-night-before runs. | Restores ~AUD 210/mo run-rate |
+| **`scripts\Activate-ArcDemo.ps1`** | Recreates NAT GW + PIP, restores optional Container Apps replicas, starts all VMs, restarts Arc + AMA agents, polls until Connected, starts on-demand Update Manager patch assessments, then validates Heartbeat. The patch assessment runs asynchronously; `-SkipValidate` skips final Heartbeat validation and `-SkipPatchAssessment` skips assessment submission. | Restores ~AUD 210/mo run-rate |
 
 Activate from cold:
 ```powershell

@@ -65,6 +65,10 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    ```powershell
    .\scripts\Activate-ArcDemo.ps1 -NamePrefix arc-demo
    ```
+   The activation script waits for Arc Connected, then starts on-demand Update
+   Manager patch assessments for the demo machines before the final Heartbeat
+   check. The scan runs asynchronously, so allow several minutes before the
+   Update Manager beat.
 3. Open tabs:
    - **Arc Demo — Estate Overview** workbook.
    - **Azure Arc** > **Machines**, filtered to resource group `rg-arc-demo`.
@@ -152,7 +156,12 @@ Open **Azure Update Manager**, then **Machines**, filtered to `rg-arc-demo`.
   still says machines do not have periodic assessment enabled, refresh after a
   few minutes; `Deploy-ArcDemo.ps1` sets `assessment-mode=AutomaticByPlatform`
   on the Arc machine OS profile.
-- Show patch assessment/compliance if populated.
+- Show patch assessment/compliance. `Activate-ArcDemo.ps1` starts an on-demand
+  patch assessment during wake-up; if the blade is still empty, refresh or come
+  back after the assessment finishes.
+- In the current lab, Windows assessment data is the reliable live proof point.
+  Linux rows can lag while the `LinuxOsUpdateExtension` is provisioning; do not
+  pause the demo waiting for Linux rows.
 - For WS2016+: tie patch posture to the full Monitor path.
 - For WS2008/WS2012-era: pivot to ESU eligibility and lifecycle risk.
 - Message: "Arc lets the platform team discuss patching and ESU from one Azure place, even before migration."

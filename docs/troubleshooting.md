@@ -104,6 +104,45 @@ az vm run-command invoke -g rg-arc-demo-infra -n lnx-app-01 --command-id RunShel
 
 Wait 5 min and re-check Heartbeat.
 
+## Update Manager shows no update data after activation
+
+**Symptom** - Azure Update Manager shows no update data, or Linux Arc machines
+show `LinuxOsUpdateExtension` stuck in `Creating` or `Deleting`.
+
+**Cause** - Periodic assessment only fetches data every 24 hours. The activation
+script submits an on-demand assessment, but Update Manager creates temporary OS
+update extensions and the portal data is asynchronous. In the current lab,
+Windows assessment results complete reliably first; Linux extension provisioning
+can lag.
+
+**Fix** - First confirm the activation script submitted assessments:
+
+```powershell
+$start = (Get-Date).AddHours(-2).ToString('o')
+az monitor activity-log list -g rg-arc-demo --start-time $start `
+  --query "[?operationName.value=='Microsoft.HybridCompute/machines/assessPatches/action'].{time:eventTimestamp,status:status.value,resource:resourceId}" `
+  -o table
+```
+
+Then inspect the update extension instance view:
+
+```powershell
+foreach ($name in az connectedmachine list -g rg-arc-demo --query "[].name" -o tsv) {
+  $m = az connectedmachine show -g rg-arc-demo -n $name --expand instanceView -o json | ConvertFrom-Json
+  $ext = @($m.resources | Where-Object { $_.name -in @('WindowsOsUpdateExtension','LinuxOsUpdateExtension') }) | Select-Object -First 1
+  [pscustomobject]@{
+    Name = $name
+    Extension = $ext.name
+    ProvisioningState = $ext.properties.provisioningState
+    Message = $ext.properties.instanceView.status.message
+  }
+}
+```
+
+For the live demo, use the Windows assessment rows as the reliable proof point
+and state that Linux assessment data is still processing if the Linux extension
+has not reached `Succeeded`.
+
 ## `az` commands fail with `AuthorizationFailed` against the *wrong* subscription
 
 **Symptom** — All your `az` commands suddenly start returning `AuthorizationFailed` against a sub ID you don't recognise.

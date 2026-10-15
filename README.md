@@ -97,13 +97,17 @@ Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor 
 # After a demo — deallocates VMs, removes NAT, and scales optional Container Apps to zero
 .\scripts\Hibernate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
 
-# Before the next demo — back to demo-ready in ~5-8 min
+# Before the next demo — back to demo-ready in ~5-8 min; starts Update Manager assessment
 .\scripts\Activate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
 ```
 
 This is distinct from cleanup deletion: it preserves resource groups, Arc records,
 workbooks, DCRs, alerts, disks, and Log Analytics so the demo can be reactivated.
 Use `Remove-ArcDemo.ps1` only when you want to delete the estate permanently.
+Activation also starts on-demand Azure Update Manager patch assessments after
+the Arc machines reconnect. The assessment job runs asynchronously, so open the
+Update Manager blade later in the walkthrough or allow several minutes for the
+portal data to refresh.
 
 ### Remove permanently
 
