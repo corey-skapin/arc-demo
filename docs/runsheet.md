@@ -92,6 +92,10 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
 
 "This is for customers who already have a hybrid estate and need one operations plane: inventory, config, patch/security posture, logs, alerts, and a path to modern AI-assisted ops later. Today is Act 1: Arc + Monitor. It stands alone."
 
+Presenter rule from Nic's runthrough: do not open the Arc server resource list
+first. Lead with the workbook and operational outcomes, then let the customer ask
+how the estate got there.
+
 ### 3.2 Estate overview workbook (2 min)
 
 Open **Arc Demo — Estate Overview**.
@@ -99,7 +103,11 @@ Open **Arc Demo — Estate Overview**.
 - Show connected hosts and OS mix.
 - Call out default WS2016/2019/2022 + Ubuntu fleet.
 - If using a mixed legacy fleet, point to `monitorTier=full-monitor` versus `arc-control-plane-only`.
-- Message: "Start with outcomes: estate, health, drift, risk. Arc is how the on-prem estate enters Azure operations."
+- If populated, use software/application inventory as the start of an application
+  rationalisation conversation.
+- Message: "This is what a head of platform wants to see on Monday morning:
+  estate, health, drift, risk. Arc is how the on-prem estate enters Azure
+  operations."
 
 ### 3.3 Inventory and Resource Graph (2 min)
 
@@ -146,9 +154,13 @@ Open **Azure Update Manager → Machines** filtered to `rg-arc-demo`.
 Open **Defender for Cloud → Recommendations** and **Regulatory compliance**.
 
 - Show Defender for Servers Plan 2 at subscription scope.
-- Open a machine recommendation or vulnerability finding if populated.
+- Open a machine recommendation or vulnerability finding if populated. If
+  vulnerability findings are available, show CVE/CVSS context and link it back
+  to Defender for Servers Plan 2 coverage.
 - Show MCSB/NIST assignments; remind that policy/compliance can take hours to populate.
-- Message: "Security sees the same governance plane for Azure and hybrid resources."
+- Message: "Security sees the same governance plane for Azure and hybrid
+  resources. This is the same conversation whether the server is Azure, VMware,
+  or another connected environment."
 
 ### 3.7 Monitor deep dive: 2016+ full path (4 min)
 
@@ -157,6 +169,7 @@ Use a WS2016/2019/2022 host.
 - **Logs**: Heartbeat, Perf, Event, ConfigurationChange.
 - **VM Insights**: dependency map for supported Windows tiers.
 - **Change Tracking**: software/service/file/registry drift.
+- **Performance**: CPU and memory trends from Perf/InsightsMetrics.
 
 Queries:
 
@@ -173,6 +186,10 @@ ConfigurationChange
 ```
 
 Key line: "2016+ gets the full Monitor story; pre-2016 stays Arc-control-plane-only by design."
+
+Optional customer-value line: "This is the evidence that stops a sizing or SQL
+licensing conversation being driven by fear. If the actual peak is modest, the
+answer may be right-size and govern, not automatically buy bigger."
 
 ### 3.8 SQL workload simulation (optional DBA beat, 2 min)
 
@@ -194,6 +211,9 @@ Open **rg-arc-demo → Alerts**.
 - Show `alert-arc-demo-host-missing-heartbeat`.
 - Show Action Group email receiver.
 - Explain that this Action Group is the seam a later optional `sre-agent` repo can consume; this repo itself stops at Azure Monitor alerting.
+- ITSM line: "In a customer environment, this Action Group can also carry a
+  webhook into ServiceNow, PagerDuty, or another HTTP endpoint. The demo keeps
+  email as the simplest visible proof."
 
 Optional force alert:
 
@@ -202,6 +222,17 @@ az vm deallocate -g rg-arc-demo-infra -n win-app-01
 # Reset after the demo:
 az vm start -g rg-arc-demo-infra -n win-app-01
 ```
+
+### 3.10 Only now open the Arc server resource (2 min)
+
+After the customer has seen the workbook, security, operations, performance, and
+alert story, open **Servers - Azure Arc** and drill into one machine.
+
+- Show the resource identity and tags.
+- Show extensions, RBAC, Activity log, and the Azure-side management surface.
+- Key line: "The machine owner still has control. Platform teams get inventory,
+  policy, monitoring, and audit without starting from RDP or server-by-server
+  tooling."
 
 ## 4. Optional workload beats
 
