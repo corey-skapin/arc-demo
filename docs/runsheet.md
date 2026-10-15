@@ -154,9 +154,17 @@ Open **Azure Update Manager → Machines** filtered to `rg-arc-demo`.
 Open **Defender for Cloud → Recommendations** and **Regulatory compliance**.
 
 - Show Defender for Servers Plan 2 at subscription scope.
+- Current demo has Defender for Servers Plan 2 enabled and MDE extensions on the
+  Arc machines (`MDE.Windows` on Windows, `MDE.Linux` on Linux).
+- Use live recommendations as the co-sell: the lab currently surfaces examples
+  such as missing periodic update checks, Windows Defender Exploit Guard,
+  Linux SSH key authentication, and secure protocol recommendations.
 - Open a machine recommendation or vulnerability finding if populated. If
   vulnerability findings are available, show CVE/CVSS context and link it back
   to Defender for Servers Plan 2 coverage.
+- Do not promise CVE/CVSS drill-down unless the Defender vulnerability blade is
+  visibly populated at demo time. The reliable claim is posture, recommendations
+  and MDE coverage.
 - Show MCSB/NIST assignments; remind that policy/compliance can take hours to populate.
 - Message: "Security sees the same governance plane for Azure and hybrid
   resources. This is the same conversation whether the server is Azure, VMware,
