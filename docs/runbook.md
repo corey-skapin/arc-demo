@@ -476,7 +476,8 @@ Wait 10–15 min after CT extension installs for first data. Then in Azure Porta
 Built-in workbooks to pin alongside (no extra config):
 - **Defender for Cloud → Regulatory compliance** (MCSB + NIST scorecards — ~12 h to first populate)
 - **Defender for Cloud → Microsoft Defender Vulnerability Management** (CVSS-scored vulns from MDE)
-- **Servers - Azure Arc** resource list, filtered to the demo resource group. Use
+- **Azure Arc** > **Machines**, filtered to the demo resource group. Fallback:
+  open `rg-arc-demo` and filter to `Microsoft.HybridCompute/machines`. Use
   **Resource Graph Explorer** for tag and inventory queries.
 - **Azure Monitor → VM Insights** (Performance + Map tabs)
 

@@ -67,7 +67,9 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    ```
 3. Open tabs:
    - **Arc Demo — Estate Overview** workbook.
-   - Azure portal search: **Servers - Azure Arc**, filtered to resource group `rg-arc-demo`.
+   - **Azure Arc** > **Machines**, filtered to resource group `rg-arc-demo`.
+     Fallback: open resource group `rg-arc-demo` and filter resource type to
+     `Microsoft.HybridCompute/machines`.
    - **Resource Graph Explorer** for tag and inventory queries.
    - **Machine configuration** or **Azure Policy → Compliance**, filtered to the demo Arc machines if the tenant exposes those blades.
    - **Azure Update Manager → Machines** filtered to the demo RG.
@@ -111,10 +113,12 @@ Open **Arc Demo — Estate Overview**.
 
 ### 3.3 Inventory and Resource Graph (2 min)
 
-Open Azure portal search: **Servers - Azure Arc**, then filter to resource group
-`rg-arc-demo`. This Arc server list is the current portal inventory view; there
-is no separate **Inventory** blade in the current Azure Arc portal experience.
-Use **Resource Graph Explorer** for the tag-based inventory query below.
+Open **Azure Arc** > **Machines**, then filter to resource group `rg-arc-demo`.
+If that navigation moves, open resource group `rg-arc-demo` and filter resource
+type to `Microsoft.HybridCompute/machines`. This machine list is the reliable
+portal inventory view; there is no separate **Inventory** blade in the current
+Azure Arc portal experience. Use **Resource Graph Explorer** for the tag-based
+inventory query below.
 
 - Show tags: `osTier`, `monitorTier`, `esuEligible`, `inventory=arc`, `updateManager=assessment`, `defender=plan2`, `machineConfig=enabled`.
 - For 2008/2012-era entries, explain: "No AMA. Still useful in the Azure control plane for inventory, governance, ESU planning, Defender/Update Manager/Machine Configuration surfaces where supported."
@@ -234,7 +238,9 @@ az vm start -g rg-arc-demo-infra -n win-app-01
 ### 3.10 Only now open the Arc server resource (2 min)
 
 After the customer has seen the workbook, security, operations, performance, and
-alert story, open **Servers - Azure Arc** and drill into one machine.
+alert story, open **Azure Arc** > **Machines** and drill into one machine.
+Fallback: open `rg-arc-demo` and select any `Microsoft.HybridCompute/machines`
+resource.
 
 - Show the resource identity and tags.
 - Show extensions, RBAC, Activity log, and the Azure-side management surface.
