@@ -148,6 +148,10 @@ Talk track:
 
 Open **Azure Update Manager**, then **Machines**, filtered to `rg-arc-demo`.
 
+- Periodic assessment should be enabled on all demo Arc machines. If the portal
+  still says machines do not have periodic assessment enabled, refresh after a
+  few minutes; `Deploy-ArcDemo.ps1` sets `assessment-mode=AutomaticByPlatform`
+  on the Arc machine OS profile.
 - Show patch assessment/compliance if populated.
 - For WS2016+: tie patch posture to the full Monitor path.
 - For WS2008/WS2012-era: pivot to ESU eligibility and lifecycle risk.

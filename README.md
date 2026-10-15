@@ -14,7 +14,7 @@ Default deployment:
 - 8 config-driven Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` — fully supported for demo/test scenarios)
 - 5 × Windows Server across WS2016/WS2019/WS2022 by default, including 2 SQL-capable Windows hosts (`win-sql-01/02`) that remain plain Windows VMs unless the optional advanced SQL path is explicitly enabled
 - 3 × Ubuntu 22.04 LTS
-- Log Analytics workspace, DCRs, Defender for Servers Plan 2, VM Insights, Change Tracking, MCSB + NIST policy initiatives, heartbeat alert, Action Group, and a custom workbook tuned for [`docs/runsheet.md`](docs/runsheet.md)
+- Log Analytics workspace, DCRs, Defender for Servers Plan 2, VM Insights, Change Tracking, Azure Update Manager periodic assessment, MCSB + NIST policy initiatives, heartbeat alert, Action Group, and a custom workbook tuned for [`docs/runsheet.md`](docs/runsheet.md)
 
 Optional workloads, independently toggleable in any combination:
 

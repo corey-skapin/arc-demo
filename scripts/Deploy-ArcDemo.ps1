@@ -812,6 +812,32 @@ foreach ($machine in $deployedFleet) {
 }
 Write-Ok 'Arc machine tags updated'
 
+Write-Header 'Phase 5.5 — Update Manager periodic assessment'
+foreach ($machine in $deployedFleet) {
+    $vm = $machine.name
+    $osType = [string]$machine.osType
+    $profilePath = if ($osType -eq 'Windows') {
+        'windows-configuration.patch-settings.assessment-mode=AutomaticByPlatform'
+    } elseif ($osType -eq 'Linux') {
+        'linux-configuration.patch-settings.assessment-mode=AutomaticByPlatform'
+    } else {
+        ''
+    }
+
+    if (-not $profilePath) {
+        Write-Warn "Skipping periodic assessment for $vm — unsupported OS type '$osType'"
+        continue
+    }
+
+    az connectedmachine update -g $arcRg -n $vm `
+        --os-profile $profilePath `
+        --only-show-errors -o none
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to enable periodic assessment for Arc machine $vm"
+    }
+}
+Write-Ok "Periodic assessment enabled on $($deployedFleet.Count) Arc machines"
+
 Remove-Item $libDir -Recurse -Force
 
 # Phase 6: AMA (Windows via Arc, Linux via Azure VM) + DCR associations to Arc resource
