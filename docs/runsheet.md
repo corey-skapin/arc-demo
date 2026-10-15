@@ -146,7 +146,7 @@ Talk track:
 
 ### 3.5 Update Manager and ESU beat (3 min)
 
-Open **Azure Update Manager → Machines** filtered to `rg-arc-demo`.
+Open **Azure Update Manager**, then **Machines**, filtered to `rg-arc-demo`.
 
 - Show patch assessment/compliance if populated.
 - For WS2016+: tie patch posture to the full Monitor path.
