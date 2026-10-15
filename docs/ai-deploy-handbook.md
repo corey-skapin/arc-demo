@@ -84,7 +84,7 @@ time/cost. Keep `-InstallSql` off for this Azure-only lab.
 | Resource groups exist | `az group show -n rg-arc-demo`; `az group show -n rg-arc-demo-infra` |
 | Arc machines connected | `az connectedmachine list -g rg-arc-demo -o table` |
 | Monitor heartbeat | Log Analytics query: `Heartbeat | where TimeGenerated > ago(30m)` |
-| Workbook exists | Azure Arc > Workbooks > `Arc Demo - Estate Overview` or skin title |
+| Workbook exists | Search **Workbooks** in the Azure portal and open `Arc Demo - Estate Overview` or the skin title. Fallback: resource group `rg-arc-demo` > Workbooks. |
 | Action Group exists | `az monitor action-group show -g rg-arc-demo -n ag-arc-demo` |
 | Container App optional alert | `alert-arc-demo-containerapp-restarts` in `rg-arc-demo-infra` |
 | SQL workload simulation optional | `docs/sql-workload-simulation.md` commands run against `win-sql-01` |

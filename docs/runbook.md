@@ -471,15 +471,21 @@ Two sets of workbooks land in `rg-arc-demo`:
 All 6 are deployed as shared workbooks via REST PUT (idempotent — re-runs match on the `workbookTag` tag).
 
 ### 4.6 Validation
-Wait 10–15 min after CT extension installs for first data. Then in Azure Portal: `rg-arc-demo` → Workbooks → "Arc Demo — Estate Overview". Tagging tile is instant via Resource Graph.
+Wait 10-15 min after CT extension installs for first data. Then search
+**Workbooks** in the Azure portal and open **Arc Demo - Estate Overview**.
+Fallback: open resource group `rg-arc-demo`, then Workbooks. Tagging tile is
+instant via Resource Graph.
 
 Built-in workbooks to pin alongside (no extra config):
-- **Defender for Cloud → Regulatory compliance** (MCSB + NIST scorecards — ~12 h to first populate)
-- **Defender for Cloud → Microsoft Defender Vulnerability Management** (CVSS-scored vulns from MDE)
+- In **Defender for Cloud**, use **Recommendations** and **Regulatory compliance**
+  when populated. MCSB/NIST scorecards can take ~12 h to first populate.
+- Use Microsoft Defender Vulnerability Management / CVE views only if the portal
+  has populated vulnerability findings for the demo machines.
 - **Azure Arc** > **Machines**, filtered to the demo resource group. Fallback:
   open `rg-arc-demo` and filter to `Microsoft.HybridCompute/machines`. Use
   **Resource Graph Explorer** for tag and inventory queries.
-- **Azure Monitor → VM Insights** (Performance + Map tabs)
+- Azure Monitor VM insights, Performance and Map views where the portal exposes
+  them for the selected machine.
 
 ## Phase 5 — SQL on Arc (optional advanced / not default)
 

@@ -72,10 +72,10 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
      `Microsoft.HybridCompute/machines`.
    - **Resource Graph Explorer** for tag and inventory queries.
    - **Machine configuration** or **Azure Policy → Compliance**, filtered to the demo Arc machines if the tenant exposes those blades.
-   - **Azure Update Manager → Machines** filtered to the demo RG.
-   - **Defender for Cloud → Recommendations** and **Regulatory compliance**.
+   - Open **Azure Update Manager**, then **Machines**, filtered to the demo RG.
+   - Open **Defender for Cloud**, then **Recommendations** and **Regulatory compliance**.
    - Portal search: **SQL Server instances - Azure Arc** only if the optional advanced SQL path was enabled with `-InstallSql`.
-   - **rg-arc-demo → Alerts** and **Action group**.
+   - Resource group `rg-arc-demo`, then **Alerts** and **Action group**.
    - If deployed: Container App, AKS cluster, and Azure-native VM in `rg-arc-demo-infra`.
 4. Sanity-check Monitor-supported hosts are reporting:
    ```kql
@@ -155,7 +155,7 @@ Open **Azure Update Manager → Machines** filtered to `rg-arc-demo`.
 
 ### 3.6 Defender for Cloud (3 min)
 
-Open **Defender for Cloud → Recommendations** and **Regulatory compliance**.
+Open **Defender for Cloud**, then **Recommendations** and **Regulatory compliance**.
 
 - Show Defender for Servers Plan 2 at subscription scope.
 - Current demo has Defender for Servers Plan 2 enabled and MDE extensions on the
@@ -218,7 +218,7 @@ Windows server, not SQL Server enabled by Azure Arc. See
 
 ### 3.9 Alerts and action group (2 min)
 
-Open **rg-arc-demo → Alerts**.
+Open resource group `rg-arc-demo`, then **Alerts**.
 
 - Show `alert-arc-demo-host-missing-heartbeat`.
 - Show Action Group email receiver.

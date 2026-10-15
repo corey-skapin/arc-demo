@@ -154,7 +154,8 @@ az connectedmachine extension show -g rg-arc-demo --machine-name win-sql-01 -n W
 
 ## Compliance scorecards (MCSB/NIST) are empty
 
-**Symptom** — Policy assignments exist, but Defender for Cloud → Regulatory compliance is blank.
+**Symptom** — Policy assignments exist, but the **Regulatory compliance** page
+in Defender for Cloud is blank.
 
 **Cause** — First policy evaluation cycle takes ~12 hours after assignment.
 
