@@ -87,12 +87,14 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    - Resource group `rg-arc-demo`, then **Alerts** and **Action group**.
    - If deployed: Container App, AKS cluster, and Azure-native VM in `rg-arc-demo-infra`.
 4. Sanity-check Monitor-supported hosts are reporting:
+
    ```kql
    Heartbeat
    | where TimeGenerated > ago(30m)
    | summarize LastHeartbeat=max(TimeGenerated) by Computer, OSType
    | order by Computer asc
    ```
+
    In workbook and Logs pickers, use **`law-arc-demo` in `rg-arc-demo`**. Do not
    use the `McapsGovernance` / `mcaps...-la` workspace; that is a subscription
    governance workspace and is not part of this demo.
@@ -341,10 +343,13 @@ Full commands: [`aks-break-scenario.md`](aks-break-scenario.md).
 
 1. Reset optional faults only if explicitly authorized; lifecycle commands preserve them.
 2. With operator approval, hibernate if the lab is not needed:
+
    ```powershell
    .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
    ```
+
 3. For permanent cleanup:
+
    ```powershell
    .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
    .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
