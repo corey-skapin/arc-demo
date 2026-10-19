@@ -58,14 +58,18 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
 ## 2. Before the meeting (T-30 min)
 
 1. Select the lab subscription:
+
    ```powershell
    az account set --subscription <SUBSCRIPTION_ID>
    ```
+
 2. If the environment is hibernated, activate it:
+
    ```powershell
    .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> -SkinPath .\config\demo-skin.json
    .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> -SkinPath .\config\demo-skin.json -OutputFormat Json
    ```
+
    After a start/reconnect, activation submits on-demand Update Manager patch
    assessments before final readiness. An already-running/connected rerun does
    not submit another assessment. Activation preserves fault flags; submission

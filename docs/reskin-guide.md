@@ -20,11 +20,13 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 ## Swap list
 
 Change per customer:
+
 - `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
 - `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. Leave `workloads.installSql` as `false` unless you intentionally want the experimental SQL branch.
 - `workloads.onPremFleetPath` for a custom OS mix.
 
 Keep constant unless the lab requirement changes:
+
 - Bicep modules, DCR streams, workbook templates, alert mechanics, Defender/Policy choices, hibernate/activate flow.
 - The repo separation: `arc-demo` remains standalone and does not require `sre-agent`.
 
@@ -35,13 +37,16 @@ Keep constant unless the lab requirement changes:
 3. Set `notifications.email` to the demo operator or customer-approved distribution list.
 4. Choose workload toggles.
 5. Run scripts without repeating those variables:
+
    ```powershell
    .\scripts\Deploy-ArcDemo.ps1 `
      -SubscriptionId <SUBSCRIPTION_ID> `
      -TenantId <TENANT_ID> `
      -SkinPath .\config\demo-skin.json
    ```
+
 6. Use the same skin for lifecycle commands:
+
    ```powershell
    .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
    .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -OutputFormat Json

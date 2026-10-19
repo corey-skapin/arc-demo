@@ -97,12 +97,12 @@ remain; never infer absence from the newest output alone.
 
 | Check | Command or portal location |
 |---|---|
-| Correct subscription | `az account show --query "{id:id,tenant:tenantId,user:user.name}" -o table` |
-| Resource groups exist | `az group show -n rg-arc-demo`; `az group show -n rg-arc-demo-infra` |
-| Arc machines connected | `az connectedmachine list -g rg-arc-demo -o table` |
-| Monitor heartbeat | Log Analytics query: `Heartbeat | where TimeGenerated > ago(30m)` |
+| Correct subscription | `az account show --subscription <SUB> --query "{id:id,tenant:tenantId,user:user.name}" -o table` |
+| Resource groups exist | `az group show --subscription <SUB> -n rg-arc-demo`; `az group show --subscription <SUB> -n rg-arc-demo-infra` |
+| Arc machines connected | `az connectedmachine list --subscription <SUB> -g rg-arc-demo -o table` |
+| Monitor heartbeat | Log Analytics query: `Heartbeat \| where TimeGenerated > ago(30m)` |
 | Workbook exists | Search **Workbooks** in the Azure portal and open `Arc Demo - Estate Overview` or the skin title. Fallback: resource group `rg-arc-demo` > Workbooks. |
-| Action Group exists | `az monitor action-group show -g rg-arc-demo -n ag-arc-demo` |
+| Action Group exists | `az monitor action-group show --subscription <SUB> -g rg-arc-demo -n ag-arc-demo` |
 | Container App optional alert | `alert-arc-demo-containerapp-restarts` in `rg-arc-demo-infra` |
 | SQL workload simulation optional | `docs/sql-workload-simulation.md` commands run against `win-sql-01` |
 
