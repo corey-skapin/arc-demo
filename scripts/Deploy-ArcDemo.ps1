@@ -10,7 +10,7 @@
       2. Bicep main.bicep deployment (RGs, network, KV, LAW, VMs,
          alerts, Defender, policies, budget)
       2.5 Data Collection Rules after Log Analytics table readiness
-      3. NAT Gateway (deployed separately so Hibernate can tear it down)
+      3. Verify explicit NAT outbound before guest onboarding
       4. Arc onboarding service principal
       5. Arc agent install on each VM (Windows via Arc ext path,
          Linux via Azure VM ext path — see AGENTS.md Gotcha 2)
@@ -39,6 +39,14 @@
 .PARAMETER SkinPath
     Optional path to a demo skin variables JSON file. Defaults to config\demo-skin.json.
 
+.PARAMETER AdminPassword
+    Current VM admin password as a SecureString for existing labs without the
+    saved Key Vault secret. Never pass a new password for routine reconciliation.
+
+.PARAMETER OnboardingSecret
+    Existing onboarding SP secret as a SecureString when new machines need
+    onboarding. Existing credentials are never reset by routine deployment.
+
 .PARAMETER Location
     Azure region. Default: australiaeast.
 
@@ -57,8 +65,8 @@
     switch and RestartCount alert. Default false.
 
 .PARAMETER DeployAks
-    Pass through the optional AKS workload toggle. Default false until the
-    workload module is implemented.
+    Deploy the optional AKS workload. Default false. Routine redeploys of
+    existing clusters preserve the sample workload/fault state.
 
 .PARAMETER OnPremFleetPath
     Optional path to a JSON file containing the on-prem simulated fleet array.
@@ -103,8 +111,8 @@
     Show the Bicep what-if output and stop.
 
 .EXAMPLE
-    .\Deploy-ArcDemo.ps1 -SubscriptionId 6ff7d039-... -TenantId 4a2e6a7b-... `
-        -AdminEmail corey@contoso.com
+    .\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> `
+        -AdminEmail demo@contoso.com
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -126,6 +134,8 @@ param(
     [string]$AutoShutdownTimezone = 'Cen. Australia Standard Time',
     [int]$BudgetAmount = 200,
     [string]$SkinPath = '',
+    [securestring]$AdminPassword,
+    [securestring]$OnboardingSecret,
     [switch]$InstallSql,
     [switch]$SkipSqlInstall
 )
@@ -133,6 +143,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+# Preserve existing CLI call syntax while enforcing one checked, explicit target.
+function Invoke-DeploymentAz { Invoke-DemoAz -Arguments $args }
+Set-Alias -Name az -Value Invoke-DeploymentAz -Scope Script -WhatIf:$false
 
 $skin = Get-DemoSkin -Path $SkinPath -RepoRoot $repoRoot
 if (-not $PSBoundParameters.ContainsKey('Location')) { $Location = Get-DemoSkinValue -Skin $skin -Path 'azure.location' -Default $Location }
@@ -147,6 +160,10 @@ if (-not $PSBoundParameters.ContainsKey('VmSize')) { $VmSize = Get-DemoSkinValue
 if (-not $PSBoundParameters.ContainsKey('AutoShutdownTime')) { $AutoShutdownTime = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTime' -Default $AutoShutdownTime }
 if (-not $PSBoundParameters.ContainsKey('AutoShutdownTimezone')) { $AutoShutdownTimezone = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTimezone' -Default $AutoShutdownTimezone }
 if (-not $PSBoundParameters.ContainsKey('BudgetAmount')) { $BudgetAmount = [int](Get-DemoSkinValue -Skin $skin -Path 'cost.monthlyBudgetAmount' -Default $BudgetAmount) }
+Assert-DemoName $NamePrefix
+if ($Location -notmatch '^[a-z0-9]+$') { throw 'Location must be an Azure region name.' }
+if ($AutoShutdownTime -notmatch '^([01][0-9]|2[0-3])[0-5][0-9]$') { throw 'AutoShutdownTime must be HHmm.' }
+if ($BudgetAmount -lt 1) { throw 'BudgetAmount must be positive.' }
 if ($PSBoundParameters.ContainsKey('InstallSql') -and $PSBoundParameters.ContainsKey('SkipSqlInstall')) {
     throw 'Use only one of -InstallSql or -SkipSqlInstall. SQL is skipped by default; pass -InstallSql only for the optional advanced SQL path.'
 }
@@ -272,8 +289,9 @@ function Wait-LogAnalyticsTables {
     )
 
     $script:MissingLawTables = @($TableNames)
+    $workspaceResource = $WorkspaceId
     $ready = Wait-Until -TimeoutSeconds $TimeoutSeconds -IntervalSeconds 30 -Message "$Label tables" -Condition {
-        $tables = @(Get-LogAnalyticsTableNames -WorkspaceId $WorkspaceId)
+        $tables = @(Get-LogAnalyticsTableNames -WorkspaceId $workspaceResource)
         $script:MissingLawTables = @($TableNames | Where-Object { $_ -notin $tables })
         return $script:MissingLawTables.Count -eq 0
     }
@@ -342,7 +360,7 @@ function Set-DataCollectionRuleAssociation {
     }
     $body = @{ properties = $properties }
     Invoke-AzRest -Method Put `
-        -Url "https://management.azure.com$ScopeResourceId/providers/Microsoft.Insights/dataCollectionRuleAssociations/$AssociationName?api-version=2022-06-01" `
+        -Url "https://management.azure.com$ScopeResourceId/providers/Microsoft.Insights/dataCollectionRuleAssociations/${AssociationName}?api-version=2022-06-01" `
         -Body $body | Out-Null
 }
 
@@ -520,12 +538,18 @@ function New-ChangeTrackingDcrBody {
 }
 
 # Phase 1: pre-flight
-$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId
+$providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
+    'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement', 'Microsoft.Insights', 'Microsoft.Security',
+    'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab', 'Microsoft.Consumption')
+if ($DeployContainerApps) { $providers += 'Microsoft.App' }
+if ($DeployAks) { $providers += @('Microsoft.ContainerService', 'Microsoft.ManagedIdentity', 'Microsoft.Resources', 'Microsoft.Storage', 'Microsoft.ContainerInstance') }
+if ($InstallSql) { $providers += 'Microsoft.AzureArcData' }
+$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $providers
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"
 $kvPrefix = "kv-$($NamePrefix -replace '-','')"
-$kvName = az keyvault list -g $infraRg --query "[?starts_with(name, '$kvPrefix')].name | [0]" -o tsv 2>$null
+$kvName = Invoke-DemoAz -Arguments @('keyvault', 'list', '-g', $infraRg, '--query', "[?starts_with(name, '$kvPrefix')].name | [0]", '-o', 'tsv') -AllowNotFound
 if ($kvName) {
     Write-Step "Found existing Key Vault $kvName — preserving for idempotent redeploy"
 } else {
@@ -535,14 +559,26 @@ if ($kvName) {
 
 # Phase 2: generate password, deploy Bicep
 Write-Header 'Generating admin password + deploying Bicep'
-$adminPwd = New-StrongPassword -Length 24
+$existingVms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound | ConvertFrom-Json)
+$existingSecret = if ($existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
+    Invoke-DemoAz -Arguments @('keyvault', 'secret', 'show', '--vault-name', $kvName, '-n', 'vm-admin-password', '--query', 'value', '-o', 'tsv') -AllowNotFound
+}
+if ($AdminPassword) {
+    $adminPwd = [System.Net.NetworkCredential]::new('', $AdminPassword).Password
+} elseif ($existingSecret) {
+    $adminPwd = $existingSecret
+} elseif ($existingVms.Count -gt 0 -and -not $WhatIfPreference) {
+    throw 'Existing VMs found but no saved admin credential. Supply the CURRENT password as -AdminPassword (SecureString); routine redeploy must not generate or rotate it.'
+} else {
+    $adminPwd = New-StrongPassword -Length 24
+}
 
-$paramFile = Join-Path $env:TEMP "arc-demo-params-$(Get-Random).json"
+$paramFile = Join-Path ([System.IO.Path]::GetTempPath()) "arc-demo-params-$(Get-Random).json"
 
 # Idempotency: if Activate-ArcDemo previously created a NAT Gateway, look it up
 # and pass the ID through to the network module so the subnet's natGateway
 # attachment is preserved on this redeploy. Without this, ARM strips the attach.
-$existingNatGwId = az network nat gateway show -g "rg-$NamePrefix-infra" -n "natgw-$NamePrefix" --query id -o tsv 2>$null
+$existingNatGwId = Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'show', '-g', $infraRg, '-n', "natgw-$NamePrefix", '--query', 'id', '-o', 'tsv') -AllowNotFound
 if ($existingNatGwId) {
     Write-Step "Found existing NAT Gateway natgw-$NamePrefix — will preserve subnet attachment"
 } else {
@@ -551,7 +587,7 @@ if ($existingNatGwId) {
 
 # Idempotency: preserve the existing budget start date. Azure refuses to change
 # the start date of an existing budget; without this guard, redeploys would fail.
-$existingBudgetStart = az consumption budget show --budget-name "budget-$NamePrefix" --query "timePeriod.startDate" -o tsv 2>$null
+$existingBudgetStart = Invoke-DemoAz -Arguments @('consumption', 'budget', 'show', '--budget-name', "budget-$NamePrefix", '--query', 'timePeriod.startDate', '-o', 'tsv') -AllowNotFound
 if ($existingBudgetStart) {
     # Normalise to YYYY-MM-01 (Azure returns full ISO timestamp)
     $existingBudgetStart = $existingBudgetStart.Substring(0, 7) + '-01'
@@ -566,11 +602,44 @@ if ($OnPremFleetPath) {
         $OnPremFleetPath = Join-Path $repoRoot $OnPremFleetPath
     }
     $resolvedFleetPath = (Resolve-Path -Path $OnPremFleetPath).Path
-    $onPremFleet = @((Get-Content -Path $resolvedFleetPath -Raw | ConvertFrom-Json -Depth 20))
+    $fleetDocument = Get-Content -LiteralPath $resolvedFleetPath -Raw | ConvertFrom-Json -Depth 20 -NoEnumerate
+    if ($fleetDocument -isnot [array]) { throw 'OnPremFleetPath must contain a JSON array, not an object.' }
+    $onPremFleet = @($fleetDocument)
     Write-Step "Using on-prem fleet config from $resolvedFleetPath ($($onPremFleet.Count) entries)"
 } elseif ($PSBoundParameters.ContainsKey('WindowsVmCount') -or $PSBoundParameters.ContainsKey('LinuxVmCount')) {
     Write-Warn 'WindowsVmCount/LinuxVmCount are deprecated; generating a count-based WS2022/Ubuntu fleet. Prefer -OnPremFleetPath for OS-mix demos.'
     $onPremFleet = @(New-CountBasedOnPremFleet -WindowsVmCount $WindowsVmCount -LinuxVmCount $LinuxVmCount)
+}
+if ($null -eq $onPremFleet) {
+    $template = Invoke-DemoAz -Arguments @('bicep', 'build', '--file', (Join-Path $repoRoot 'bicep\main.bicep'), '--stdout') | ConvertFrom-Json -Depth 100
+    $onPremFleet = @($template.parameters.onPremFleet.defaultValue)
+}
+Test-DemoFleet -Fleet $onPremFleet
+$additionalVmCount = 0
+if ($DeployArcOnPrem) {
+    foreach ($entry in $onPremFleet | Where-Object deploymentMode -eq 'azure-vm') {
+        if (-not @($existingVms | Where-Object { $_.name -eq $entry.name -and $_.hardwareProfile.vmSize -eq $VmSize -and $_.location -eq $Location }).Count) { $additionalVmCount++ }
+    }
+}
+if ($DeployAzureVMs -and -not @($existingVms | Where-Object { $_.tags.workload -eq 'azure-native-vm' -and $_.tags.demoPrefix -eq $NamePrefix -and $_.hardwareProfile.vmSize -eq $VmSize }).Count) { $additionalVmCount++ }
+Test-DemoComputeCapacity -Location $Location -VmSize $VmSize -AdditionalVmCount $additionalVmCount
+$initializeAksWorkload = $true
+if ($DeployAks) {
+    $existingCluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', "$NamePrefix-aks", '-o', 'json') -AllowNotFound | ConvertFrom-Json
+    if ($existingCluster) {
+        if ($existingCluster.powerState.code -ne 'Running' -or $existingCluster.provisioningState -ne 'Succeeded') { throw 'Existing AKS must be Running/Succeeded before deployment. Use approved activation first; deploy never starts a parked cluster incidentally.' }
+        $initializeAksWorkload = $false
+    }
+    Test-DemoComputeCapacity -Location $Location -VmSize 'Standard_B2as_v2' -AdditionalVmCount $(if ($existingCluster) { 0 } else { 1 })
+}
+$containerAppSimulateCrash = $false
+if ($DeployContainerApps) {
+    $existingApp = Invoke-DemoAz -Arguments @('containerapp', 'show', '-g', $infraRg, '-n', "ca-$NamePrefix-fault", '-o', 'json') -AllowNotFound | ConvertFrom-Json
+    if ($existingApp) {
+        $flag = @($existingApp.properties.template.containers.env | Where-Object name -eq 'SIMULATE_CRASH')
+        if ($flag.Count -ne 1 -or $flag[0].value -notin @('true', 'false')) { throw 'Cannot preserve existing Container App SIMULATE_CRASH flag; inspect configuration before redeployment.' }
+        $containerAppSimulateCrash = [bool]::Parse($flag[0].value)
+    }
 }
 
 $templateParameters = @{
@@ -584,6 +653,8 @@ $templateParameters = @{
     deployAzureVMs          = @{ value = $DeployAzureVMs }
     deployContainerApps     = @{ value = $DeployContainerApps }
     deployAks               = @{ value = $DeployAks }
+    initializeAksWorkload   = @{ value = $initializeAksWorkload }
+    containerAppSimulateCrash = @{ value = $containerAppSimulateCrash }
     existingNatGatewayId    = @{ value = $existingNatGwId }
     existingBudgetStartDate = @{ value = $existingBudgetStart }
     tenantId                = @{ value = $TenantId }
@@ -616,28 +687,31 @@ if ($null -ne $onPremFleet) {
 $deploymentName = "arc-demo-$(Get-Date -Format yyyyMMdd-HHmmss)"
 $bicepFile = Join-Path $repoRoot 'bicep\main.bicep'
 
+try {
 if ($WhatIfPreference) {
     Write-Step 'Running Bicep what-if...'
     az deployment sub what-if --name $deploymentName --location $Location `
         --template-file $bicepFile --parameters @$paramFile --only-show-errors
-    [System.IO.File]::Delete($paramFile)
     return
 }
 
+if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Deploy infrastructure and reconcile Arc monitoring (preserving credentials)')) {
+    return
+}
 Write-Step "Deploying main.bicep (deployment: $deploymentName)..."
 az deployment sub create --name $deploymentName --location $Location `
     --template-file $bicepFile --parameters @$paramFile --only-show-errors -o none
-if ($LASTEXITCODE -ne 0) {
-    if ([System.IO.File]::Exists($paramFile)) { [System.IO.File]::Delete($paramFile) }
-    throw "Bicep deployment failed. Inspect with: az deployment sub show --name $deploymentName"
-}
 $outputs = az deployment sub show --name $deploymentName --query properties.outputs -o json | ConvertFrom-Json
-[System.IO.File]::Delete($paramFile)
+} finally {
+    [System.IO.File]::Delete($paramFile)
+}
 Write-Ok 'Bicep deployment complete'
+if (-not $existingVms.Count -or $AdminPassword) {
+    az keyvault secret set --vault-name $kvName -n vm-admin-password --value $adminPwd -o none --only-show-errors
+}
 
 $workspaceId = $outputs.workspaceId.value
 $workspaceName = ($workspaceId -split '/')[-1]
-$workspaceCustomerId = $outputs.workspaceCustomerId.value
 $deployedFleet = @(@($outputs.vmFleet.value) | Where-Object { $_ -and $_.deployed -eq $true })
 $vmNames     = @($deployedFleet | Select-Object -ExpandProperty name)
 $azureVmNames = @($outputs.azureVmNames.value | Where-Object { $_ })
@@ -645,8 +719,6 @@ $azureVmResourceIds = @($outputs.azureVmResourceIds.value | Where-Object { $_ })
 $dcrCoreId   = $outputs.dcrCoreId.value
 $dcrVmiId    = $outputs.dcrVmiId.value
 $dcrCtId     = $outputs.dcrCtId.value
-$winVms = @($deployedFleet | Where-Object { $_.osType -eq 'Windows' } | Select-Object -ExpandProperty name)
-$lnxVms = @($deployedFleet | Where-Object { $_.osType -eq 'Linux' } | Select-Object -ExpandProperty name)
 $monitorFleet = @($deployedFleet | Where-Object { $_.supportsAzureMonitor -eq $true })
 $monitorVms = @($monitorFleet | Select-Object -ExpandProperty name)
 $monitorWindowsVms = @($monitorFleet | Where-Object { $_.osType -eq 'Windows' } | Select-Object -ExpandProperty name)
@@ -693,40 +765,26 @@ if ($DeployAzureVMs -and $azureVmResourceIds.Count -gt 0) {
     Write-Ok "Azure-native VM DCRAs created: $($azureVmResourceIds.Count * 2)"
 }
 
-# Phase 3: NAT Gateway (separate so Hibernate can delete it)
+# Phase 3: verify outbound before guest onboarding
 Write-Header 'Phase 3 — NAT Gateway'
-$natName = "natgw-$NamePrefix"
-$pipName = "pip-natgw-$NamePrefix"
-$vnetName = "vnet-$NamePrefix"
-$pipExists = az network public-ip show -g $infraRg -n $pipName --query id -o tsv 2>$null
-if (-not $pipExists) {
-    az network public-ip create -g $infraRg -n $pipName -l $Location `
-        --sku Standard --allocation-method Static --only-show-errors -o none
-    Write-Ok "Public IP created ($pipName)"
-} else { Write-Ok 'Public IP already exists' }
-
-$natExists = az network nat gateway show -g $infraRg -n $natName --query id -o tsv 2>$null
-if (-not $natExists) {
-    az network nat gateway create -g $infraRg -n $natName -l $Location `
-        --public-ip-addresses $pipName --idle-timeout 10 --only-show-errors -o none
-    Write-Ok "NAT Gateway created ($natName)"
-} else { Write-Ok 'NAT Gateway already exists' }
-
-$attached = az network vnet subnet show -g $infraRg --vnet-name $vnetName -n snet-vms --query "natGateway.id" -o tsv 2>$null
-if (-not $attached) {
-    az network vnet subnet update -g $infraRg --vnet-name $vnetName -n snet-vms `
-        --nat-gateway $natName --only-show-errors -o none
-    Write-Ok 'NAT Gateway attached to subnet'
-} else { Write-Ok 'Subnet already has NAT GW' }
+$natId = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Network/natGateways/natgw-$NamePrefix"
+$attached = az network vnet subnet show -g $infraRg --vnet-name "vnet-$NamePrefix" -n snet-vms --query 'natGateway.id' -o tsv
+if ($attached -ne $natId) { throw 'Expected demo NAT is not attached after infrastructure deployment. Inspect the subnet before guest onboarding.' }
+Write-Ok 'Expected NAT Gateway attached to subnet'
 
 if ($DeployArcOnPrem -and $vmNames.Count -gt 0) {
 # Phase 4: Arc onboarding SPN (idempotent)
 Write-Header 'Phase 4 — Arc onboarding service principal'
-$spnAppId = az ad sp list --display-name "sp-$NamePrefix-onboard" --query "[0].appId" -o tsv 2>$null
-if ($spnAppId) {
-    Write-Ok "SPN already exists ($spnAppId). Resetting credential to allow re-onboarding..."
-    $spnSecret = az ad sp credential reset --id $spnAppId --query password -o tsv
-} else {
+$alreadyArc = @(az connectedmachine list -g $arcRg --query "[].name" -o tsv)
+$toOnboardFleet = @($deployedFleet | Where-Object { $_.name -notin $alreadyArc })
+$spnMatches = @(az ad sp list --display-name "sp-$NamePrefix-onboard" --query "[?displayName=='sp-$NamePrefix-onboard'].appId" -o tsv)
+if ($spnMatches.Count -gt 1) { throw 'Ambiguous onboarding service principal name. Resolve duplicates before deployment.' }
+$spnAppId = $spnMatches | Select-Object -First 1
+$spnSecret = ''
+if ($spnAppId -and $toOnboardFleet.Count) {
+    if (-not $OnboardingSecret) { throw 'New Arc onboarding is required. Supply the existing SP secret as -OnboardingSecret (SecureString); credentials are never reset automatically.' }
+    $spnSecret = [System.Net.NetworkCredential]::new('', $OnboardingSecret).Password
+} elseif (-not $spnAppId -and $toOnboardFleet.Count) {
     $spnJson = az ad sp create-for-rbac --name "sp-$NamePrefix-onboard" `
         --role "Azure Connected Machine Onboarding" `
         --scopes "/subscriptions/$SubscriptionId/resourceGroups/$arcRg" `
@@ -737,9 +795,11 @@ if ($spnAppId) {
 }
 
 # Helper script files
-$libDir   = Join-Path $env:TEMP "arc-demo-onboard-$(Get-Random)"
+$libDir   = Join-Path ([System.IO.Path]::GetTempPath()) "arc-demo-onboard-$(Get-Random)"
 New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+try {
 $winOnboard = @"
+`$ErrorActionPreference = 'Stop'
 `$env:MSFT_ARC_TEST = 'true'
 [Environment]::SetEnvironmentVariable('MSFT_ARC_TEST','true','Machine')
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -750,6 +810,8 @@ Start-Process msiexec.exe -Wait -ArgumentList "/i `$env:TEMP\acm.msi /qn"
   --resource-group $arcRg --tenant-id $TenantId --location $Location ``
   --subscription-id $SubscriptionId ``
   --tags "$arcOnboardingTags"
+if (`$LASTEXITCODE -ne 0) { throw 'Arc onboarding failed' }
+'ARC_DEMO_OK'
 "@
 $lnxOnboard = @"
 set -e
@@ -762,6 +824,7 @@ sudo MSFT_ARC_TEST=true azcmagent connect \
   --resource-group $arcRg --tenant-id $TenantId --location $Location \
   --subscription-id $SubscriptionId \
   --tags "$arcOnboardingTags"
+echo ARC_DEMO_OK
 "@
 $winFile = Join-Path $libDir 'arc-win.ps1'
 $lnxFile = Join-Path $libDir 'arc-lnx.sh'
@@ -770,37 +833,21 @@ $lnxFile = Join-Path $libDir 'arc-lnx.sh'
 
 # Phase 5: Arc onboarding (parallel, skips already-Connected machines)
 Write-Header 'Phase 5 — Arc onboarding (parallel)'
-$alreadyArc = (az connectedmachine list -g $arcRg --query "[].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-$toOnboardFleet = @($deployedFleet | Where-Object { $_.name -notin $alreadyArc })
 if (-not $toOnboardFleet) {
     Write-Ok 'All VMs already Arc-onboarded — skipping'
 } else {
     Write-Step "Onboarding $($toOnboardFleet.Count) of $($vmNames.Count) VMs..."
-    $jobs = @()
     foreach ($machine in $toOnboardFleet) {
         $vm = $machine.name
         $isWin = $machine.osType -eq 'Windows'
-        $jobs += Start-Job -Name "onboard-$vm" -ScriptBlock {
-            param($vm, $isWin, $infraRg, $f)
-            $cmdId = if ($isWin) { 'RunPowerShellScript' } else { 'RunShellScript' }
-            az vm run-command invoke -g $infraRg -n $vm --command-id $cmdId --scripts "@$f" --only-show-errors -o tsv 2>&1
-        } -ArgumentList $vm, $isWin, $infraRg, ($(if ($isWin) { $winFile } else { $lnxFile }))
-    }
-    $jobs | Wait-Job -Timeout 1800 | Out-Null
-    foreach ($j in $jobs) {
-        $out = (Receive-Job $j 2>&1 | Out-String)
-        if ($out -match 'Successfully Onboarded|ProvisioningState/succeeded|Connected') {
-            Write-Ok $j.Name
-        } else {
-            Write-Warn "$($j.Name) — check Arc portal"
-        }
-        Remove-Job $j -Force
+        $target = [pscustomobject]@{ Name = $vm; OsType = $machine.osType; Id = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$vm" }
+        Invoke-DemoGuestCommand -Machine $target -Script ($(if ($isWin) { "@$winFile" } else { "@$lnxFile" }))
     }
 }
 Write-Step 'Waiting for all Arc machines to report Connected...'
 $ok = Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Arc Connected' -Condition {
     $connected = (az connectedmachine list -g $arcRg --query "[?status=='Connected'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-    return $connected.Count -ge $vmNames.Count
+    return @($vmNames | Where-Object { $_ -notin $connected }).Count -eq 0
 }
 if (-not $ok) { throw 'Timed out waiting for all Arc machines to be Connected' }
 Write-Ok 'All Arc machines Connected'
@@ -832,40 +879,29 @@ foreach ($machine in $deployedFleet) {
     az connectedmachine update -g $arcRg -n $vm `
         --os-profile $profilePath `
         --only-show-errors -o none
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to enable periodic assessment for Arc machine $vm"
-    }
 }
 Write-Ok "Periodic assessment enabled on $($deployedFleet.Count) Arc machines"
 
-Remove-Item $libDir -Recurse -Force
+} finally {
+    Remove-Item -LiteralPath $libDir -Recurse -Force
+}
 
 # Phase 6: AMA (Windows via Arc, Linux via Azure VM) + DCR associations to Arc resource
 Write-Header 'Phase 6 — Azure Monitor Agent + DCR associations'
 
 $jobs = @()
 foreach ($vm in $monitorWindowsVms) {
-    $jobs += Start-Job -ScriptBlock {
-        param($vm, $rg)
-        az connectedmachine extension create -g $rg --machine-name $vm `
-          -n AzureMonitorWindowsAgent --publisher Microsoft.Azure.Monitor `
-          --type AzureMonitorWindowsAgent --enable-auto-upgrade true `
-          --only-show-errors -o tsv 2>&1 | Out-Null
-    } -ArgumentList $vm, $arcRg
+    $jobs += Start-DemoAzJob -Arguments @('connectedmachine', 'extension', 'create', '-g', $arcRg, '--machine-name', $vm,
+        '-n', 'AzureMonitorWindowsAgent', '--publisher', 'Microsoft.Azure.Monitor', '--type', 'AzureMonitorWindowsAgent', '--enable-auto-upgrade', 'true', '-o', 'none')
 }
 foreach ($vm in $monitorLinuxVms) {
-    $jobs += Start-Job -ScriptBlock {
-        param($vm, $rg)
-        az vm extension set -g $rg --vm-name $vm -n AzureMonitorLinuxAgent `
-          --publisher Microsoft.Azure.Monitor --enable-auto-upgrade true `
-          --only-show-errors -o tsv 2>&1 | Out-Null
-    } -ArgumentList $vm, $infraRg
+    $jobs += Start-DemoAzJob -Arguments @('vm', 'extension', 'set', '-g', $infraRg, '--vm-name', $vm, '-n', 'AzureMonitorLinuxAgent',
+        '--publisher', 'Microsoft.Azure.Monitor', '--enable-auto-upgrade', 'true', '-o', 'none')
 }
 if ($jobs.Count -gt 0) {
     Write-Step "Installing AMA on $($monitorVms.Count) Monitor-supported machines (parallel)..."
-    $jobs | Wait-Job -Timeout 1800 | Out-Null
-    $jobs | ForEach-Object { Remove-Job $_ -Force }
-    Write-Ok 'AMA installs submitted'
+    Receive-DemoJobs -Jobs $jobs
+    Write-Ok 'AMA installs completed'
 } else {
     Write-Warn 'No Monitor-supported machines in the deployed fleet — skipping AMA installs'
 }
@@ -896,17 +932,11 @@ if ($arcOnlyVms.Count -gt 0) {
 Write-Header 'Phase 7 — Dependency Agent (VM Insights-supported Windows only)'
 $jobs = @()
 foreach ($vm in $vmInsightsWindowsVms) {
-    $jobs += Start-Job -ScriptBlock {
-        param($vm, $rg)
-        az connectedmachine extension create -g $rg --machine-name $vm `
-          -n DependencyAgentWindows --publisher Microsoft.Azure.Monitoring.DependencyAgent `
-          --type DependencyAgentWindows --enable-auto-upgrade true `
-          --only-show-errors -o tsv 2>&1 | Out-Null
-    } -ArgumentList $vm, $arcRg
+    $jobs += Start-DemoAzJob -Arguments @('connectedmachine', 'extension', 'create', '-g', $arcRg, '--machine-name', $vm,
+        '-n', 'DependencyAgentWindows', '--publisher', 'Microsoft.Azure.Monitoring.DependencyAgent', '--type', 'DependencyAgentWindows', '--enable-auto-upgrade', 'true', '-o', 'none')
 }
 if ($jobs.Count -gt 0) {
-    $jobs | Wait-Job -Timeout 1800 | Out-Null
-    $jobs | ForEach-Object { Remove-Job $_ -Force }
+    Receive-DemoJobs -Jobs $jobs
     Write-Ok 'Dependency Agent installed on VM Insights-supported Windows VMs'
 } else {
     Write-Warn 'No VM Insights-supported Windows machines — skipping Dependency Agent'
@@ -916,26 +946,15 @@ if ($jobs.Count -gt 0) {
 Write-Header 'Phase 8 — Change Tracking extension'
 $jobs = @()
 foreach ($vm in $changeTrackingWindowsVms) {
-    $jobs += Start-Job -ScriptBlock {
-        param($vm, $rg)
-        az connectedmachine extension create -g $rg --machine-name $vm `
-          -n ChangeTracking-Windows --publisher Microsoft.Azure.ChangeTrackingAndInventory `
-          --type ChangeTracking-Windows --enable-auto-upgrade true `
-          --only-show-errors -o tsv 2>&1 | Out-Null
-    } -ArgumentList $vm, $arcRg
+    $jobs += Start-DemoAzJob -Arguments @('connectedmachine', 'extension', 'create', '-g', $arcRg, '--machine-name', $vm,
+        '-n', 'ChangeTracking-Windows', '--publisher', 'Microsoft.Azure.ChangeTrackingAndInventory', '--type', 'ChangeTracking-Windows', '--enable-auto-upgrade', 'true', '-o', 'none')
 }
 foreach ($vm in $changeTrackingLinuxVms) {
-    $jobs += Start-Job -ScriptBlock {
-        param($vm, $rg)
-        az connectedmachine extension create -g $rg --machine-name $vm `
-          -n ChangeTracking-Linux --publisher Microsoft.Azure.ChangeTrackingAndInventory `
-          --type ChangeTracking-Linux --enable-auto-upgrade true `
-          --only-show-errors -o tsv 2>&1 | Out-Null
-    } -ArgumentList $vm, $arcRg
+    $jobs += Start-DemoAzJob -Arguments @('vm', 'extension', 'set', '-g', $infraRg, '--vm-name', $vm,
+        '-n', 'ChangeTracking-Linux', '--publisher', 'Microsoft.Azure.ChangeTrackingAndInventory', '--enable-auto-upgrade', 'true', '-o', 'none')
 }
 if ($jobs.Count -gt 0) {
-    $jobs | Wait-Job -Timeout 1800 | Out-Null
-    $jobs | ForEach-Object { Remove-Job $_ -Force }
+    Receive-DemoJobs -Jobs $jobs
     Write-Ok 'Change Tracking extension installed on supported machines'
 } else {
     Write-Warn 'No Change Tracking-supported machines — skipping extension'
@@ -951,7 +970,7 @@ if (-not $InstallSql) {
 } elseif ($sqlVms) {
     Write-Header "Phase 9 — Experimental SQL Server 2022 Developer install on $($sqlVms.Count) Azure-VM-backed hosts (~20 min; not a supported Arc SQL validation target)"
     Write-Warn 'This legacy path mixes workload simulation with Arc SQL extension registration. Use only for experimentation; do not claim Arc SQL validation in this Azure-VM-backed lab. See docs/sql-arc-spike.md.'
-    $sqlScriptPath = Join-Path $env:TEMP "sql-install-$(Get-Random).ps1"
+    $sqlScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) "sql-install-$(Get-Random).ps1"
     $sqlScript = @'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -971,23 +990,18 @@ $drive = (Get-Volume -DiskImage $mount).DriveLetter
     /SUPPRESSPRIVACYSTATEMENTNOTICE /UPDATEENABLED=0 /SQLCOLLATION='SQL_Latin1_General_CP1_CI_AS'
 Dismount-DiskImage -ImagePath $iso.FullName | Out-Null
 Get-Service MSSQLSERVER | Format-List Name, Status
+if ((Get-Service MSSQLSERVER).Status -ne 'Running') { throw 'SQL service is not running' }
+'ARC_DEMO_OK'
 '@
     [System.IO.File]::WriteAllText($sqlScriptPath, $sqlScript, [System.Text.UTF8Encoding]::new($false))
-    $jobs = @()
+    try {
     foreach ($vm in $sqlVms) {
-        $jobs += Start-Job -Name "sql-$vm" -ScriptBlock {
-            param($vm, $rg, $f)
-            az vm run-command invoke -g $rg -n $vm --command-id RunPowerShellScript --scripts "@$f" --only-show-errors --query "value[0].message" -o tsv 2>&1
-        } -ArgumentList $vm, $infraRg, $sqlScriptPath
+        $target = [pscustomobject]@{ Name = $vm; OsType = 'Windows'; Id = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$vm" }
+        Invoke-DemoGuestCommand -Machine $target -Script "@$sqlScriptPath"
     }
-    $jobs | Wait-Job -Timeout 3600 | Out-Null
-    foreach ($j in $jobs) {
-        $out = (Receive-Job $j 2>&1 | Out-String)
-        if ($out -match 'MSSQLSERVER\s+Running|Status\s*:\s*Running') { Write-Ok $j.Name }
-        else { Write-Warn $j.Name }
-        Remove-Job $j -Force
+    } finally {
+        Remove-Item -LiteralPath $sqlScriptPath -Force
     }
-    Remove-Item $sqlScriptPath -Force
 
     Write-Header 'Phase 10 — Arc-enable SQL (BPA + Defender for SQL)'
     foreach ($vm in $sqlVms) {
@@ -1110,25 +1124,8 @@ foreach ($wb in $nseilazSet) {
 
 # Phase 12: validation
 Write-Header 'Phase 12 — Validation'
-if ($DeployArcOnPrem -and $monitorVms.Count -gt 0) {
-Write-Step 'Waiting up to 10 min for first Heartbeats...'
-$lawCustId = $workspaceCustomerId
-$ok = Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Heartbeat' -Condition {
-    $token = Get-LawQueryToken
-    $hdr = @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
-    $body = @{ query = 'Heartbeat | where TimeGenerated > ago(10m) | summarize Hosts = dcount(Computer)' } | ConvertTo-Json
-    try {
-        $r = Invoke-RestMethod -Method Post -Headers $hdr -Body $body `
-          -Uri "https://api.loganalytics.io/v1/workspaces/$lawCustId/query"
-        $hosts = if ($r.tables[0].rows) { $r.tables[0].rows[0][0] } else { 0 }
-        return $hosts -ge $monitorVms.Count
-    } catch { return $false }
-}
-if ($ok) { Write-Ok "Heartbeat received from all $($monitorVms.Count) Monitor-supported hosts" }
-else { Write-Warn "Heartbeat not yet from all hosts — check portal, may need a few more minutes" }
-} else {
-    Write-Warn 'DeployArcOnPrem is false or no Monitor-supported VM outputs were returned — skipping Arc Heartbeat validation'
-}
+& (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 600
+if ($LASTEXITCODE -ne 0) { throw 'Deployment finished, but required infrastructure/monitor readiness failed or remains pending. Inspect the checks above; no faults were reset.' }
 
 Write-Header '🎉 Deploy complete'
 $wbUrl = "https://portal.azure.com/#@$TenantId/resource$wbId"
@@ -1144,5 +1141,5 @@ if ($InstallSql) {
 } else {
     Write-Host "    - SQL Server/Arc SQL/BPA was skipped by default; use -InstallSql only for the optional advanced path."
 }
-Write-Host "    - Use ./scripts/Hibernate-ArcDemo.ps1 between demos (~AUD 35/mo)."
+Write-Host "    - After operator approval, use Hibernate-ArcDemo.ps1 with the same subscription, tenant and skin; retained services still incur costs."
 Write-Host ''

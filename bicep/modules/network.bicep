@@ -1,10 +1,5 @@
-// Network: VNet + subnet + NSG. NAT GW is created separately
-// by Activate-ArcDemo.ps1 so it can be torn down during hibernation.
-//
-// Idempotency: if a NAT GW already exists (from a prior Activate run), the
-// subnet preserves the attachment on re-deploy. Without this guard, re-running
-// main.bicep against an existing environment would strip the NAT GW from the
-// subnet and break outbound for all Arc agents.
+// Fresh deployment needs explicit outbound before VM extensions run.
+// Preserve an existing lifecycle-created NAT; hibernation can still delete it.
 
 @description('Azure region')
 param location string
@@ -36,6 +31,28 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
   }
 }
 
+resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = if (empty(existingNatGatewayId)) {
+  name: 'pip-natgw-${namePrefix}'
+  location: location
+  tags: tags
+  sku: { name: 'Standard' }
+  properties: {
+    publicIPAddressVersion: 'IPv4'
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource natGateway 'Microsoft.Network/natGateways@2024-05-01' = if (empty(existingNatGatewayId)) {
+  name: 'natgw-${namePrefix}'
+  location: location
+  tags: tags
+  sku: { name: 'Standard' }
+  properties: {
+    idleTimeoutInMinutes: 10
+    publicIpAddresses: [{ id: publicIp!.id }]
+  }
+}
+
 resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: 'vnet-${namePrefix}'
   location: location
@@ -47,13 +64,11 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
     subnets: [
       {
         name: subnetName
-        properties: union(
-          {
-            addressPrefix: subnetPrefix
-            networkSecurityGroup: { id: nsg.id }
-          },
-          empty(existingNatGatewayId) ? {} : { natGateway: { id: existingNatGatewayId } }
-        )
+        properties: {
+          addressPrefix: subnetPrefix
+          networkSecurityGroup: { id: nsg.id }
+          natGateway: { id: empty(existingNatGatewayId) ? natGateway!.id : existingNatGatewayId }
+        }
       }
     ]
   }

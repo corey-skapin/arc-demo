@@ -32,6 +32,9 @@ param workloadName string = 'crashloop-demo'
 @description('Sample workload image. Must include /bin/sh because the demo fault is env-var driven.')
 param workloadImage string = 'mcr.microsoft.com/azurelinux/base/core:3.0'
 
+@description('Install the initial sample workload. Disable on routine redeploys of an existing cluster to preserve scenario state.')
+param initializeWorkload bool = true
+
 var safePrefix = toLower(replace(namePrefix, '_', '-'))
 var clusterName = take('${safePrefix}-aks', 63)
 var dnsPrefix = take('${replace(safePrefix, '-', '')}aks', 54)
@@ -185,7 +188,7 @@ resource workloadScriptContributor 'Microsoft.Authorization/roleAssignments@2022
   }
 }
 
-resource workloadScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+resource workloadScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = if (initializeWorkload) {
   name: deploymentScriptName
   location: location
   tags: tags

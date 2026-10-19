@@ -1,207 +1,99 @@
 <#
 .SYNOPSIS
-    Wakes the Arc demo from hibernation. Idempotent.
-
+    Restores outbound networking, starts retained workloads and validates the demo.
 .DESCRIPTION
-    - Recreates the NAT Gateway + public IP and attaches to the demo subnet.
-    - Restores optional Container Apps workload minimum replicas to 1.
-    - Starts all VMs in parallel and waits until they're running.
-    - Restarts the Arc agent (himds) and AMA on each VM so Connected status
-      returns quickly without waiting for the default 5-min reconnect.
-    - Starts Azure Update Manager on-demand patch assessments after Arc reconnects.
-    - Validates Arc Connected + Heartbeat (unless -SkipValidate).
-
-.PARAMETER NamePrefix
-    Used to derive RG names (default: arc-demo).
-
-.PARAMETER Location
-    Azure region (must match the original deploy).
-
-.PARAMETER SkinPath
-    Optional path to a demo skin variables JSON file. Defaults to config\demo-skin.json.
-
-.PARAMETER SkipValidate
-    Don't poll for Heartbeat at the end. Useful for prep-the-night-before runs.
-
-.PARAMETER SkipPatchAssessment
-    Don't run Azure Update Manager on-demand patch assessments during activation.
-
-.EXAMPLE
-    .\Activate-ArcDemo.ps1
+    Uses retained deployment manifests and actual VM OS metadata, not name prefixes.
+    Does not reset workload faults or credentials. Patch assessment submission is
+    asynchronous; readiness checks telemetry separately. -WhatIf is read-only.
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 param(
+    [Parameter(Mandatory)][guid]$SubscriptionId,
+    [Parameter(Mandatory)][guid]$TenantId,
     [string]$NamePrefix = 'arc-demo',
     [string]$Location = 'australiaeast',
     [string]$SkinPath = '',
     [switch]$SkipValidate,
     [switch]$SkipPatchAssessment
 )
-
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
-Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
+$skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
+if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
+if (-not $PSBoundParameters.ContainsKey('Location')) { $Location = Get-DemoSkinValue $skin 'azure.location' $Location }
+Assert-DemoName $NamePrefix
+Initialize-DemoContext $SubscriptionId $TenantId
+$inventory = Get-DemoInventory $NamePrefix
+Assert-DemoSkinInventory $skin $inventory
+$missing = @($inventory.Machines | Where-Object { -not $_.Actual })
+if ($missing) { throw "Missing expected VMs: $($missing.Name -join ', '). Reconcile deployment before activation." }
+if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Restore NAT, start VMs/AKS/Container Apps and submit patch assessments (without fault reset)')) { return }
 
-$skin = Get-DemoSkin -Path $SkinPath -RepoRoot $repoRoot
-if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue -Skin $skin -Path 'azure.namePrefix' -Default $NamePrefix }
-if (-not $PSBoundParameters.ContainsKey('Location')) { $Location = Get-DemoSkinValue -Skin $skin -Path 'azure.location' -Default $Location }
-
-$arcRg   = "rg-$NamePrefix"
-$infraRg = "rg-$NamePrefix-infra"
-$vnet    = "vnet-$NamePrefix"
-$subnet  = 'snet-vms'
-$natGw   = "natgw-$NamePrefix"
-$natPip  = "pip-natgw-$NamePrefix"
-
-Write-Header "Activating Arc demo ($arcRg + $infraRg)"
-
-# 1. NAT GW (idempotent)
-$pipExists = az network public-ip show -g $infraRg -n $natPip --query id -o tsv 2>$null
-if (-not $pipExists) {
-    az network public-ip create -g $infraRg -n $natPip -l $Location --sku Standard --allocation-method Static --only-show-errors -o none
-    Write-Ok "Created public IP $natPip"
-} else { Write-Ok "Public IP exists" }
-
-$natExists = az network nat gateway show -g $infraRg -n $natGw --query id -o tsv 2>$null
-if (-not $natExists) {
-    az network nat gateway create -g $infraRg -n $natGw -l $Location --public-ip-addresses $natPip --idle-timeout 10 --only-show-errors -o none
-    Write-Ok "Created NAT GW $natGw"
-} else { Write-Ok "NAT GW exists" }
-
-$attached = az network vnet subnet show -g $infraRg --vnet-name $vnet -n $subnet --query "natGateway.id" -o tsv 2>$null
-if (-not $attached) {
-    az network vnet subnet update -g $infraRg --vnet-name $vnet -n $subnet --nat-gateway $natGw --only-show-errors -o none
-    Write-Ok 'Attached NAT GW to subnet'
-} else { Write-Ok 'NAT GW already attached' }
-
-Write-Step 'Restoring optional Container Apps workload replicas...'
-$containerApps = (az containerapp list -g $infraRg --query "[?tags.workload=='container-app'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-if ($containerApps) {
-    foreach ($app in $containerApps) {
-        az containerapp update -g $infraRg -n $app `
-            --set-env-vars SIMULATE_CRASH=false `
-            --min-replicas 1 --max-replicas 1 `
-            --only-show-errors -o none
-        Write-Ok "Restored $app to one replica"
+$infraRg = $inventory.InfraRg
+$natId = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Network/natGateways/natgw-$NamePrefix"
+$pip = @($inventory.Resources | Where-Object { $_.type -eq 'Microsoft.Network/publicIPAddresses' -and $_.name -eq "pip-natgw-$NamePrefix" })
+if (-not $pip) {
+    Invoke-DemoAz -Arguments @('network', 'public-ip', 'create', '-g', $infraRg, '-n', "pip-natgw-$NamePrefix", '-l', $Location, '--sku', 'Standard', '--allocation-method', 'Static', '-o', 'none') | Out-Null
+}
+if ($natId -notin $inventory.Resources.id) {
+    Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'create', '-g', $infraRg, '-n', "natgw-$NamePrefix", '-l', $Location, '--public-ip-addresses', "pip-natgw-$NamePrefix", '--idle-timeout', '10', '-o', 'none') | Out-Null
+}
+$subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '-g', $infraRg, '--vnet-name', "vnet-$NamePrefix", '-n', 'snet-vms', '-o', 'json') | ConvertFrom-Json
+if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { throw 'Demo subnet has an unexpected NAT Gateway; refusing to overwrite it.' }
+if ($subnet.natGateway.id -ne $natId) {
+    Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'update', '--ids', $subnet.id, '--nat-gateway', $natId, '-o', 'none') | Out-Null
+}
+$startedVmIds = @()
+foreach ($machine in $inventory.Machines) {
+    if ($machine.Actual.powerState -ne 'VM running') {
+        Invoke-DemoAz -Arguments @('vm', 'start', '--ids', $machine.Id, '--no-wait', '-o', 'none') | Out-Null
+        $startedVmIds += $machine.Id
     }
-} else {
-    Write-Ok 'No Container Apps workload found'
 }
-
-# 2. Start VMs
-Write-Step 'Starting all VMs (parallel)...'
-$vms = (az vm list -g $infraRg --query "[].name" -o tsv) -split "`n" | Where-Object { $_ }
-foreach ($v in $vms) { az vm start -g $infraRg -n $v --no-wait --only-show-errors -o none }
-Wait-Until -TimeoutSeconds 600 -IntervalSeconds 20 -Message 'all VMs running' -Condition {
-    $running = (az vm list -g $infraRg --show-details --query "[?powerState=='VM running'].name" -o tsv) -split "`n" | Where-Object { $_ }
-    return $running.Count -eq $vms.Count
-} | Out-Null
-Write-Ok "$($vms.Count) VMs running"
-
-# 3. Restart Arc + AMA so reconnect is fast
-Write-Step 'Restarting Arc + AMA on each VM (parallel)...'
-$winCmd = 'Restart-Service himds,AzureMonitorAgent -Force; "OK"'
-$lnxCmd = 'sudo systemctl restart himdsd azuremonitoragent && echo OK'
-
-$jobs = @()
-foreach ($v in $vms) {
-    $isWin = $v -like 'win-*'
-    $jobs += Start-Job -Name "r-$v" -ScriptBlock {
-        param($v, $rg, $isWin, $winCmd, $lnxCmd)
-        $cmdId = if ($isWin) { 'RunPowerShellScript' } else { 'RunShellScript' }
-        $script = if ($isWin) { $winCmd } else { $lnxCmd }
-        az vm run-command invoke -g $rg -n $v --command-id $cmdId --scripts $script --query "value[0].message" -o tsv 2>&1
-    } -ArgumentList $v, $infraRg, $isWin, $winCmd, $lnxCmd
-}
-$jobs | Wait-Job -Timeout 600 | Out-Null
-foreach ($j in $jobs) {
-    $out = (Receive-Job $j 2>&1 | Out-String).Trim()
-    if ($out -match 'OK') { Write-Ok $j.Name } else { Write-Warn $j.Name }
-    Remove-Job $j -Force
-}
-
-# 4. Wait for Arc Connected
-Write-Step 'Waiting for all Arc machines to report Connected...'
-Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'Arc Connected' -Condition {
-    $c = (az connectedmachine list -g $arcRg --query "[?status=='Connected'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-    return $c.Count -ge $vms.Count
-} | Out-Null
-Write-Ok 'All Arc machines Connected'
-
-# 5. Update Manager patch assessment
-if (-not $SkipPatchAssessment) {
-    Write-Step 'Starting Update Manager on-demand patch assessments...'
-    $arcMachineRecords = @(az connectedmachine list -g $arcRg `
-            --query "[?status=='Connected'].{name:name,id:id}" `
-            -o json --only-show-errors | ConvertFrom-Json)
-    $patchTargets = @($arcMachineRecords | Where-Object { $vms -contains $_.name })
-    if ($patchTargets.Count -lt $vms.Count) {
-        throw "Found $($patchTargets.Count) connected Arc machine records for $($vms.Count) VMs; cannot run patch assessments for the full demo fleet"
-    }
-
-    $patchJobs = @()
-    foreach ($target in $patchTargets) {
-        $patchJobs += Start-Job -Name "patch-$($target.name)" -ScriptBlock {
-            param($machineName, $machineId)
-            $output = az connectedmachine assess-patches --ids $machineId --no-wait --only-show-errors -o none 2>&1
-            [pscustomobject]@{
-                Name     = $machineName
-                ExitCode = $LASTEXITCODE
-                Output   = ($output | Out-String).Trim()
-            }
-        } -ArgumentList $target.name, $target.id
-    }
-
-    $patchJobs | Wait-Job -Timeout 300 | Out-Null
-    $runningPatchJobs = @($patchJobs | Where-Object { $_.State -eq 'Running' })
-    if ($runningPatchJobs) {
-        $timedOutNames = ($runningPatchJobs | Select-Object -ExpandProperty Name) -join ', '
-        $runningPatchJobs | Stop-Job
-        $patchJobs | Remove-Job -Force
-        throw "Timed out submitting Update Manager patch assessments: $timedOutNames"
-    }
-
-    foreach ($job in $patchJobs) {
-        $result = Receive-Job $job
-        Remove-Job $job -Force
-        if ($job.State -ne 'Completed' -or -not $result) {
-            $details = if ($result.Output) { ": $($result.Output)" } else { '' }
-            throw "Patch assessment submission failed for $($job.Name)$details"
-        }
-        if ($result.ExitCode -ne 0) {
-            if ($result.Output -match 'OperationConflict') {
-                Write-Warn "Patch assessment operation already in progress for $($result.Name)"
-                continue
-            }
-            $details = if ($result.Output) { ": $($result.Output)" } else { '' }
-            throw "Patch assessment submission failed for $($result.Name)$details"
-        }
-        Write-Ok "Patch assessment submitted for $($result.Name)"
-    }
-    Write-Warn 'Update Manager assessment runs asynchronously; allow several minutes for portal data to refresh'
-}
-else {
-    Write-Ok 'Update Manager patch assessment skipped'
-}
-
-if ($SkipValidate) {
-    Write-Header '✅ Activated (Heartbeat validation skipped)'
-    return
-}
-
-# 6. Heartbeat
-Write-Step 'Waiting for Heartbeat from all hosts...'
-$lawCustId = az monitor log-analytics workspace show -g $arcRg -n "law-$NamePrefix" --query customerId -o tsv 2>$null
-Wait-Until -TimeoutSeconds 600 -IntervalSeconds 45 -Message 'Heartbeat' -Condition {
-    $token = Get-LawQueryToken
-    $hdr = @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
-    $body = @{ query = 'Heartbeat | where TimeGenerated > ago(10m) | summarize Hosts = dcount(Computer)' } | ConvertTo-Json
-    try {
-        $r = Invoke-RestMethod -Method Post -Headers $hdr -Body $body -Uri "https://api.loganalytics.io/v1/workspaces/$lawCustId/query"
-        $hosts = if ($r.tables[0].rows) { $r.tables[0].rows[0][0] } else { 0 }
-        return $hosts -ge $vms.Count
-    } catch { return $false }
+Wait-Until -Message 'expected VM identities running' -Condition {
+    $vms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '--show-details', '-o', 'json') | ConvertFrom-Json)
+    @($inventory.Machines | Where-Object { $_.Id -notin @($vms | Where-Object powerState -eq 'VM running' | ForEach-Object id) }).Count -eq 0
 } | Out-Null
 
-Write-Header '✅ Demo is fully active'
-Write-Host "  Open the workbook from the Arc resource group → Workbooks."
+foreach ($id in $inventory.AksClusterIds) {
+    $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
+    if ($cluster.provisioningState -ne 'Succeeded') { throw "AKS $($cluster.name) is $($cluster.provisioningState). Wait for the current operation to finish, then retry; do not start during stop." }
+    if ($cluster.powerState.code -eq 'Stopped') { Invoke-DemoAz -Arguments @('aks', 'start', '-g', $infraRg, '-n', ($id -split '/')[-1], '--no-wait', '-o', 'none') | Out-Null }
+    elseif ($cluster.powerState.code -ne 'Running') { throw "Unexpected AKS power state: $($cluster.powerState.code)" }
+}
+foreach ($id in $inventory.ContainerAppIds) {
+    $app = Invoke-DemoAz -Arguments @('containerapp', 'show', '--ids', $id, '-o', 'json') | ConvertFrom-Json
+    $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $infraRg, '-n', $app.name, '-o', 'json') | ConvertFrom-Json)
+    if (@($revisions | Where-Object { $_.properties.active }).Count -eq 0) {
+        Invoke-DemoAz -Arguments @('containerapp', 'revision', 'activate', '-g', $infraRg, '--revision', $app.properties.latestRevisionName, '-o', 'none') | Out-Null
+    }
+}
+$arcBeforeRestart = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
+$reconnectIds = @()
+foreach ($machine in $inventory.Machines) {
+    $wasConnected = $machine.ArcId -in @($arcBeforeRestart | Where-Object status -eq 'Connected' | ForEach-Object id)
+    if ($machine.Id -notin $startedVmIds -and ($machine.Native -or $wasConnected)) { continue }
+    $reconnectIds += $machine.Id
+    $services = @()
+    if (-not $machine.Native) { $services += if ($machine.OsType -eq 'Windows') { 'himds' } else { 'himdsd' } }
+    if ($machine.Monitor) { $services += if ($machine.OsType -eq 'Windows') { 'AzureMonitorAgent' } else { 'azuremonitoragent' } }
+    if (-not $services) { continue }
+    $script = if ($machine.OsType -eq 'Windows') {
+        "`$ErrorActionPreference='Stop'; Restart-Service $($services -join ',') -Force; 'ARC_DEMO_OK'"
+    } else { "set -e; sudo systemctl restart $($services -join ' '); echo ARC_DEMO_OK" }
+    Invoke-DemoGuestCommand -Machine $machine -Script $script
+}
+Wait-Until -Message 'expected Arc identities connected' -Condition {
+    $arc = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
+    @($inventory.Machines | Where-Object { -not $_.Native -and $_.ArcId -notin @($arc | Where-Object status -eq 'Connected' | ForEach-Object id) }).Count -eq 0
+} | Out-Null
+if (-not $SkipPatchAssessment -and $reconnectIds.Count -gt 0) {
+    foreach ($machine in $inventory.Machines | Where-Object { -not $_.Native }) {
+        Invoke-DemoAz -Arguments @('connectedmachine', 'assess-patches', '--ids', $machine.ArcId, '--no-wait', '-o', 'none') | Out-Null
+    }
+}
+if (-not $SkipValidate) {
+    & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 600
+    if ($LASTEXITCODE -ne 0) { throw 'Activation completed but readiness failed or remains pending. Review the readiness checks above.' }
+}
+Write-Ok 'Activation finished. Existing fault flags were preserved; assessment submissions are not assessment completion.'

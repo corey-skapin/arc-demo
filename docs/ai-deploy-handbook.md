@@ -30,14 +30,17 @@ Do:
 2. Run scripts/Test-Prerequisites.ps1.
 3. Review config/demo-skin.json and update only customer-facing skin values.
 4. Deploy with scripts/Deploy-ArcDemo.ps1 using the skin and selected workload flags.
-5. Validate Arc machines, workbook, Log Analytics Heartbeat, alert rules, and optional workload resources.
+5. Run Test-ArcDemoReadiness.ps1 with the same explicit target/skin; preserve JSON evidence outside source. Verify guest/workload signals separately.
 6. Record any manual follow-up clearly.
-7. Hibernate with scripts/Hibernate-ArcDemo.ps1 when finished.
+7. Hibernate only when the user explicitly approves parking the demo; pass the same subscription/tenant/skin.
 
 Do not:
 - Hard-code subscription, tenant, or private email values into source.
 - Claim SQL Server enabled by Azure Arc in this Azure-only lab.
 - Delete the lab unless asked to run scripts/Remove-ArcDemo.ps1.
+- Change CLI default context, register providers, reset credentials/faults or alter shared Defender pricing incidentally.
+- Run disruptive lifecycle smoke tests against an in-use lab.
+- Treat a successful ARM submission, extension provisioning or patch submission as completed guest/telemetry validation.
 ```
 
 ## Required inputs
@@ -78,6 +81,20 @@ time/cost. Keep `-InstallSql` off for this Azure-only lab.
 
 ## Validation checklist
 
+First read [lifecycle.md](lifecycle.md). Use:
+
+```powershell
+.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> `
+  -SkinPath .\config\demo-skin.json -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600
+```
+
+JSON v1 uses exact resource IDs and exit 0 pass, 1 fail/error, 2 pending.
+Readiness never induces/resets faults. Missing skins/configs are errors. Preflight
+is read-only and effective Owner or Contributor+UAA is mandatory; supplying a
+principal ID does not skip RBAC. Preserve deployment history and existing VM/SP
+credentials. Optional-only deployments can have empty fleets while older hosts
+remain; never infer absence from the newest output alone.
+
 | Check | Command or portal location |
 |---|---|
 | Correct subscription | `az account show --query "{id:id,tenant:tenantId,user:user.name}" -o table` |
@@ -103,23 +120,22 @@ claim for this Azure-only lab.
 
 ## Hibernation
 
-Always hibernate when the live rehearsal is finished:
+Hibernate only after the user explicitly approves parking this lab:
 
 ```powershell
-.\scripts\Hibernate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
+.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
 ```
 
 Verify:
 
 ```powershell
-az vm list -g rg-arc-demo-infra -d --query "[].{name:name,power:powerState}" -o table
-az resource list -g rg-arc-demo-infra --resource-type Microsoft.Network/natGateways -o table
-az resource list -g rg-arc-demo-infra --resource-type Microsoft.Network/publicIPAddresses -o table
-az containerapp list -g rg-arc-demo-infra --query "[].{name:name,min:properties.template.scale.minReplicas}" -o table
+.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> `
+  -SkinPath .\config\demo-skin.json -DesiredState Hibernated -OutputFormat Json
 ```
 
 Expected hibernated state: all VMs deallocated, no NAT Gateway/Public IP, optional
-Container App min replicas `0`.
+Container App revisions inactive, optional AKS Stopped/Succeeded. Zero minimum
+replicas alone is not a parked Container App; retained services/storage can bill.
 
 ## Hand off to SRE Agent
 

@@ -2,7 +2,7 @@
 
 > Story-first walkthrough for a standalone Azure Arc + Azure Monitor demo. No Azure SRE Agent dependency. The later `sre-agent` repo is optional and can consume the alerts produced here.
 >
-> Total time: **12-15 min** for the default Arc/Monitor path, or **20-30 min** with optional workload beats. SQL Server/Arc SQL/BPA is an optional advanced branch and is skipped by default.
+> Plan **20-30 min** for the Arc/Monitor narrative with discussion and selected optional beats; a compressed core tour is 12-15 min. SQL Server/Arc SQL/BPA remains experimental and skipped by default.
 
 ## 0. Lab shape and workload toggles
 
@@ -22,7 +22,7 @@ These defaults come from `config\demo-skin.json`. To retarget for another custom
 | Arc estate + Azure-native VM comparison | `-DeployAzureVMs $true` |
 | Arc estate + Container App fault alert | `-DeployContainerApps $true` |
 | Arc estate + AKS crash-loop alert | `-DeployAks $true` |
-| Everything live-validated today | `-DeployAzureVMs $true -DeployContainerApps $true -DeployAks $true` |
+| All implemented optional workloads (validate the chosen lab separately) | `-DeployAzureVMs $true -DeployContainerApps $true -DeployAks $true` |
 | Azure-native scenarios only | `-DeployArcOnPrem $false -DeployAzureVMs $true -DeployContainerApps $true` |
 | Optional SQL workload beat | Future option: SQL Server on an Azure VM can simulate workload signals, but do not claim SQL Server enabled by Azure Arc in this Azure-only lab; see [`sql-arc-spike.md`](sql-arc-spike.md). |
 
@@ -63,12 +63,13 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    ```
 2. If the environment is hibernated, activate it:
    ```powershell
-   .\scripts\Activate-ArcDemo.ps1 -NamePrefix arc-demo
+   .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> -SkinPath .\config\demo-skin.json
+   .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> -SkinPath .\config\demo-skin.json -OutputFormat Json
    ```
-   The activation script waits for Arc Connected, then starts on-demand Update
-   Manager patch assessments for the demo machines before the final Heartbeat
-   check. The scan runs asynchronously, so allow several minutes before the
-   Update Manager beat.
+   After a start/reconnect, activation submits on-demand Update Manager patch
+   assessments before final readiness. An already-running/connected rerun does
+   not submit another assessment. Activation preserves fault flags; submission
+   is not scan completion. Allow several minutes before the Update Manager beat.
 3. Open tabs:
    - **Arc Demo — Estate Overview** workbook.
    - **Azure Arc** > **Machines**, filtered to resource group `rg-arc-demo`.
@@ -93,6 +94,14 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
    governance workspace and is not part of this demo.
 
 ## 3. Live flow
+
+Presenter gate: [readiness](lifecycle.md) must pass or the missing surface must be
+explicitly disclosed. A healthy infrastructure snapshot does not prove policy
+scores, CT inventory cycles or patch assessments are complete. Optional AKS needs
+a longer prep window; never hibernate/restart it mid-demo. The approved Linux CT
+repair has separate guest and telemetry evidence, not a claim of full lab
+teardown/recreate validation. Keep fault induction/reset as explicit, approved
+scenario actions.
 
 ### 3.1 Frame: the problem (1 min)
 
@@ -321,13 +330,13 @@ Full commands: [`aks-break-scenario.md`](aks-break-scenario.md).
 
 ## 6. After the meeting
 
-1. Reset any optional faults (`SIMULATE_CRASH=false`, `CRASH_LOOP=false`).
-2. Hibernate if you do not need the lab running:
+1. Reset optional faults only if explicitly authorized; lifecycle commands preserve them.
+2. With operator approval, hibernate if the lab is not needed:
    ```powershell
-   .\scripts\Hibernate-ArcDemo.ps1 -NamePrefix arc-demo
+   .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
    ```
 3. For permanent cleanup:
    ```powershell
-   .\scripts\Remove-ArcDemo.ps1 -WhatIf
-   .\scripts\Remove-ArcDemo.ps1
+   .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
+   .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
    ```
