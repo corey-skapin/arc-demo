@@ -109,8 +109,53 @@ Describe 'Retained workload identity classification' {
 Describe 'Checked guest execution and jobs' {
     InModuleScope Common {
         BeforeEach {
-            Mock Start-DemoAzJob { [pscustomobject]@{ Name = 'fake' } }
+            $global:ArcGuestTransportFixture = @{}
+            Mock Start-DemoAzJob {
+                param($Arguments)
+                $global:ArcGuestTransportFixture.arguments = $Arguments
+                $global:ArcGuestTransportFixture.path = $Arguments[[Array]::IndexOf($Arguments, '--scripts') + 1].TrimStart('@')
+                $global:ArcGuestTransportFixture.content = [System.IO.File]::ReadAllText($global:ArcGuestTransportFixture.path)
+                [pscustomobject]@{ Name = 'fake' }
+            }
             $script:machine = [pscustomobject]@{ Name = 'native-win'; Id = '/vm/native-win'; OsType = 'Windows' }
+        }
+        AfterEach { Remove-Variable ArcGuestTransportFixture -Scope Global -ErrorAction SilentlyContinue }
+        It 'transports every script line through a file for <OsType>' -TestCases @(
+            @{ OsType = 'Windows'; Command = 'RunPowerShellScript' }
+            @{ OsType = 'Linux'; Command = 'RunShellScript' }
+        ) {
+            param($OsType, $Command)
+            $script:machine.OsType = $OsType
+            Mock Receive-DemoJobs {
+                [System.IO.File]::Exists($global:ArcGuestTransportFixture.path) | Should -BeTrue
+                '{"value":[{"code":"ProvisioningState/succeeded","message":"ARC_DEMO_OK\n"}]}'
+            }
+            $scriptText = "first line`nsecond line with 'quotes' and | pipes`nARC_DEMO_OK"
+            Invoke-DemoGuestCommand -Machine $script:machine -Script $scriptText
+            $global:ArcGuestTransportFixture.content | Should -BeExactly $scriptText
+            $arguments = $global:ArcGuestTransportFixture.arguments
+            $arguments[[Array]::IndexOf($arguments, '--command-id') + 1] | Should -Be $Command
+            $arguments[[Array]::IndexOf($arguments, '--scripts') + 1] | Should -BeExactly "@$($global:ArcGuestTransportFixture.path)"
+            [System.IO.File]::Exists($global:ArcGuestTransportFixture.path) | Should -BeFalse
+        }
+        It 'removes the script file when guest submission fails' {
+            Mock Receive-DemoJobs { throw 'injected guest submission failure' }
+            { Invoke-DemoGuestCommand -Machine $script:machine -Script "line one`nline two" } | Should -Throw '*injected guest submission failure*'
+            [System.IO.File]::Exists($global:ArcGuestTransportFixture.path) | Should -BeFalse
+        }
+        It 'preserves caller-owned script files used by onboarding and SQL' {
+            $path = Join-Path ([System.IO.Path]::GetTempPath()) "arc guest $([guid]::NewGuid()).ps1"
+            try {
+                [System.IO.File]::WriteAllText($path, "line one`nline two")
+                Mock Receive-DemoJobs { '{"value":[{"code":"ProvisioningState/succeeded","message":"ARC_DEMO_OK\n"}]}' }
+                Invoke-DemoGuestCommand -Machine $script:machine -Script "@$path"
+                $global:ArcGuestTransportFixture.content | Should -BeExactly "line one`nline two"
+                [System.IO.File]::Exists($path) | Should -BeTrue
+            } finally { [System.IO.File]::Delete($path) }
+        }
+        It 'rejects a missing caller script before starting any job' {
+            { Invoke-DemoGuestCommand -Machine $script:machine -Script "@$(Join-Path ([System.IO.Path]::GetTempPath()) "$([guid]::NewGuid()).ps1")" } | Should -Throw
+            Should -Invoke Start-DemoAzJob -Times 0
         }
         It 'rejects provisioning success without guest completion' {
             Mock Receive-DemoJobs { '{"value":[{"code":"ProvisioningState/succeeded","message":"script exited 1"}]}' }
@@ -283,6 +328,61 @@ Describe 'Readiness CLI contract' {
         Mock Initialize-DemoContext {}
         Mock Assert-DemoSkinInventory {}
         Mock Get-DemoInventory { [pscustomobject]@{ Machines = @(); Resources = @() } }
+    }
+
+    Describe 'Tenant-scoped Azure directory commands' {
+        InModuleScope Common {
+            BeforeEach {
+                $global:ArcDirectoryFixture = @{
+                    calls = @(); tenant = '22222222-2222-2222-2222-222222222222'; exitCode = 0
+                    previousTenant = $script:DemoTenant; previousSubscription = $script:DemoSubscription
+                    previousExitCode = $global:LASTEXITCODE
+                    path = Join-Path ([System.IO.Path]::GetTempPath()) "arc-fake-cli-$([guid]::NewGuid()).ps1"
+                }
+                $fakeCli = {
+                    $global:ArcDirectoryFixture.calls += ,@($args)
+                    $global:LASTEXITCODE = $global:ArcDirectoryFixture.exitCode
+                    if ($args[0] -eq 'account') { $global:ArcDirectoryFixture.tenant } else { '{"id":"demo-sp"}' }
+                }
+                [System.IO.File]::WriteAllText($global:ArcDirectoryFixture.path, $fakeCli.ToString())
+                $script:DemoTenant = '22222222-2222-2222-2222-222222222222'
+                $script:DemoSubscription = '11111111-1111-1111-1111-111111111111'
+                Mock Get-Command { [pscustomobject]@{ Source = $global:ArcDirectoryFixture.path } }
+            }
+            AfterEach {
+                [System.IO.File]::Delete($global:ArcDirectoryFixture.path)
+                $script:DemoTenant = $global:ArcDirectoryFixture.previousTenant
+                $script:DemoSubscription = $global:ArcDirectoryFixture.previousSubscription
+                $global:LASTEXITCODE = $global:ArcDirectoryFixture.previousExitCode
+                Remove-Variable ArcDirectoryFixture -Scope Global
+            }
+            It 'verifies the actual default tenant without appending an unsupported subscription argument' {
+                Invoke-DemoAz -Arguments @('ad', 'sp', 'show', '--id', 'demo-sp') | Should -Be '{"id":"demo-sp"}'
+                $global:ArcDirectoryFixture.calls.Count | Should -Be 2
+                $global:ArcDirectoryFixture.calls[0] | Should -Not -Contain '--subscription'
+                $global:ArcDirectoryFixture.calls[1] | Should -Not -Contain '--subscription'
+            }
+            It 'blocks directory operations when the default tenant differs' {
+                $global:ArcDirectoryFixture.tenant = '33333333-3333-3333-3333-333333333333'
+                { Invoke-DemoAz -Arguments @('ad', 'sp', 'show', '--id', 'demo-sp') } | Should -Throw '*default tenant*'
+                $global:ArcDirectoryFixture.calls.Count | Should -Be 1
+            }
+            It 'blocks directory operations when default context inspection fails' {
+                $global:ArcDirectoryFixture.exitCode = 1
+                { Invoke-DemoAz -Arguments @('ad', 'sp', 'show', '--id', 'demo-sp') } | Should -Throw '*Unable to verify*'
+                $global:ArcDirectoryFixture.calls.Count | Should -Be 1
+            }
+            It 'requires explicit tenant initialization before directory operations' {
+                $script:DemoTenant = $null
+                { Invoke-DemoAz -Arguments @('ad', 'sp', 'show', '--id', 'demo-sp') } | Should -Throw '*explicit demo tenant*'
+                $global:ArcDirectoryFixture.calls.Count | Should -Be 0
+            }
+            It 'still pins resource operations to the requested subscription' {
+                Invoke-DemoAz -Arguments @('resource', 'list', '-g', 'rg-retail-demo') | Out-Null
+                $global:ArcDirectoryFixture.calls[0][-2] | Should -Be '--subscription'
+                $global:ArcDirectoryFixture.calls[0][-1] | Should -Be $script:DemoSubscription
+            }
+        }
     }
 
     Describe 'Container App readiness state enumeration' {

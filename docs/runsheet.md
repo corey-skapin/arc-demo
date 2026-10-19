@@ -180,8 +180,13 @@ Open **Azure Update Manager**, then **Machines**, filtered to `rg-arc-demo`.
 Open **Defender for Cloud**, then **Recommendations** and **Regulatory compliance**.
 
 - Show Defender for Servers Plan 2 at subscription scope.
-- Current demo has Defender for Servers Plan 2 enabled and MDE extensions on the
-  Arc machines (`MDE.Windows` on Windows, `MDE.Linux` on Linux).
+- Verify Defender for Servers Plan 2 and actual endpoint health separately.
+  A plan setting or an MDE extension resource is not proof of healthy endpoint
+  protection. Use a healthy Windows endpoint for the live coverage proof; check
+  Linux guest status before claiming Linux MDE coverage. Linux extension ARM
+  state can be Updating while AMA/CT guest handlers and telemetry remain healthy.
+  Disclose that discrepancy; do not reinstall working monitoring agents to clear
+  another extension's pending operation.
 - Use live recommendations as the co-sell: the lab currently surfaces examples
   such as missing periodic update checks, Windows Defender Exploit Guard,
   Linux SSH key authentication, and secure protocol recommendations.
@@ -249,12 +254,12 @@ Open resource group `rg-arc-demo`, then **Alerts**.
   webhook into ServiceNow, PagerDuty, or another HTTP endpoint. The demo keeps
   email as the simplest visible proof."
 
-Optional force alert:
+Optional force alert (separate explicit approval; not part of preflight):
 
 ```powershell
-az vm deallocate -g rg-arc-demo-infra -n win-app-01
+az vm deallocate --subscription <SUBSCRIPTION_ID> -g rg-arc-demo-infra -n win-app-01
 # Reset after the demo:
-az vm start -g rg-arc-demo-infra -n win-app-01
+az vm start --subscription <SUBSCRIPTION_ID> -g rg-arc-demo-infra -n win-app-01
 ```
 
 ### 3.10 Only now open the Arc server resource (2 min)

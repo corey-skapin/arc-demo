@@ -372,11 +372,19 @@ function Invoke-DemoAz {
         [switch]$AllowNotFound
     )
     $az = (Get-Command az -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
-    if ($script:DemoSubscription -and '--subscription' -notin $Arguments -and $Arguments[0] -notin @('version', 'bicep')) {
+    if ($script:DemoSubscription -and '--subscription' -notin $Arguments -and $Arguments[0] -notin @('version', 'bicep', 'ad')) {
         $Arguments += @('--subscription', $script:DemoSubscription)
     }
     $stderr = [System.IO.Path]::GetTempFileName()
     try {
+        if ($Arguments[0] -eq 'ad') {
+            if (-not $script:DemoTenant) { throw 'Initialize the explicit demo tenant before a directory operation.' }
+            $defaultTenant = & $az account show --query tenantId -o tsv 2> $stderr
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to verify the Azure CLI default tenant before a directory operation.' }
+            if (($defaultTenant -join '').Trim() -ne $script:DemoTenant) {
+                throw 'Directory operations use the CLI default tenant, which differs from the explicitly requested tenant. Select the intended tenant before retrying; no CLI defaults were changed.'
+            }
+        }
         $output = & $az @Arguments 2> $stderr
         $exitCode = $LASTEXITCODE
         $detail = [System.IO.File]::ReadAllText($stderr).Trim()
@@ -462,9 +470,24 @@ function Invoke-DemoGuestCommand {
         [Parameter(Mandatory)][string]$Script
     )
     $cmd = if ($Machine.OsType -eq 'Windows') { 'RunPowerShellScript' } else { 'RunShellScript' }
-    $job = Start-DemoAzJob -Arguments @('vm', 'run-command', 'invoke', '--ids', $Machine.Id,
-        '--command-id', $cmd, '--scripts', $Script, '-o', 'json', '--only-show-errors')
-    $result = Receive-DemoJobs -Jobs @($job) -TimeoutSeconds 900 -PassThru | ConvertFrom-Json
+    $scriptPath = $null
+    try {
+        if ($Script.StartsWith('@')) {
+            $sourcePath = (Resolve-Path -LiteralPath $Script.Substring(1) -ErrorAction Stop).ProviderPath
+            if (-not [System.IO.File]::Exists($sourcePath)) { throw 'Guest script input must be a file.' }
+            $scriptArgument = "@$sourcePath"
+        } else {
+            # az.cmd can truncate multiline arguments. Keep the file until the job finishes.
+            $scriptPath = [System.IO.Path]::GetTempFileName()
+            [System.IO.File]::WriteAllText($scriptPath, $Script, [System.Text.UTF8Encoding]::new($false))
+            $scriptArgument = "@$scriptPath"
+        }
+        $job = Start-DemoAzJob -Arguments @('vm', 'run-command', 'invoke', '--ids', $Machine.Id,
+            '--command-id', $cmd, '--scripts', $scriptArgument, '-o', 'json', '--only-show-errors')
+        $result = Receive-DemoJobs -Jobs @($job) -TimeoutSeconds 900 -PassThru | ConvertFrom-Json
+    } finally {
+        if ($scriptPath) { [System.IO.File]::Delete($scriptPath) }
+    }
     $messages = @($result.value | ForEach-Object { $_.message }) -join "`n"
     if ($result.value.code -match 'failed' -or $messages -notmatch '(?m)^ARC_DEMO_OK\s*$') {
         throw "Guest command failed on $($Machine.Name); required completion marker absent or failure reported. Review VM Run Command output."

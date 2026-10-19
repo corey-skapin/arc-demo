@@ -1,5 +1,39 @@
 # Troubleshooting
 
+## Directory CLI rejects --subscription
+
+`az ad` operations are tenant-scoped; commands such as `az ad sp show` do not
+accept `--subscription`. The checked adapter does not append that argument to
+directory commands. Before any directory read/write it verifies the CLI's actual
+default tenant matches the explicit requested tenant, and stops on mismatch.
+It never silently switches defaults to make an identity operation succeed.
+
+## Multiline Azure CLI arguments are truncated on Windows
+
+**Symptom** — A multiline Resource Graph query returns unfiltered resources, or
+an inline guest script does not execute its later lines.
+
+**Cause** — Passing embedded newlines through the Windows `az.cmd` launcher can
+truncate the native argument at its first line. A successful CLI exit is not proof
+that the intended query/script was transported.
+
+**Fix** — For REST queries, send the complete query in a JSON request body. For
+simple KQL without line comments, flatten line breaks before invoking the CLI and
+verify the result shape. Guest commands use the documented
+[`--scripts @script.ps1` file form](https://learn.microsoft.com/azure/virtual-machines/windows/run-command#using-run-commands).
+`Invoke-DemoGuestCommand` retains its temporary UTF-8 script until the bounded job
+finishes and removes it on success/failure. Do not print credential-bearing scripts.
+
+## Linux ARM Updating while monitoring guest handlers are healthy
+
+Inspect ARM model state, VM guest instance view, recent activity and exact-ID
+telemetry separately. An outstanding MDE.Linux operation can coincide with AMA
+and Change Tracking reporting ARM Updating even when their guest handlers report
+Succeeded and data continues to arrive. Readiness must remain pending, not be
+forced green. A missing MDE status file is not proof of working endpoint protection.
+Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
+restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
+
 > Every failure mode I've personally hit during build or operation, with a verified fix.
 > If you hit something not listed here, please open an issue (or PR a fix in this file).
 
