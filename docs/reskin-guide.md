@@ -21,7 +21,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 
 Change per customer:
 - `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
-- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all live-validated workloads. Leave `workloads.installSql` as `false` unless you intentionally want the optional advanced SQL branch.
+- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. Leave `workloads.installSql` as `false` unless you intentionally want the experimental SQL branch.
 - `workloads.onPremFleetPath` for a custom OS mix.
 
 Keep constant unless the lab requirement changes:
@@ -31,7 +31,7 @@ Keep constant unless the lab requirement changes:
 ## Retarget steps
 
 1. Copy `config\demo-skin.json` or start from `config\dummy-customer.demo-skin.json`.
-2. Set `azure.namePrefix` to a short lowercase prefix that is valid in Azure resource names.
+2. Set `azure.namePrefix` to 3-20 lowercase letters/digits/hyphens, starting with a letter and ending with a letter/digit. Workload toggles must be JSON booleans, not strings. Missing or malformed skins fail explicitly.
 3. Set `notifications.email` to the demo operator or customer-approved distribution list.
 4. Choose workload toggles.
 5. Run scripts without repeating those variables:
@@ -43,20 +43,27 @@ Keep constant unless the lab requirement changes:
    ```
 6. Use the same skin for lifecycle commands:
    ```powershell
-   .\scripts\Activate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
-   .\scripts\Hibernate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
-   .\scripts\Remove-ArcDemo.ps1 -SkinPath .\config\demo-skin.json -WhatIf
+   .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
+   .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -OutputFormat Json
+   .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
+   .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
    ```
 
 ## Off state vs cleanup
 
 `Hibernate-ArcDemo.ps1` is the weekend/off state. It deallocates VMs, deletes the
-NAT Gateway and public IP, resets any optional Container App fault, and scales
-Container Apps to zero-min replicas. It keeps the estate intact: resource groups,
+NAT Gateway and public IP, stops optional AKS, and deactivates optional Container
+App revisions. Fault flags are preserved, not reset. It keeps the estate intact: resource groups,
 Arc records, workbooks, DCRs, alerts, disks, and Log Analytics remain.
 
 `Remove-ArcDemo.ps1` is cleanup deletion. Use it only when the demo should be
 permanently removed.
+
+Both operations require explicit operator approval. Removal preserves shared
+subscription Defender by default. See [lifecycle.md](lifecycle.md) for exact
+scope, retained deployment manifests, optional-workload costs and the readiness
+JSON/exit-code contract. Changing skin toggles alone does not delete previously
+deployed workloads; lifecycle still accounts for retained manifests.
 
 ## Examples
 

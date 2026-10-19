@@ -121,7 +121,7 @@ The fleet schema and legacy OS treatment are documented in
 
 - VMs sit in a single `/24` subnet behind an empty NSG (no inbound rules).
 - A **NAT Gateway** provides outbound internet for the Arc agent's outbound-only API calls (required — Azure default outbound is being deprecated).
-- The NAT GW is deleted by `Hibernate-ArcDemo.ps1` to save ~AUD 55/mo and recreated by `Activate-ArcDemo.ps1`.
+- The NAT GW is deleted by `Hibernate-ArcDemo.ps1` after compute is parked and recreated by `Activate-ArcDemo.ps1` before VM startup. Use explicit target/skin inputs; retained services still bill. See [lifecycle semantics](lifecycle.md) and [cost assumptions](cost.md).
 
 ## Identity
 

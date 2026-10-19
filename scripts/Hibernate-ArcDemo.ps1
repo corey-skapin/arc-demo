@@ -1,104 +1,65 @@
 <#
 .SYNOPSIS
-    Puts the Arc demo into low-cost hibernation (~AUD 35/mo).
-
+    Parks retained demo workloads without deleting their data or resetting faults.
 .DESCRIPTION
-    - Deallocates all VMs in the infra RG.
-    - Deletes the NAT Gateway and its public IP (saves ~AUD 55/mo).
-    - Resets demo Container Apps faults and scales Container Apps to zero.
-    - Leaves Log Analytics, DCRs, workbook, alerts, Arc records and disks
-      in place so the demo is intact and ready to wake up.
-
-.PARAMETER NamePrefix
-    Used to derive RG names (default: arc-demo).
-
-.PARAMETER SkinPath
-    Optional path to a demo skin variables JSON file. Defaults to config\demo-skin.json.
-
-.PARAMETER WhatIf
-    Preview the actions without performing them.
-
-.EXAMPLE
-    .\Hibernate-ArcDemo.ps1
+    Verifies exact VM deallocation and AKS Stopped state before removing NAT.
+    Deactivates Container App revisions (minReplicas=0 alone is not a stopped app).
+    Never run against a live demo without the operator's explicit approval.
 #>
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding(SupportsShouldProcess)]
 param(
+    [Parameter(Mandatory)][guid]$SubscriptionId,
+    [Parameter(Mandatory)][guid]$TenantId,
     [string]$NamePrefix = 'arc-demo',
     [string]$SkinPath = ''
 )
-
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
-Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
-
-$skin = Get-DemoSkin -Path $SkinPath -RepoRoot $repoRoot
-if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue -Skin $skin -Path 'azure.namePrefix' -Default $NamePrefix }
-
-$arcRg   = "rg-$NamePrefix"
-$infraRg = "rg-$NamePrefix-infra"
-$vnet    = "vnet-$NamePrefix"
-$subnet  = 'snet-vms'
-$natGw   = "natgw-$NamePrefix"
-$natPip  = "pip-natgw-$NamePrefix"
-
-Write-Header "Hibernating Arc demo ($arcRg + $infraRg)"
-
-Write-Step 'Deallocating all VMs (parallel)...'
-$vms = (az vm list -g $infraRg --query "[].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-if (-not $vms) {
-    Write-Warn "No VMs found in $infraRg — skipping VM deallocation"
-} else {
-    foreach ($v in $vms) {
-        if ($PSCmdlet.ShouldProcess($v, 'deallocate')) {
-            az vm deallocate -g $infraRg -n $v --no-wait --only-show-errors -o none
-        }
-    }
-
-    if ($WhatIfPreference) {
-        Write-Warn 'WhatIf set — skipping wait for VM deallocation'
-    } else {
-        Wait-Until -TimeoutSeconds 600 -IntervalSeconds 30 -Message 'all VMs deallocated' -Condition {
-            $running = (az vm list -g $infraRg --show-details --query "[?powerState=='VM running'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-            return $running.Count -eq 0
-        } | Out-Null
-        Write-Ok 'All VMs deallocated'
+Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
+$skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
+if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
+Assert-DemoName $NamePrefix
+Initialize-DemoContext $SubscriptionId $TenantId
+$inventory = Get-DemoInventory $NamePrefix
+Assert-DemoSkinInventory $skin $inventory
+if (@($inventory.Machines | Where-Object { -not $_.Actual }).Count) { throw 'Expected VMs are missing; resolve inventory drift before hibernating.' }
+if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Deallocate VMs, stop AKS, deactivate Container App revisions and remove demo NAT/public IP')) { return }
+$infraRg = $inventory.InfraRg
+foreach ($machine in $inventory.Machines) {
+    if ($machine.Actual.powerState -ne 'VM deallocated') {
+        Invoke-DemoAz -Arguments @('vm', 'deallocate', '--ids', $machine.Id, '--no-wait', '-o', 'none') | Out-Null
     }
 }
-
-Write-Step 'Scaling optional Container Apps workload to zero...'
-$containerApps = (az containerapp list -g $infraRg --query "[?tags.workload=='container-app'].name" -o tsv 2>$null) -split "`n" | Where-Object { $_ }
-if ($containerApps) {
-    foreach ($app in $containerApps) {
-        if ($PSCmdlet.ShouldProcess($app, 'set SIMULATE_CRASH=false and min replicas 0')) {
-            az containerapp update -g $infraRg -n $app `
-                --set-env-vars SIMULATE_CRASH=false `
-                --min-replicas 0 --max-replicas 1 `
-                --only-show-errors -o none
-            Write-Ok "Scaled $app to zero-min replicas"
-        }
+foreach ($id in $inventory.AksClusterIds) {
+    $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
+    if ($cluster.provisioningState -eq 'Stopping') { continue }
+    if ($cluster.provisioningState -ne 'Succeeded') { throw "AKS $($cluster.name) is $($cluster.provisioningState). Resolve the in-progress/failed operation before parking." }
+    if ($cluster.powerState.code -ne 'Stopped') { Invoke-DemoAz -Arguments @('aks', 'stop', '-g', $infraRg, '-n', ($id -split '/')[-1], '--no-wait', '-o', 'none') | Out-Null }
+}
+foreach ($id in $inventory.ContainerAppIds) {
+    $name = ($id -split '/')[-1]
+    $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $infraRg, '-n', $name, '-o', 'json') | ConvertFrom-Json)
+    foreach ($revision in $revisions | Where-Object { $_.properties.active }) {
+        Invoke-DemoAz -Arguments @('containerapp', 'revision', 'deactivate', '-g', $infraRg, '--revision', $revision.name, '-o', 'none') | Out-Null
     }
-} else {
-    Write-Ok 'No Container Apps workload found'
 }
-
-# NAT GW must be deleted BEFORE the public IP (PIP delete fails if still allocated)
-Write-Step 'Detaching + deleting NAT Gateway...'
-$attached = az network vnet subnet show -g $infraRg --vnet-name $vnet -n $subnet --query "natGateway.id" -o tsv 2>$null
-if ($attached -and $PSCmdlet.ShouldProcess('subnet', 'detach NAT GW')) {
-    az network vnet subnet update -g $infraRg --vnet-name $vnet -n $subnet --remove natGateway --only-show-errors -o none
-    Write-Ok 'Detached NAT GW from subnet'
+Wait-Until -Message 'all expected VMs deallocated and AKS stopped' -TimeoutSeconds 1200 -Condition {
+    $vms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '--show-details', '-o', 'json') | ConvertFrom-Json)
+    if (@($inventory.Machines | Where-Object { $_.Id -notin @($vms | Where-Object powerState -eq 'VM deallocated' | ForEach-Object id) }).Count) { return $false }
+    foreach ($id in $inventory.AksClusterIds) {
+        $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
+        if ($cluster.powerState.code -ne 'Stopped' -or $cluster.provisioningState -ne 'Succeeded') { return $false }
+    }
+    return $true
+} | Out-Null
+$natId = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Network/natGateways/natgw-$NamePrefix"
+$subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '-g', $infraRg, '--vnet-name', "vnet-$NamePrefix", '-n', 'snet-vms', '-o', 'json') | ConvertFrom-Json
+if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { throw 'Unexpected subnet NAT Gateway; refusing to detach it.' }
+if ($subnet.natGateway.id -eq $natId) {
+    Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'update', '--ids', $subnet.id, '--remove', 'natGateway', '-o', 'none') | Out-Null
 }
-$natExists = az network nat gateway show -g $infraRg -n $natGw --query id -o tsv 2>$null
-if ($natExists -and $PSCmdlet.ShouldProcess($natGw, 'delete')) {
-    az network nat gateway delete -g $infraRg -n $natGw --only-show-errors
-    Write-Ok "Deleted $natGw"
-}
-$pipExists = az network public-ip show -g $infraRg -n $natPip --query id -o tsv 2>$null
-if ($pipExists -and $PSCmdlet.ShouldProcess($natPip, 'delete')) {
-    az network public-ip delete -g $infraRg -n $natPip --only-show-errors
-    Write-Ok "Deleted $natPip"
-}
-
-Write-Header '✅ Demo hibernated'
-Write-Host "  Steady-state hibernated cost: ~AUD 35/mo (OS disks + LAW retention)."
-Write-Host "  Wake it up with: .\Activate-ArcDemo.ps1"
+$resources = @(Invoke-DemoAz -Arguments @('resource', 'list', '-g', $infraRg, '-o', 'json') | ConvertFrom-Json)
+if ($natId -in $resources.id) { Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'delete', '-g', $infraRg, '-n', "natgw-$NamePrefix") | Out-Null }
+if ("pip-natgw-$NamePrefix" -in $resources.name) { Invoke-DemoAz -Arguments @('network', 'public-ip', 'delete', '-g', $infraRg, '-n', "pip-natgw-$NamePrefix") | Out-Null }
+& (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -DesiredState Hibernated -TimeoutSeconds 300
+if ($LASTEXITCODE -ne 0) { throw 'Hibernation is incomplete; inspect readiness output before retrying.' }
+Write-Ok 'Demo hibernated. Disks, retained data, optional workload storage and subscription-level services can still incur charges.'

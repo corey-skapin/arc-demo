@@ -1,6 +1,6 @@
 # Azure Arc Demo
 
-> A scripted, repeatable demo environment for showing Azure Arc + Azure Monitor to customers. Stand it up in ~30 min, hibernate it between demos for ~AUD 35/mo, wake it up in ~5 min.
+> A scripted demo environment for showing Azure Arc + Azure Monitor to customers. Plan a preparation window; readiness, not elapsed time, determines when it is ready.
 
 [![Lint](https://github.com/corey-skapin/arc-demo/actions/workflows/lint.yml/badge.svg)](https://github.com/corey-skapin/arc-demo/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -11,7 +11,7 @@ A **standalone Azure Arc + Azure Monitor lab**. It does **not** require Azure SR
 
 Default deployment:
 
-- 8 config-driven Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` — fully supported for demo/test scenarios)
+- 8 config-driven Azure VMs registered as Arc-enabled servers (with `MSFT_ARC_TEST=true` for demo/test simulation, not production or blanket feature-support validation)
 - 5 × Windows Server across WS2016/WS2019/WS2022 by default, including 2 SQL-capable Windows hosts (`win-sql-01/02`) that remain plain Windows VMs unless the optional advanced SQL path is explicitly enabled
 - 3 × Ubuntu 22.04 LTS
 - Log Analytics workspace, DCRs, Defender for Servers Plan 2, VM Insights, Change Tracking, Azure Update Manager periodic assessment, MCSB + NIST policy initiatives, heartbeat alert, Action Group, and a custom workbook tuned for [`docs/runsheet.md`](docs/runsheet.md)
@@ -32,13 +32,14 @@ See [`docs/architecture.md`](docs/architecture.md) for the full topology.
 
 Default Act-1 deployment costs are shown below. Optional Azure VM, Container App, and AKS workloads add their own incremental cost.
 
-| State | ~AUD/month | What stays | What goes |
+| State | Cost stance | What stays | What goes |
 |---|---|---|---|
-| **Active** | ~210 | Everything | Nothing (VMs auto-shutdown overnight) |
-| **Hibernated** | ~35 | LAW, DCRs, workbook, alerts, disks, Arc records | NAT GW, public IP, VM compute, Defender per-host charges |
-| **Removed** | 0 | Nothing | Everything |
+| **Active** | Reprice selected workloads | Everything | Nothing (VM auto-shutdown is not whole-lab hibernation) |
+| **Hibernated** | Retained-service costs remain | LAW, DCRs, workbooks, alerts, disks, Arc records | Demo NAT/PIP, VM compute; optional AKS stopped and Container App revisions inactive |
+| **Removed** | Verify final charges | Shared/subscription services unless explicitly removed | Two demo RGs, named policies and budget |
 
-Full breakdown: [`docs/cost.md`](docs/cost.md).
+The previous AUD 210 total was incorrect: its unverified line items sum to 358.
+See [`docs/cost.md`](docs/cost.md), not those legacy numbers, before budgeting.
 
 ## Quick start
 
@@ -94,11 +95,12 @@ Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor 
 ### Off state / activate
 
 ```powershell
-# After a demo — deallocates VMs, removes NAT, and scales optional Container Apps to zero
-.\scripts\Hibernate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
+# After explicit operator approval: deallocates VMs, stops AKS, deactivates Container Apps, removes NAT
+.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
 
-# Before the next demo — back to demo-ready in ~5-8 min; starts Update Manager assessment
-.\scripts\Activate-ArcDemo.ps1 -SkinPath .\config\demo-skin.json
+# Before the next demo; no automatic fault reset or credential rotation
+.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
+.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -OutputFormat Json
 ```
 
 This is distinct from cleanup deletion: it preserves resource groups, Arc records,
@@ -112,11 +114,16 @@ portal data to refresh.
 ### Remove permanently
 
 ```powershell
-.\scripts\Remove-ArcDemo.ps1 -WhatIf   # preview
-.\scripts\Remove-ArcDemo.ps1
+.\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -WhatIf
+.\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
 ```
 
 ## Customisation
+
+See [`docs/lifecycle.md`](docs/lifecycle.md) for the readiness JSON/exit-code
+contract, retained manifests, explicit targeting, retry/credential behavior,
+optional-workload parking, cleanup scope and validation boundaries. Removal
+preserves subscription Defender by default; identity deletion is separately opt-in.
 
 Customer-specific values live in [`config\demo-skin.json`](config/demo-skin.json). Change that file to retarget the demo name, resource prefix, region, notification email, workload toggles, workbook labels, and tags; see [`docs/reskin-guide.md`](docs/reskin-guide.md) for the swap-list and dummy-customer example. Runtime command-line parameters still override the skin when you need a one-off change.
 

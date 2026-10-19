@@ -3,6 +3,55 @@
 > Every failure mode I've personally hit during build or operation, with a verified fix.
 > If you hit something not listed here, please open an issue (or PR a fix in this file).
 
+## Activation waits forever or reports success with missing hosts
+
+Old lifecycle scripts compared counts, inferred Windows from `win-*`, ignored
+timeout results and expected native Azure VMs to have Arc records. They could
+also use only the newest empty fleet after an optional-workload-only deployment.
+The maintained scripts require explicit subscription/tenant, retain per-workload
+manifests, use actual VM OS metadata and compare exact IDs. Run read-only
+`Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -OutputFormat Json`.
+Resolve its failed checks; do not add unrelated hosts to satisfy a count.
+Do not delete subscription deployment history: missing/ambiguous inventory is an
+error requiring operator reconciliation, not a silent "no VMs" success.
+
+## Linux Change Tracking missing despite healthy AMA
+
+The previous deploy implementation installed CT via Arc while AGENTS required
+the Azure VM path for this lab's unreliable Linux guest-extension stack.
+Ordinary Arc CT support does not validate that stack on an Arc-enabled Azure VM.
+The maintained path uses `Microsoft.Azure.ChangeTrackingAndInventory` /
+`ChangeTracking-Linux` as a **VM extension**, retaining existing AMA and **Arc-ID**
+DCR associations. Approved installation on the three Linux lab hosts verified
+handler 2.42.0.0 guest success and fresh ConfigurationData/ConfigurationChange
+records without restarting VMs. The handler remains auto-upgrade enabled.
+See [Microsoft's supported CLI examples](https://learn.microsoft.com/azure/azure-change-tracking-inventory/change-tracking-inventory-support-matrix).
+
+First inspect both extension surfaces and DCRAs read-only. Obtain scoped approval
+before installation. Do not delete stuck Arc extensions, restart a VM or move
+DCRAs incidentally. Provisioning success and data arrival are separate checks;
+CT cycles/ingestion can lag substantially.
+
+## Container App is healthy but readiness says pending
+
+Healthy active revisions can report `RunningAtMaxScale` or `RunningAtMinScale`,
+not only `Running`. The readiness check accepts these states. Compare a
+timestamped app `runningStatus`, latest/latest-ready revision, active revision
+`healthState`/`runningState` and `SIMULATE_CRASH` **without updating them**. A stale
+snapshot or enum mismatch is not grounds to reset a workload fault.
+
+## Preflight or redeployment now refuses a previously tolerated state
+
+Preflight no longer registers providers or skips RBAC for a supplied principal.
+Missing providers, insufficient effective permissions, malformed skins,
+SKU restrictions and insufficient quota terminate with instructions.
+Quota/listing checks are not capacity guarantees.
+Routine redeployment does not reset SP credentials or generate a new password for
+existing VMs. Old labs without the saved Key Vault secret need their **current**
+password as `-AdminPassword` (SecureString); an existing SP needed for new
+onboarding needs `-OnboardingSecret`. Obtain the current values from the operator;
+do not rotate them as a shortcut. See [lifecycle semantics](lifecycle.md).
+
 ## Deploy fails immediately with `SkuNotAvailable`
 
 **Symptom** — `Deploy-ArcDemo.ps1` fails at the VM creation phase with:
@@ -12,22 +61,16 @@ SkuNotAvailable: The requested VM size for resource 'Following SKUs have failed 
 
 **Cause** — Azure capacity restrictions on burstable B-series in AU regions, especially in MCAPS-style subscriptions.
 
-**Fix** — Probe other SKUs in the region:
+**Fix** — Inspect restrictions and quota in the confirmed target:
 
 ```powershell
-foreach ($s in 'Standard_B2as_v2','Standard_D2as_v5','Standard_D2s_v5','Standard_E2as_v5') {
-  az group create -n rg-skutest -l australiaeast --only-show-errors | Out-Null
-  $err = az vm create -g rg-skutest -n probe -l australiaeast `
-    --image MicrosoftWindowsServer:WindowsServer:2022-datacenter-azure-edition:latest `
-    --size $s --admin-username azureuser --admin-password 'P@ssw0rd-Probe-123!' `
-    --authentication-type password --public-ip-address '""' --nsg '""' `
-    --validate --only-show-errors 2>&1 | Out-String
-  if ($err -match "SkuNotAvailable") { "❌ $s" } else { "✅ $s" }
-}
-az group delete -n rg-skutest --yes --no-wait
+az vm list-skus --subscription <SUB> -l australiaeast --size Standard_B2as_v2 --all -o table
+az vm list-usage --subscription <SUB> -l australiaeast -o table
 ```
 
-Then re-deploy with `-VmSize <working-sku>`.
+Choose a permitted SKU/region and review the matching Bicep preview. Neither an
+unrestricted SKU listing nor `--validate` guarantees physical allocation. Do not
+create/delete arbitrary probe resource groups in an in-use lab.
 
 ## Clean deploy fails while creating DCRs with missing Log Analytics tables
 
@@ -50,18 +93,12 @@ deterministic, so reruns update existing resources instead of duplicating them.
 
 **Symptom** — Arc Connected immediately after onboarding, then `Disconnected` after the first overnight auto-shutdown.
 
-**Cause** — Azure **default outbound is being deprecated**. New VMs use it on first boot but lose it after deallocate/start.
+**Cause** — Earlier deployments relied on implicit default outbound rather than an explicit outbound path. Do not assume that path survives a deallocate/start cycle.
 
-**Fix** — The `Activate-ArcDemo.ps1` script creates a **NAT Gateway** before starting VMs. If you deployed before the NAT GW existed, run:
+**Fix** — Fresh deployment now creates a **NAT Gateway** before compute/extension provisioning. Activation recreates it before starting parked VMs. For an older lab missing NAT, after approving activation, run:
 
 ```powershell
-.\scripts\Activate-ArcDemo.ps1 -SkipValidate
-# Then restart Arc agent on each VM
-foreach ($v in (az vm list -g rg-arc-demo-infra --query "[].name" -o tsv)) {
-  $cmd = if ($v -like 'win-*') { 'RunPowerShellScript' } else { 'RunShellScript' }
-  $script = if ($v -like 'win-*') { 'Restart-Service himds -Force' } else { 'sudo systemctl restart himdsd' }
-  az vm run-command invoke -g rg-arc-demo-infra -n $v --command-id $cmd --scripts $script
-}
+.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
 ```
 
 ## No Heartbeat in Log Analytics for Linux hosts
@@ -79,11 +116,13 @@ foreach ($v in (az vm list -g rg-arc-demo-infra --query "[].name" -o tsv)) {
 # Should show AMA on the Azure VM ext list (Linux)
 az vm extension list -g rg-arc-demo-infra --vm-name lnx-app-01
 
-# Should show 3 DCRAs (core, VMI, CT) attached to the ARC resource
+# Linux has core + CT DCRAs on the Arc resource; Linux VMI map is disabled.
 az resource list -g rg-arc-demo --resource-type Microsoft.Insights/dataCollectionRuleAssociations
 ```
 
-If DCRA is on Azure VM, delete it and create against Arc:
+If a DCRA is wrongly attached to the backing Azure VM, obtain approval for the
+exact association repair before changing/deleting anything. The intended Arc
+association payload is:
 
 ```powershell
 $sub = (az account show --query id -o tsv)
@@ -206,7 +245,7 @@ az policy state trigger-scan --resource-group rg-arc-demo
 
 ## Hibernate seems to skip the NAT GW delete
 
-**Symptom** — Hibernate completes, but next month's cost is still ~AUD 90, not AUD 35.
+**Symptom** — Hibernate completes, but retained-service charges exceed an old estimate.
 
 **Cause** — You may have other NAT GWs or public IPs in the same RG with different names that didn't get deleted.
 
@@ -222,9 +261,9 @@ The script only deletes `natgw-arc-demo` and `pip-natgw` (matching the default `
 
 See [`cost.md`](cost.md) for the full breakdown by state. The most common surprises:
 
-- **Defender for Servers Plan 2** is billed *per server-hour*. If you forgot to enable auto-shutdown, expect ~AUD 180/mo for 8 servers running 24/7.
-- **NAT Gateway** is ~AUD 55/mo on its own. Hibernate deletes it.
-- **Log Analytics ingestion** is ~AUD 0.30 per GB-day above the free tier. Heavy debugging (e.g. turning on every event log) can spike this.
+- **Defender for Servers Plan 2** uses published server/month pricing with applicable usage metering. Check the selected plan and actual billed coverage; VM deallocation is not a blanket promise of no Defender charges.
+- **NAT Gateway/PIP** continue billing until removed. Successful hibernation verifies their absence.
+- **Log Analytics** has ingestion and retention charges. Heavy debugging can increase ingestion; use current regional pricing and the workspace's actual usage, not an old hard-coded unit rate.
 
 ## "AGENTS.md says X, but the script does Y"
 

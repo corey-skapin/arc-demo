@@ -1,87 +1,47 @@
-# Cost breakdown
+# Cost and lifecycle states
 
-> All figures in **AUD/month** and based on East Australia pricing as of mid-2026.
-> Pricing changes — use the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for current numbers.
+This lab is cost-controlled, not free. Price the selected skin/workloads using the
+[Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) and
+check actual Cost Management charges in the **confirmed** subscription.
+No current price quote is implied by these docs.
 
-## State summary
+## Correcting the previous estimate
 
-| State | Cost/month | Trigger |
+The old active line items were 170 + 32 + 75 + 25 + 50 + 5 + 1 = **AUD 358/month**,
+not the stated AUD 210. Those unit prices, uptime and ingestion assumptions were
+not verified; **358 is an arithmetic correction, not a validated forecast**.
+The old hibernated line items summed to 36, not 35. Neither number should be
+used for a customer commitment or a subscription budget without repricing.
+
+## What continues to cost money
+
+| State | Compute/network behavior | Remaining costs |
 |---|---|---|
-| **Active** (deploy default) | ~AUD 210 | After `Deploy-ArcDemo.ps1` |
-| **Hibernated** | ~AUD 35 | After `Hibernate-ArcDemo.ps1` |
-| **Removed** | AUD 0 | After `Remove-ArcDemo.ps1` |
+| Active | VMs, NAT, and enabled optional workloads run | VM runtime, disks, NAT/PIP, telemetry ingestion/retention, applicable Defender coverage, optional services |
+| Hibernated | Exact VM deallocation; optional AKS stopped; Container App revisions inactive; demo NAT/PIP removed | Disks/snapshots, retained data and applicable Defender/subscription services; optional AKS storage, Container App environment/workload-profile charges where applicable |
+| Removed | Both demo groups observed deleted | Delayed usage posting, retained tenant/shared resources and services outside those groups may still bill |
 
-## Active state — line items
+The nightly VM auto-shutdown schedule does not start VMs in the morning, park AKS,
+deactivate Container Apps, or delete NAT. It is not a complete hibernation policy.
+Do not assume the desired runtime schedule happened: inspect power state and cost.
+Arc records and subscription-wide Defender pricing are distinct from Azure VM
+power; do not promise that VM deallocation makes all Defender charges disappear.
 
-Assumes the default config (8 VMs, B2as_v2, auto-shutdown at 19:00 local time, leaving roughly 10 hours/day of running time on weekdays and ~5 hours/day on weekends). SQL Server/Arc SQL/BPA is skipped by default.
-Optional workloads are shown separately and are not included in the default total.
+## Safe cost controls
 
-| Item | Qty | Unit | ~AUD/mo |
-|---|---|---|---|
-| Compute — `Standard_B2as_v2` | 8 | ~AUD 50 × ~42% uptime | **~170** |
-| OS disks (Standard SSD, 64 GB) | 8 | ~AUD 4 | **~32** |
-| **Defender for Servers Plan 2** | 8 | USD 15 × ~42% uptime | **~75** |
-| Log Analytics ingestion (perf + events + CT on 8 hosts) | — | ~3 GB/day × AUD 0.30 | **~25** |
-| Log Analytics retention (30 days included) | — | — | **0** |
-| NAT Gateway | 1 | ~AUD 50 | **~50** |
-| NAT public IP (Standard, static) | 1 | ~AUD 5 | **~5** |
-| Action Group / Alert / Workbook / Policy / Workspace | — | free at rest | **0** |
-| Optional Container App workload | 1 tiny consumption app | only when `-DeployContainerApps $true` | **low / usage-based** |
-| Optional advanced SQL branch | 2 SQL-capable hosts | only when `-InstallSql` is explicitly used; not live-validated after setup hang | **not included** |
-| Key Vault (one secret) | 1 | < AUD 1 | **~1** |
-| **Total active** | | | **~AUD 210/mo** |
+Use the [lifecycle scripts](lifecycle.md) between demos, with operator approval.
+Reduce the fleet or optional workloads before deploying if they are not needed
+for the story. The budget is an **alert**, not a spending cap or shutdown trigger.
+Keep notification emails and the currency/threshold aligned to the actual
+subscription. The default amount 200 is a configurable threshold, not proof the
+lab fits within AUD 200.
 
-> **Why Defender prorates**: Defender for Servers is billed *per server-hour*. Deallocated VMs aren't billed. So the same scripts give very different numbers depending on whether you leave VMs running 24/7 or use the auto-shutdown.
+Do not advise four-day workspace retention (the configured Analytics workspace
+uses supported retention settings), snapshot-and-delete as a supported lifecycle
+(the scripts do not implement disk restoration), or Defender plan changes without
+checking scope/features/prices. Defender prices are commonly quoted per
+server/month, not USD 5 or 15 per server-hour.
 
-## Hibernated state — line items
-
-After `Hibernate-ArcDemo.ps1`:
-- All 8 VMs deallocated → no compute, no Defender billing.
-- NAT Gateway deleted → no networking charge.
-- Everything else stays so the demo can wake up in 5-8 min.
-
-| Item | ~AUD/mo |
-|---|---|
-| OS disks (Standard SSD, 64 GB × 8) | ~32 |
-| Log Analytics retention (residual data, decays) | ~3 |
-| Key Vault | ~1 |
-| **Total hibernated** | **~AUD 36/mo** |
-
-## Removed state
-
-After `Remove-ArcDemo.ps1`: AUD 0. Both RGs gone, policy assignments deleted, budget removed, SPN removed, Defender reverted to Free (unless `-KeepDefender`).
-
-## Knobs you can turn
-
-### Lower the active cost
-
-- **Run fewer / shorter VMs**: `-WindowsVmCount 3 -LinuxVmCount 2` cuts compute + Defender by ~40%.
-- **Drop Defender to Plan 1**: ~USD 5/server-hour instead of USD 15. You lose vulnerability assessment richness — the workbook tile loses its CVSS data. Edit `bicep/modules/defender.bicep` and change `subPlan` to remove it.
-- **Smaller VMs**: only worth it if you can find a working sub-B2 SKU (rarely available in AU regions).
-- **Shorter retention** on LAW: 4 days instead of 30 (`retentionInDays` in `bicep/modules/workspace.bicep`).
-
-### Lower the hibernated cost
-
-- **Snapshot + delete OS disks**: snapshots are ~25% the cost of running disks. Total drops to ~AUD 15/mo but restore time goes from 5 min to ~10 min. Not built into the scripts but easy to add.
-- **Use Standard HDD** instead of Standard SSD for OS disks: ~AUD 8/mo total instead of AUD 32 (4 GB lower performance — your demo VMs boot slower, may cause AMA reconnect delays).
-
-### Cost alerts
-
-The default budget alerts at AUD 200/mo with email at 50/80/100% actual + 100% forecast. Tune:
-
-```powershell
-.\scripts\Deploy-ArcDemo.ps1 -BudgetAmount 100 ...
-```
-
-## Sanity-check your bill
-
-```powershell
-# Cost so far this month, filtered to the demo RGs
-az consumption usage list `
-  --start-date (Get-Date -Day 1 -Format yyyy-MM-dd) `
-  --end-date   (Get-Date -Format yyyy-MM-dd) `
-  --query "[?contains(instanceName,'arc-demo')].{day:usageStart,resource:instanceName,cost:pretaxCost,meter:meterName}" `
-  -o table
-```
-
-If the bill looks wildly off from this guide, the most likely cause is **forgetting to hibernate after a demo** + Defender Plan 2 racking up 24/7 charges. Set a calendar reminder, or wire up a Logic App on the budget alert to auto-hibernate at 80% (left as an exercise — would be a nice follow-up PR).
+AKS stop releases capacity; restart may fail if regional capacity is exhausted.
+Do not promise a fixed five-minute wakeup for the optional AKS beat. Retain a
+demo-prep window and review [Microsoft's stop/start constraints](https://learn.microsoft.com/azure/aks/start-stop-cluster).

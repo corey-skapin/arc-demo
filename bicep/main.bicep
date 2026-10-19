@@ -211,7 +211,13 @@ param deployContainerApps bool = false
 @description('Deploy the optional AKS workload with Container Insights, a sample workload, and a pod restart alert.')
 param deployAks bool = false
 
-@description('Optional existing NAT Gateway resource ID to attach to the subnet. Pass through from the deploy script so re-runs preserve the Activate-ArcDemo NAT GW attachment. Leave empty on fresh deploys.')
+@description('Bootstrap the AKS sample only for a new cluster. The wrapper disables this on existing clusters to preserve workload faults.')
+param initializeAksWorkload bool = true
+
+@description('Preserved SIMULATE_CRASH value read from an existing Container App by the wrapper.')
+param containerAppSimulateCrash bool = false
+
+@description('Existing demo NAT Gateway ID to preserve on redeploy. Empty creates NAT/PIP before compute; hibernation can still remove them.')
 param existingNatGatewayId string = ''
 
 @description('Existing budget start date (YYYY-MM-01) to preserve on re-runs. Defaults to the first of the current UTC month for fresh deploys.')
@@ -350,6 +356,7 @@ module containerAppsMod 'modules/container-apps.bicep' = if (deployContainerApps
     containerImage: 'nginx:stable-alpine'
     targetPort: 80
     restartCountThreshold: 0
+    simulateCrash: containerAppSimulateCrash
   }
 }
 
@@ -362,6 +369,7 @@ module aksMod 'modules/aks.bicep' = if (deployAks) {
     namePrefix: namePrefix
     workspaceId: workspaceMod.outputs.workspaceId
     actionGroupId: alertsMod.outputs.actionGroupId
+    initializeWorkload: initializeAksWorkload
   }
 }
 
@@ -428,6 +436,7 @@ output containerAppName string = deployContainerApps ? containerAppsMod!.outputs
 output containerAppFqdn string = deployContainerApps ? containerAppsMod!.outputs.containerAppFqdn : ''
 output containerAppIds array = deployContainerApps ? containerAppsMod!.outputs.containerAppIds : []
 output containerAppAlertRuleId string = deployContainerApps ? containerAppsMod!.outputs.alertRuleId : ''
+output aksClusterIds array = deployAks ? aksMod!.outputs.clusterIds : []
 output dcrCoreId string = dcrsMod.outputs.dcrCoreId
 output dcrVmiId string = dcrsMod.outputs.dcrVmiId
 output dcrCtId string = dcrsMod.outputs.dcrCtId

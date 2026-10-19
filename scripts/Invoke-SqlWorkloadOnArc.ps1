@@ -340,6 +340,7 @@ function Get-GuestScript {
 }
 
 function Invoke-ArcRunCommand {
+    [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory = $true)][string]$Script)
 
     $runCommandName = Get-RunCommandName
