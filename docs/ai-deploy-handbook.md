@@ -41,13 +41,15 @@ Do not:
 - Change CLI default context, register providers, reset credentials/faults or alter shared Defender pricing incidentally.
 - Run disruptive lifecycle smoke tests against an in-use lab.
 - Treat a successful ARM submission, extension provisioning or patch submission as completed guest/telemetry validation.
+- Treat Monitor readiness or healthy/licensed passive-mode Linux sensors as active-antivirus or full EDR proof.
+- Park Arc before an attached SRE layer has completed its fault window and its own approved hibernation.
 ```
 
 ## Required inputs
 
 | Input | Notes |
 |---|---|
-| Subscription ID | Use a clean/new subscription where the operator has Owner. |
+| Subscription ID | Use a demo subscription with effective Owner, or Contributor plus User Access Administrator. |
 | Tenant ID | Must match the subscription tenant and later SRE Agent tenant. |
 | Notification email | Used for budget and Action Group email receiver. |
 | Region | Defaults to `australiaeast`; keep aligned with the SRE repo. |
@@ -100,7 +102,8 @@ remain; never infer absence from the newest output alone.
 | Correct subscription | `az account show --subscription <SUB> --query "{id:id,tenant:tenantId,user:user.name}" -o table` |
 | Resource groups exist | `az group show --subscription <SUB> -n rg-arc-demo`; `az group show --subscription <SUB> -n rg-arc-demo-infra` |
 | Arc machines connected | `az connectedmachine list --subscription <SUB> -g rg-arc-demo -o table` |
-| Monitor heartbeat | Log Analytics query: `Heartbeat \| where TimeGenerated > ago(30m)` |
+| Monitor heartbeat | Readiness requires Heartbeat within 10 minutes by every expected ARM `_ResourceId`, not just host names/counts. |
+| Linux endpoint protection | Direct sensor health, mode and extension health are separate. Passive mode/RTP false is not active-antivirus proof; retain event-provider caveats. |
 | Workbook exists | Search **Workbooks** in the Azure portal and open `Arc Demo - Estate Overview` or the skin title. Fallback: resource group `rg-arc-demo` > Workbooks. |
 | Action Group exists | `az monitor action-group show --subscription <SUB> -g rg-arc-demo -n ag-arc-demo` |
 | Container App optional alert | `alert-arc-demo-containerapp-restarts` in `rg-arc-demo-infra` |
@@ -136,6 +139,10 @@ Verify:
 Expected hibernated state: all VMs deallocated, no NAT Gateway/Public IP, optional
 Container App revisions inactive, optional AKS Stopped/Succeeded. Zero minimum
 replicas alone is not a parked Container App; retained services/storage can bill.
+Keep the runtime target, skin/fleet inputs, revision/fault state and deployment
+history outside git. An attached SRE layer must be parked first through its own
+procedure. Activation can restart guest agents and submit asynchronous patch
+assessments; targeted VM-start/readiness evidence does not validate that whole path.
 
 ## Hand off to SRE Agent
 

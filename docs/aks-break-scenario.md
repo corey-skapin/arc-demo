@@ -1,11 +1,14 @@
 # AKS crash-loop scenario
 
 Optional workload behind `-DeployAks $true`. It creates a one-node AKS cluster
-`<prefix>-aks` in `australiaeast`, enables Container Insights against the shared
+`<prefix>-aks` in the chosen region (default `australiaeast`), enables Container Insights against the shared
 Log Analytics workspace, applies a tiny Kubernetes deployment in namespace
 `arc-demo-aks`, and routes the AKS pod restart alert to the existing Action Group.
 The prefix, region, and AKS toggle can come from `config\demo-skin.json`; see
 [`reskin-guide.md`](reskin-guide.md).
+This workload was absent from the verified eight-host active lab; its optional
+deployment and stop/start path are not implied to be live-validated.
+Break/reset require a separately approved bounded window and fallback plan.
 
 ## Deploy
 
@@ -24,6 +27,7 @@ The sample deployment is named `crashloop-demo`. It is healthy by default becaus
 
 ```powershell
 az aks command invoke `
+  --subscription <subscription-id> `
   --resource-group rg-arc-demo-infra `
   --name arc-demo-aks `
   --command "kubectl set env deployment/crashloop-demo -n arc-demo-aks CRASH_LOOP=true"
@@ -38,6 +42,7 @@ when restart count or CrashLoopBackOff is observed.
 
 ```kql
 KubePodInventory
+| where TimeGenerated > ago(15m)
 | where ClusterName =~ "arc-demo-aks"
 | where Namespace == "arc-demo-aks"
 | summarize Restarts=max(ContainerRestartCount), Reasons=make_set(ContainerStatusReason) by Name
@@ -47,7 +52,13 @@ KubePodInventory
 
 ```powershell
 az aks command invoke `
+  --subscription <subscription-id> `
   --resource-group rg-arc-demo-infra `
   --name arc-demo-aks `
   --command "kubectl set env deployment/crashloop-demo -n arc-demo-aks CRASH_LOOP=false && kubectl rollout status deployment/crashloop-demo -n arc-demo-aks --timeout=180s"
 ```
+
+Lifecycle discovery follows retained cluster IDs, not the current skin toggle.
+Hibernation stops an existing cluster; activation starts it without resetting
+`CRASH_LOOP`. Capacity and stop/start timing restrictions still apply; see
+[lifecycle.md](lifecycle.md).

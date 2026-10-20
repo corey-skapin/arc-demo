@@ -12,8 +12,7 @@
       2.5 Data Collection Rules after Log Analytics table readiness
       3. Verify explicit NAT outbound before guest onboarding
       4. Arc onboarding service principal
-      5. Arc agent install on each VM (Windows via Arc ext path,
-         Linux via Azure VM ext path — see AGENTS.md Gotcha 2)
+      5. Connected Machine Agent install via VM Run Command for both OS types
       6. AMA install + DCR associations for Monitor-supported fleet entries
          only (DCRA against the Arc resource ID — see AGENTS.md Gotcha 3)
       7. Dependency Agent for VM Insights-supported Windows entries only
@@ -82,9 +81,9 @@
     script generates a count-based Ubuntu 22.04 fleet. Prefer OnPremFleetPath.
 
 .PARAMETER VmSize
-    VM SKU. Default Standard_B2as_v2 (2 vCPU / 8 GiB AMD burstable). Probe
-    with `az vm create --validate` before changing — capacity restrictions
-    on B-series are common in AU regions.
+    VM SKU. Default Standard_B2as_v2 (2 vCPU / 8 GiB AMD burstable). Check
+    regional restrictions/quota; listings and ARM validation do not guarantee
+    physical capacity. Do not create probe resources without approval.
 
 .PARAMETER AutoShutdownTime
     HHmm in AutoShutdownTimezone. Default 1900.

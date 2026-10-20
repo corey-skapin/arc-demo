@@ -50,7 +50,7 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
 
 | Tier | What to show | What not to promise |
 |---|---|---|
-| **WS2016/WS2019/WS2022** | Full Azure Monitor path: AMA, core DCR, Heartbeat, performance/events, VM Insights map, Change Tracking, Defender, Update Manager/Machine Configuration surfaces, alerts/workbooks. | Nothing special; this is the supported Monitor path. |
+| **WS2016/WS2019/WS2022** | Full Azure Monitor path: AMA, core DCR, Heartbeat, performance/events, VM Insights map, Change Tracking, Defender, Update Manager/Machine Configuration surfaces, alerts/workbooks. | Monitor readiness does not prove endpoint health, policy results or completed assessment. |
 | **Ubuntu 22.04** | AMA + core DCR + Change Tracking/syslog inventory in the shared workspace. | VM Insights dependency map is intentionally off until Dependency Agent support is validated for the chosen distro/kernel. |
 | **WS2008/WS2012-era** | Arc-control-plane-only value: Azure Resource Graph inventory, tags (`osTier`, `monitorTier`, `esuEligible`), ESU conversation, Update Manager assessment where supported, Defender, Machine Configuration/TLS 1.2 policy posture, RBAC/audit. | Do **not** claim AMA, VM Insights, or Change Tracking. AMA is intentionally gated off for pre-2016 Windows. |
 | **Represent-not-run legacy** | Use as a narrative placeholder when the Marketplace image is unavailable. | Do not claim a live deployed server exists. |
@@ -90,14 +90,19 @@ For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema i
 
    ```kql
    Heartbeat
-   | where TimeGenerated > ago(30m)
-   | summarize LastHeartbeat=max(TimeGenerated) by Computer, OSType
+   | where TimeGenerated > ago(10m)
+   | summarize LastHeartbeat=max(TimeGenerated) by ResourceId=tolower(_ResourceId), Computer, OSType
    | order by Computer asc
    ```
 
    In workbook and Logs pickers, use **`law-arc-demo` in `rg-arc-demo`**. Do not
    use the `McapsGovernance` / `mcaps...-la` workspace; that is a subscription
    governance workspace and is not part of this demo.
+
+   Treat this Logs view as a presenter aid, not the readiness gate: the script
+   verifies every expected full Arc/native resource ID. After startup, Arc can
+   reconnect before fresh Heartbeats become queryable. Keep pending status and
+   allow bounded convergence; do not reinstall/restart agents just for that delay.
 
 ## 3. Live flow
 
@@ -187,12 +192,14 @@ Open **Defender for Cloud**, then **Recommendations** and **Regulatory complianc
 
 - Show Defender for Servers Plan 2 at subscription scope.
 - Verify Defender for Servers Plan 2 and actual endpoint health separately.
-  A plan setting or an MDE extension resource is not proof of healthy endpoint
-  protection. Use a healthy Windows endpoint for the live coverage proof; check
-  Linux guest status before claiming Linux MDE coverage. Linux extension ARM
-  state can be Updating while AMA/CT guest handlers and telemetry remain healthy.
-  Disclose that discrepancy; do not reinstall working monitoring agents to clear
-  another extension's pending operation.
+  Use independently verified Windows endpoint evidence for the security beat.
+  Approved Linux diagnostics found healthy/licensed sensors **in passive mode**,
+  with real-time protection disabled and the engine not loaded. MDE provisioning
+  reached Succeeded after approved startup, but two extension health payloads
+  still recorded event-provider issues differing from direct sensor health.
+  Disclose these limits: neither Monitor PASS nor successful onboarding proves
+  active antivirus or complete EDR/event delivery. Do not change AV policy or
+  reinstall healthy AMA/CT to make the story greener.
 - Use live recommendations as the co-sell: the lab currently surfaces examples
   such as missing periodic update checks, Windows Defender Exploit Guard,
   Linux SSH key authentication, and secure protocol recommendations.
@@ -262,6 +269,9 @@ Open resource group `rg-arc-demo`, then **Alerts**.
 
 Optional force alert (separate explicit approval; not part of preflight):
 
+Do not run this during a separately owned SRE fault window. Agree a bounded
+observation/reset plan first and verify connectivity/Heartbeat after recovery.
+
 ```powershell
 az vm deallocate --subscription <SUBSCRIPTION_ID> -g rg-arc-demo-infra -n win-app-01
 # Reset after the demo:
@@ -293,10 +303,15 @@ Open the Azure-native VM in `rg-arc-demo-infra` (default `az-arcdemo-01`) and Az
 
 ### 4.2 Container App fault (`-DeployContainerApps $true`)
 
+Break/reset require a separately approved, bounded fault window and a verified
+fallback reset. If the companion SRE owner is running the scenario, do not run
+competing commands or treat its intentional transient fault as drift.
+
 Break:
 
 ```powershell
 az containerapp update `
+  --subscription <SUBSCRIPTION_ID> `
   --resource-group rg-arc-demo-infra `
   --name ca-arc-demo-fault `
   --set-env-vars SIMULATE_CRASH=true
@@ -306,19 +321,27 @@ Show **RestartCount** metric and `alert-arc-demo-containerapp-restarts` routed t
 
 ```powershell
 az containerapp update `
+  --subscription <SUBSCRIPTION_ID> `
   --resource-group rg-arc-demo-infra `
   --name ca-arc-demo-fault `
   --set-env-vars SIMULATE_CRASH=false
 ```
 
 Full commands: [`container-app-fault.md`](container-app-fault.md).
+Verify the fault flag, actual serving revision and HTTP response after reset;
+alert recovery is asynchronous. Distinguish an operator reset from a
+read-back/audit-proven SRE repair.
 
 ### 4.3 AKS crash-loop (`-DeployAks $true`)
+
+Only if actually deployed and separately approved; this lab's active eight-host
+proof does not validate AKS deployment or stop/start. Agree a bounded reset first.
 
 Break:
 
 ```powershell
 az aks command invoke `
+  --subscription <SUBSCRIPTION_ID> `
   --resource-group rg-arc-demo-infra `
   --name arc-demo-aks `
   --command "kubectl set env deployment/crashloop-demo -n arc-demo-aks CRASH_LOOP=true"
@@ -328,6 +351,7 @@ Show Container Insights data and `alert-arc-demo-aks-pod-restarts`. Repair:
 
 ```powershell
 az aks command invoke `
+  --subscription <SUBSCRIPTION_ID> `
   --resource-group rg-arc-demo-infra `
   --name arc-demo-aks `
   --command "kubectl set env deployment/crashloop-demo -n arc-demo-aks CRASH_LOOP=false && kubectl rollout status deployment/crashloop-demo -n arc-demo-aks --timeout=180s"
@@ -342,13 +366,19 @@ Full commands: [`aks-break-scenario.md`](aks-break-scenario.md).
 ## 6. After the meeting
 
 1. Reset optional faults only if explicitly authorized; lifecycle commands preserve them.
-2. With operator approval, hibernate if the lab is not needed:
+2. If SRE is attached, finish its fault window and park that layer using its own maintained procedure first. With operator approval, then preview and hibernate Arc:
 
    ```powershell
+   .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
    .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
+   .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -DesiredState Hibernated -OutputFormat Json
    ```
 
-3. For permanent cleanup:
+   Keep runtime target/skin/fleet and deployment history outside git for wake-up.
+   Hibernation is not permanent cleanup and does not rotate credentials or reset
+   `SIMULATE_CRASH`. On wake, restore Arc/Monitor and verify Ready before SRE.
+
+3. For separately approved permanent cleanup only:
 
    ```powershell
    .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf

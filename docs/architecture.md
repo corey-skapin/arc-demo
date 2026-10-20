@@ -20,7 +20,7 @@ flowchart TB
             ARC1[/Arc machine<br/>win-app-01..03<br/>WS2016/2019/2022/]
             ARC2[/Arc machine<br/>win-sql-01..02<br/>WS2019/2022/]
             ARC3[/Arc machine<br/>lnx-app-01..03/]
-            SQL1[/Optional Arc SQL instance<br/>only with -InstallSql/]
+            SQL1[/Experimental SQL extension<br/>not validated in this lab/]
         end
 
         subgraph rg_infra["rg-arc-demo-infra (backing infra)"]
@@ -44,7 +44,7 @@ flowchart TB
         DEFENDER([Defender for Servers<br/>Plan 2])
         POL([Policy: MCSB])
         POL2([Policy: NIST 800-53 r5])
-        BUDGET([Budget AUD 200/mo])
+        BUDGET([Budget alert threshold 200<br/>subscription currency, not a cap])
     end
 
     INET((Internet<br/>gbl.his.arc.azure.com<br/>Defender + AMA endpoints))
@@ -84,10 +84,9 @@ flowchart TB
     VNET --> NAT
     NAT --> INET
 
-    DEFENDER -. protects .-> ARC1
-    DEFENDER -. protects .-> ARC2
-    DEFENDER -. protects .-> ARC3
-    DEFENDER -. optional Defender for SQL .-> SQL1
+    DEFENDER -. plan configured .-> ARC1
+    DEFENDER -. plan configured .-> ARC2
+    DEFENDER -. plan configured .-> ARC3
     POL -. evaluates .-> ARC1
     POL2 -. evaluates .-> ARC1
 ```
@@ -101,14 +100,14 @@ Keeping them separate makes the demo flow read correctly in the portal (the cust
 
 ## Data flow
 
-1. **Azure VMs** boot and the deploy script installs the **Connected Machine Agent** (`azcmagent`) with `MSFT_ARC_TEST=true` (officially supported for demo scenarios) so it registers a **Microsoft.HybridCompute/machines** resource in `rg-arc-demo`.
+1. **Azure VMs** boot and the deploy script installs the **Connected Machine Agent** (`azcmagent`) with `MSFT_ARC_TEST=true` for test/demo simulation, registering a **Microsoft.HybridCompute/machines** resource in `rg-arc-demo`. This is not blanket validation of extensions or Arc SQL on Azure VMs.
 2. After Bicep creates the workspace and solutions, the deploy script waits for the required Log Analytics tables and then upserts the core, VM Insights, and Change Tracking DCRs.
 3. The deploy script tags every Arc machine with OS tier, Monitor tier, ESU eligibility, inventory, Update Manager assessment, Defender, and Machine Configuration metadata.
-4. For fleet entries with `supportsAzureMonitor=true`, the deploy script installs **AzureMonitorAgent** (or **AzureMonitorWindowsAgent**) and associates the core DCR.
+4. For fleet entries with `supportsAzureMonitor=true`, the deploy script installs **AzureMonitorLinuxAgent** through Azure VM extensions or **AzureMonitorWindowsAgent** through Arc extensions and associates the core DCR with the Arc machine ID.
 5. For entries with `supportsVmInsights=true`, it associates the VM Insights DCR and installs **DependencyAgentWindows**. Pre-2016 Windows and unvalidated Linux tiers are excluded.
 6. For entries with `supportsChangeTracking=true`, it associates the Change Tracking DCR and installs the Change Tracking extension.
-7. **Defender for Servers Plan 2** is enabled at subscription scope for the Arc-enabled servers. The SQL Server install, Arc SQL extension, BPA, and Defender for SQL branch is optional/advanced and only runs when `-InstallSql` (or `workloads.installSql=true`) is explicitly used; it is currently not live-validated after the SQL setup hang.
-8. **MCSB + NIST 800-53 r5** policy initiatives are assigned at subscription scope — their results power the regulatory compliance scorecard in Defender for Cloud (~12h to first populate).
+7. **Defender for Servers Plan 2** is configured at subscription scope, separately from endpoint sensor health. Inspected Linux sensors were healthy/licensed but in passive mode with real-time protection disabled; do not infer active AV/full EDR proof. The SQL Server install, Arc SQL extension and BPA branch is experimental and skipped by default; see [SQL stance](sql-arc-spike.md).
+8. **MCSB + NIST 800-53 r5** policy initiatives are assigned at subscription scope; evaluation/compliance data can take hours to populate.
 9. The **Estate Overview workbook** pulls all of the above into one persona-ordered dashboard.
 10. If `-DeployAzureVMs $true` is set, an extra Azure-native Windows VM is deployed in the infra resource group and monitored directly with AMA + post-Bicep DCR associations to the same workspace. It is not Arc-enabled, so it appears as a native Azure VM in Monitor.
 11. If `-DeployContainerApps $true` is set, a tiny Container App is deployed in the infra resource group with `SIMULATE_CRASH=false` by default. Flipping that environment variable creates a crash-looping revision; the `RestartCount` platform metric alert emails the same Action Group.
@@ -119,13 +118,13 @@ The fleet schema and legacy OS treatment are documented in
 
 ## Networking
 
-- VMs sit in a single `/24` subnet behind an empty NSG (no inbound rules).
+- VMs sit in a single `/24` subnet behind an NSG with no custom rules; Azure's default NSG rules still apply.
 - A **NAT Gateway** provides outbound internet for the Arc agent's outbound-only API calls (required — Azure default outbound is being deprecated).
 - The NAT GW is deleted by `Hibernate-ArcDemo.ps1` after compute is parked and recreated by `Activate-ArcDemo.ps1` before VM startup. Use explicit target/skin inputs; retained services still bill. See [lifecycle semantics](lifecycle.md) and [cost assumptions](cost.md).
 
 ## Identity
 
-- VMs use system-assigned managed identities (for AMA on Linux, and for the optional SQL Arc extension when `-InstallSql` is enabled).
+- Backing VMs have system-assigned managed identities. Arc agent identity and Arc-scoped DCR associations remain distinct; do not move Linux DCRAs to a VM ID merely because that VM has a managed identity.
 - A service principal **`sp-arc-demo-onboard`** with the *Azure Connected Machine Onboarding* role on `rg-arc-demo` is created once and reused — its only job is for the Arc agent to register on first install.
 - Key Vault stores the local-admin password (single secret `vm-admin-password`).
 

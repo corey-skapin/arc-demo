@@ -79,6 +79,19 @@ setting minimum replicas to zero alone does not prevent HTTP scale-out.
 Fault flags, storage, DCRAs and guest configuration are preserved.
 Retries inspect current state and do not repeat completed state transitions.
 
+Before parking, preserve the confirmed target, exact skin/fleet files and their
+hashes, prefix/region, deployment-manifest identities and optional revision/fault
+state in a private operator handoff outside git. Hibernation needs no VM password
+or onboarding secret and does not rotate either. Keep the existing Key Vault and
+tenant onboarding identity for later approved deployment/reconciliation.
+
+If the optional SRE layer is attached, finish/reset its approved fault window and
+hibernate that layer first under its own procedure. Then preview and run Arc
+hibernation. Wake Arc/Monitor and verify Ready before resuming the dependent SRE
+layer. Readiness requires no active Container App revisions while parked; its
+fault flag remains unchanged. An intentionally retained fault will return on
+reactivation, so inspect it rather than silently resetting it.
+
 AKS has additional timing/capacity constraints: allow 15-30 minutes between stop
 and start, and do not interleave operations. Stopped state is retained for up to
 12 months; standalone pods are not preserved. Storage and other resources remain
@@ -164,7 +177,8 @@ active Container App revision health. `RunningAtMinScale`/`RunningAtMaxScale` ar
 valid healthy revision states. Hibernated hosts intentionally skip Heartbeat.
 This is **infrastructure/monitor readiness**, not proof of every guest workload,
 Kubernetes pod, policy compliance result, CT inventory cycle, or completed patch
-assessment. Demonstrate those separately; never manufacture fault data to pass.
+assessment or Defender sensor/AV/EDR health. Demonstrate those separately; never
+manufacture fault data to pass.
 
 ## Linux monitoring and support stance
 
@@ -181,10 +195,36 @@ Linux VM Insights/Dependency Agent map remains disabled. SQL-shaped workload
 simulation is separate from Arc SQL: no SQL Server enabled by Azure Arc/BPA
 validation is claimed in this Azure-only lab.
 
+### Linux Defender is a separate diagnostic surface
+
+Approved guest diagnostics on the three Linux hosts found installed sensors
+reporting `healthy=true`, `licensed=true`, no direct health issues and an active
+service, but `passive_mode_enabled=true`, `real_time_protection_enabled=false`
+and `engine_load_status="Engine not loaded"`. MDE extension models converged to
+Succeeded/onboarding Success after approved startup without a manual MDE repair.
+Two extension payloads still recorded event-provider issues that differed from
+the newer direct sensor health. Do not label this active-antivirus or complete
+EDR/event-delivery validation, or change policy to make the story greener.
+
+The earlier timeout's underlying cause is not established. Keep timestamped ARM,
+guest health and existing log evidence separate. No reinstall/retry/removal,
+service restart, VM restart or AV-mode change follows from diagnosis alone.
+
 ## Validation boundaries
 
 Mocked Pester tests, script parsing, PSScriptAnalyzer, Bicep compile and live
 read-only readiness are separate evidence. The approved CT repair verifies only
-that repair. A fresh deployment, double-deploy idempotency, AKS park/start,
-hibernate/activate and delete/recreate have **not** been live exercised as part of
-this remediation; those require an explicitly approved disposable lab window.
+that repair. An approved active-estate rehearsal on 20 October 2026 verified all
+eight exact VM/Arc/Heartbeat identities and all 79 infrastructure/monitor checks.
+Raw timestamps/IDs stay in private session evidence; that is a point-in-time
+pre-fault snapshot, not an ongoing health guarantee. Windows Heartbeats arrived
+after Arc reconnected without an agent repair; keep pending status until fresh
+expected-ID telemetry is actually visible.
+
+Those approved targeted VM starts did not execute the full
+`Activate-ArcDemo.ps1` agent-restart/patch-assessment path. A fresh deployment,
+double-deploy idempotency, AKS park/start, a complete hibernate/activate cycle and
+delete/recreate remain separate validation exercises. An approved operational
+hibernation only proves the parked state actually observed; it does not prove
+future activation or fresh deployment. Run full/destructive smoke cycles only
+in an explicitly approved disposable lab, never incidentally against an in-use demo.

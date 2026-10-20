@@ -12,7 +12,7 @@ assignees: ''
 
 ## What happened?
 
-(Paste the relevant error output. Redact tenant IDs, sub IDs if needed.)
+(Paste a minimal relevant error excerpt. Redact credentials, tokens, onboarding payloads, private tenant/subscription IDs and mailboxes.)
 
 ## What did you expect to happen?
 

@@ -31,12 +31,23 @@ require explicit runtime `-SubscriptionId` and `-TenantId`; use the same
 JSON schemaVersion 1 correlates exact resource IDs; exit 0 is pass, 1 failure/error,
 2 pending. It never repairs or induces faults.
 
+Monitor readiness does not certify endpoint protection. Approved Linux diagnostics
+found healthy/licensed sensors in passive mode with real-time protection disabled;
+extension-reported event-provider issues differed from direct sensor health.
+Preserve these caveats. No AV-mode/policy change, extension retry/reinstall or
+restart is authorized by a health inspection or a passing Monitor snapshot.
+
 Keep the demo running unless the user explicitly approves parking/removal.
 Read-only inspection and `-WhatIf` do not authorize mutation. No hibernate,
 remove, credential reset, fault induction/reset, role or pricing changes as an
 incidental test. Activation/hibernation preserve fault flags. Removal preserves
 subscription Defender by default; `-DisableDefender` and
 `-RemoveOnboardingIdentity` are explicit opt-ins.
+
+For a combined demo, park the companion SRE layer through its own scripts before
+Arc hibernation; reverse the dependency order when waking. Keep the runtime
+target, skin/fleet inputs and deployment history outside git. Preview first and
+verify `-DesiredState Hibernated` afterward; do not substitute permanent removal.
 
 Lifecycle inventory uses retained successful per-workload deployment manifests:
 an optional-only deployment with an empty fleet does not erase earlier VMs.
@@ -76,7 +87,7 @@ These are *not* hypothetical. Every one of them broke the original build. The sc
 - **PowerShell scripts** use approved verbs (`Verb-Noun.ps1`), parameter validation attributes, `CmdletBinding(SupportsShouldProcess)`, write to `$VerbosePreference`-aware streams, and emit structured objects, never `Write-Host` (except for top-level progress banners). PSScriptAnalyzer is enforced via `.github/workflows/lint.yml`.
 - **Bicep modules** in `bicep/modules/`, top-level template in `bicep/main.bicep`. Always `az bicep build` before commit.
 - **Don't introduce new top-level dependencies.** This repo intentionally uses only `az`, `pwsh 7+`, and `Invoke-RestMethod` (built into PS). Adding Terraform / Pulumi / `Az` PowerShell module / etc. is out of scope.
-- **Idempotency is mandatory.** Preserve existing VM/SP credentials; do not reset demo faults during lifecycle operations. Mock reruns locally. Double deployment and destructive live lifecycle tests require approval in a disposable lab; do not run them against an in-use demo.
+- **Idempotency is mandatory.** Preserve existing VM/SP credentials; do not reset demo faults during lifecycle operations. Mock reruns locally. Double deployment and destructive live lifecycle tests require approval in a disposable lab; do not run them against an in-use demo. Targeted VM startup/readiness proof is not proof of the full activation script, which can restart guest agents and submit patch assessments.
 
 ## Happy-path command sequence
 

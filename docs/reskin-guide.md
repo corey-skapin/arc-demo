@@ -69,6 +69,9 @@ subscription Defender by default. See [lifecycle.md](lifecycle.md) for exact
 scope, retained deployment manifests, optional-workload costs and the readiness
 JSON/exit-code contract. Changing skin toggles alone does not delete previously
 deployed workloads; lifecycle still accounts for retained manifests.
+Keep the chosen runtime target, skin/fleet files and deployment history in a
+private operator handoff for reactivation; do not copy live IDs/secrets into the
+customer skin. Park an attached SRE layer first through its own procedure.
 
 ## Examples
 
@@ -78,4 +81,4 @@ Dummy customer: compare with `config\dummy-customer.demo-skin.json`; it changes 
 
 ## Remaining constants
 
-The following strings intentionally remain in code/docs because they identify the reusable spine, not a customer skin: repo names (`arc-demo`, `sre-agent`), feature flags (`SIMULATE_CRASH`, `CRASH_LOOP`), built-in workbook names from the vendored Nic Seilaz library, sample host names (`win-app-01`), and sample commands in historical runbooks. Live scripts now read customer-facing deploy defaults from the skin file.
+The following strings intentionally remain in code/docs because they identify the reusable spine, not a customer skin: repo names (`arc-demo`, `sre-agent`), feature flags (`SIMULATE_CRASH`, `CRASH_LOOP`), built-in workbook names from the vendored Nic Seilaz library and sample host names (`win-app-01`). Substitute the chosen names in examples; maintained lifecycle scripts use retained IDs and customer-facing defaults from the skin.

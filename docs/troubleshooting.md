@@ -1,5 +1,9 @@
 # Troubleshooting
 
+Known failure modes with verified observations, fixes where established, and
+explicit unresolved boundaries. Confirm the runtime tenant/subscription and get
+scoped approval before any repair, restart, policy scan or fault operation.
+
 ## Directory CLI rejects --subscription
 
 `az ad` operations are tenant-scoped; commands such as `az ad sp show` do not
@@ -34,8 +38,40 @@ forced green. A missing MDE status file is not proof of working endpoint protect
 Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
 restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
 
-> Every failure mode I've personally hit during build or operation, with a verified fix.
-> If you hit something not listed here, please open an issue (or PR a fix in this file).
+## Linux MDE timed out, but the installed sensor reports healthy
+
+The inspected MDE.Linux operations failed with `ResourceOperationFailure` /
+`VMExtensionProvisioningTimeout`, last reporting "Plugin enabled"; guest status
+reported a missing status file. That identifies the failure mode, not its cause.
+After separately approved VM starts, all three extension models converged to
+Succeeded/onboarding Success without a manual MDE repair. Existing logs recorded
+an interrupted installation, resumed onboarding and "Installation already in
+progress". Do not turn an old package error from another date into a current
+root-cause claim.
+
+Direct diagnostics reported `healthy=true`, `licensed=true`, an active service
+and no direct health issues, but passive mode was enabled, real-time protection
+disabled and the engine not loaded. Two extension payloads still recorded
+event-provider issues differing from direct health. Do not claim active AV/full
+EDR or blindly reinstall a working sensor. Keep timestamped observations separate;
+review policy intent and the discrepancy under a new approved diagnostic scope
+before proposing a targeted change. See [lifecycle boundaries](lifecycle.md).
+
+## Arc reconnects after startup, but Windows Heartbeat is still pending
+
+First inspect exact backing-VM power and Arc connection read-only. Overnight
+auto-shutdown does not start hosts the next morning; a deallocated VM is not
+proof of a broken Arc agent. Starting it needs explicit approval and a verified
+existing outbound path, not an incidental repair.
+
+During the approved eight-host rehearsal, Windows Arc connection returned before
+fresh Heartbeats were queryable. Bounded read-only observation eventually verified
+all eight expected Arc IDs and all 79 checks without restarting/reinstalling AMA.
+Use `Test-ArcDemoReadiness.ps1` with the same target/skin and a bounded timeout;
+retain pending status until new `_ResourceId`-matched telemetry is visible.
+New ingestion of an old buffered record does not make its `TimeGenerated` fresh.
+If the deadline expires, report the actual missing IDs and inspect evidence;
+do not restart agents or substitute native-VM identities to manufacture success.
 
 ## Activation waits forever or reports success with missing hosts
 
@@ -89,7 +125,8 @@ do not rotate them as a shortcut. See [lifecycle semantics](lifecycle.md).
 ## Deploy fails immediately with `SkuNotAvailable`
 
 **Symptom** — `Deploy-ArcDemo.ps1` fails at the VM creation phase with:
-```
+
+```text
 SkuNotAvailable: The requested VM size for resource 'Following SKUs have failed for Capacity Restrictions: Standard_B2as_v2' is currently not available in location 'australiaeast'.
 ```
 
@@ -148,10 +185,11 @@ deterministic, so reruns update existing resources instead of duplicating them.
 
 ```powershell
 # Should show AMA on the Azure VM ext list (Linux)
-az vm extension list -g rg-arc-demo-infra --vm-name lnx-app-01
+az vm extension list --subscription <SUB> -g rg-arc-demo-infra --vm-name lnx-app-01
 
 # Linux has core + CT DCRAs on the Arc resource; Linux VMI map is disabled.
-az resource list -g rg-arc-demo --resource-type Microsoft.Insights/dataCollectionRuleAssociations
+az monitor data-collection rule association list --subscription <SUB> `
+  --resource "/subscriptions/<SUB>/resourceGroups/rg-arc-demo/providers/Microsoft.HybridCompute/machines/lnx-app-01"
 ```
 
 If a DCRA is wrongly attached to the backing Azure VM, obtain approval for the
@@ -159,23 +197,25 @@ exact association repair before changing/deleting anything. The intended Arc
 association payload is:
 
 ```powershell
-$sub = (az account show --query id -o tsv)
+$sub = '<SUB>'
+Import-Module .\scripts\lib\Common.psm1 -Force
+Initialize-DemoContext -SubscriptionId $sub -TenantId <TENANT>
 $arcId = "/subscriptions/$sub/resourceGroups/rg-arc-demo/providers/Microsoft.HybridCompute/machines/lnx-app-01"
 $dcrId = "/subscriptions/$sub/resourceGroups/rg-arc-demo/providers/Microsoft.Insights/dataCollectionRules/dcr-arc-demo"
-$body = @{ properties = @{ dataCollectionRuleId = $dcrId } } | ConvertTo-Json
-$token = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv
-Invoke-RestMethod -Method Put -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } `
-  -Body $body `
-  -Uri "https://management.azure.com$arcId/providers/Microsoft.Insights/dataCollectionRuleAssociations/dcra-core-lnx-app-01?api-version=2022-06-01"
+$body = @{ properties = @{ dataCollectionRuleId = $dcrId } }
+Invoke-AzRest -Method Put -Body $body `
+  -Url "https://management.azure.com$arcId/providers/Microsoft.Insights/dataCollectionRuleAssociations/dcra-core-lnx-app-01?api-version=2022-06-01"
 ```
 
-Then restart AMA on the VM:
+Do not assume a restart is needed. Only if separately approved diagnostics
+require an AMA service restart, use the checked, file-backed guest helper:
+
 ```powershell
-az vm run-command invoke -g rg-arc-demo-infra -n lnx-app-01 --command-id RunShellScript `
-  --scripts 'sudo systemctl restart azuremonitoragent'
+$machine = @{ Name = 'lnx-app-01'; OsType = 'Linux'; Id = "/subscriptions/$sub/resourceGroups/rg-arc-demo-infra/providers/Microsoft.Compute/virtualMachines/lnx-app-01" }
+Invoke-DemoGuestCommand -Machine $machine -Script 'set -e; sudo systemctl restart azuremonitoragent; echo ARC_DEMO_OK'
 ```
 
-Wait 5 min and re-check Heartbeat.
+Use bounded exact-ID readiness afterward; do not promise a fixed five-minute recovery.
 
 ## Update Manager shows no update data after activation
 
@@ -192,7 +232,7 @@ can lag.
 
 ```powershell
 $start = (Get-Date).AddHours(-2).ToString('o')
-az monitor activity-log list -g rg-arc-demo --start-time $start `
+az monitor activity-log list --subscription <SUB> -g rg-arc-demo --start-time $start `
   --query "[?operationName.value=='Microsoft.HybridCompute/machines/assessPatches/action'].{time:eventTimestamp,status:status.value,resource:resourceId}" `
   -o table
 ```
@@ -200,8 +240,8 @@ az monitor activity-log list -g rg-arc-demo --start-time $start `
 Then inspect the update extension instance view:
 
 ```powershell
-foreach ($name in az connectedmachine list -g rg-arc-demo --query "[].name" -o tsv) {
-  $m = az connectedmachine show -g rg-arc-demo -n $name --expand instanceView -o json | ConvertFrom-Json
+foreach ($name in az connectedmachine list --subscription <SUB> -g rg-arc-demo --query "[].name" -o tsv) {
+  $m = az connectedmachine show --subscription <SUB> -g rg-arc-demo -n $name --expand instanceView -o json | ConvertFrom-Json
   $ext = @($m.resources | Where-Object { $_.name -in @('WindowsOsUpdateExtension','LinuxOsUpdateExtension') }) | Select-Object -First 1
   [pscustomobject]@{
     Name = $name
@@ -225,11 +265,13 @@ has not reached `Succeeded`.
 **Fix** — Always start a session with:
 
 ```powershell
-az account set --subscription <YOUR_SUB>
-az account show --query "{id:id,tenantId:tenantId,user:user.name}" -o table
+az account show --subscription <SUB> --query "{id:id,tenantId:tenantId,user:user.name}" -o table
 ```
 
-The `Test-Prerequisites.ps1` script does this check for you.
+Confirm the tenant as well as the subscription. `Test-Prerequisites.ps1` and
+lifecycle scripts verify the explicit target without changing CLI defaults.
+Tenant-scoped directory commands are the exception to `--subscription`: see the
+directory guard above; mismatches stop rather than silently switch accounts.
 
 ## `az rest` 400/500s with weird URL parsing errors
 
@@ -260,8 +302,9 @@ running in Azure Virtual Machines as the validation target. See
 **Cause** — First BPA scan can take 30-60 min after the `WindowsAgent.SqlServer` extension reaches `Succeeded`.
 
 **Fix** — Wait. To verify the extension is healthy:
+
 ```powershell
-az connectedmachine extension show -g rg-arc-demo --machine-name win-sql-01 -n WindowsAgent.SqlServer --query "properties.provisioningState"
+az connectedmachine extension show --subscription <SUB> -g rg-arc-demo --machine-name win-sql-01 -n WindowsAgent.SqlServer --query "properties.provisioningState"
 ```
 
 ## Compliance scorecards (MCSB/NIST) are empty
@@ -271,10 +314,12 @@ in Defender for Cloud is blank.
 
 **Cause** — First policy evaluation cycle takes ~12 hours after assignment.
 
-**Fix** — Wait. To force evaluation:
+**Fix** — Wait. A separately approved evaluation trigger can request a new scan:
+
 ```powershell
-az policy state trigger-scan --resource-group rg-arc-demo
+az policy state trigger-scan --subscription <SUB> --resource-group rg-arc-demo
 ```
+
 (Still takes 1-3 hours; "force" is relative.)
 
 ## Hibernate seems to skip the NAT GW delete
@@ -284,12 +329,17 @@ az policy state trigger-scan --resource-group rg-arc-demo
 **Cause** — You may have other NAT GWs or public IPs in the same RG with different names that didn't get deleted.
 
 **Fix** — Check:
+
 ```powershell
-az network nat gateway list -g rg-arc-demo-infra -o table
-az network public-ip list -g rg-arc-demo-infra -o table
+az network nat gateway list --subscription <SUB> -g rg-arc-demo-infra -o table
+az network public-ip list --subscription <SUB> -g rg-arc-demo-infra -o table
 ```
 
-The script only deletes `natgw-arc-demo` and `pip-natgw` (matching the default `-NamePrefix`). If you used `-NamePrefix foo`, the script uses `natgw-foo` and still `pip-natgw`. Adjust if needed.
+The script only deletes `natgw-<prefix>` and `pip-natgw-<prefix>` in the retained
+infra group: defaults are `natgw-arc-demo` and `pip-natgw-arc-demo`. It first
+verifies compute is parked and refuses to detach an unexpected subnet gateway.
+Do not delete other networking as a cost shortcut; inspect its owner/scope.
+An absent or foreign VM/manifest is an error, not permission for teardown.
 
 ## Cost is higher than expected
 

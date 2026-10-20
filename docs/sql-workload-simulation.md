@@ -17,6 +17,9 @@ events and a text log:
 
 It is a workload simulation. It does **not** install SQL Server and does **not**
 register SQL Server enabled by Azure Arc.
+The source's presence is not proof that the simulator is installed/running.
+Deployment, fault/reset and removal require their own scoped approval.
+Even Status/CollectLogs use guest Run Command execution, not ARM-only inspection.
 
 ## Why this exists
 
@@ -114,6 +117,9 @@ Avoid:
 > This is a real SQL Server BPA/Defender inventory demo.
 
 ## Cleanup
+
+Remove only under explicit approval. Hibernation parks the VM and preserves the
+simulator configuration/task and its fault mode; it is not simulator removal.
 
 ```powershell
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
