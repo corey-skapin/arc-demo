@@ -50,6 +50,7 @@ validating it in the target region:
 
 ```powershell
 az vm image list --location australiaeast `
+  --subscription <SUBSCRIPTION_ID> `
   --publisher MicrosoftWindowsServer `
   --offer WindowsServer `
   --sku 2012-R2-Datacenter `

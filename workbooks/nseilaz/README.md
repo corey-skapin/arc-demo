@@ -17,7 +17,11 @@ These workbook templates come from **[github.com/nseilaz/AzureArc_Workbooks](htt
 
 ## How they get into your workspace
 
-`scripts/Deploy-ArcDemo.ps1` reads each file, sets `sourceId` to your demo workspace, and PUTs them as shared workbooks in the Arc resource group. They appear under **Azure Arc → Workbooks**.
+`scripts/Deploy-ArcDemo.ps1` reads each file, sets `sourceId` to your demo workspace, and PUTs them as shared workbooks in the Arc resource group. Search **Workbooks** and choose the demo group/workspace; the Arc portal navigation can vary.
+
+A vendored workbook is a presentation template, not proof its data sources are
+populated. In particular, keep SQL Estate/BPA out of the default Azure-only lab's
+validated story; see [SQL stance](../../docs/sql-arc-spike.md).
 
 ## Updating the snapshot
 
@@ -38,4 +42,8 @@ foreach ($f in $files) {
     -OutFile (Join-Path $dest $f)
 }
 ```
-Then re-run `Deploy-ArcDemo.ps1` — workbook PUTs are idempotent (matched on a `workbookTag` tag derived from the display name; re-runs of the same display name are no-ops).
+
+The deploy wrapper upserts matching `workbookTag` identities derived from display
+names and updates their content; a repeated display name is not a promise of
+zero writes. A full deployment also reconciles infrastructure, not just workbooks.
+Preview/review its scope and obtain approval before rerunning it against a lab.

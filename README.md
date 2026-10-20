@@ -45,7 +45,7 @@ See [`docs/cost.md`](docs/cost.md), not those legacy numbers, before budgeting.
 
 ### Prerequisites
 
-- Azure subscription where you have **Owner** role
+- Azure subscription where you have effective **Owner**, or **Contributor + User Access Administrator**, including inherited/group assignments
 - PowerShell 7.4+
 - Azure CLI 2.60+
 - Bicep CLI (`az bicep install`)
@@ -100,7 +100,7 @@ Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor 
 
 # Before the next demo; no automatic fault reset or credential rotation
 .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
-.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -OutputFormat Json
+.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -OutputFormat Json -TimeoutSeconds 600
 ```
 
 This is distinct from cleanup deletion: it preserves resource groups, Arc records,
@@ -110,6 +110,13 @@ Activation also starts on-demand Azure Update Manager patch assessments after
 the Arc machines reconnect. The assessment job runs asynchronously, so open the
 Update Manager blade later in the walkthrough or allow several minutes for the
 portal data to refresh.
+
+Retain the confirmed runtime target, skin/fleet files and subscription deployment
+history outside public source. Hibernation preserves identities, credentials and
+fault settings; it deactivates Container App revisions rather than changing their
+environment variables. If a companion SRE layer is attached, park that layer first
+using its own maintained procedure, then park Arc to avoid investigations of
+intentionally disconnected hosts. See [lifecycle.md](docs/lifecycle.md).
 
 ### Remove permanently
 
@@ -127,7 +134,7 @@ preserves subscription Defender by default; identity deletion is separately opt-
 
 Customer-specific values live in [`config\demo-skin.json`](config/demo-skin.json). Change that file to retarget the demo name, resource prefix, region, notification email, workload toggles, workbook labels, and tags; see [`docs/reskin-guide.md`](docs/reskin-guide.md) for the swap-list and dummy-customer example. Runtime command-line parameters still override the skin when you need a one-off change.
 
-All scripts accept parameters. The most useful:
+Deployment parameters (lifecycle scripts expose a smaller, documented subset):
 
 | Parameter | Default | Purpose |
 |---|---|---|
@@ -142,7 +149,7 @@ All scripts accept parameters. The most useful:
 | `-InstallSql` | `$false` | Experimental legacy path. Do not use for Arc SQL claims. Future SQL work should split workload simulation from true Arc SQL validation; see `docs/sql-arc-spike.md` |
 | `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
 | `-LinuxVmCount` | `3` | Deprecated compatibility generator for an Ubuntu count-based fleet |
-| `-VmSize` | `Standard_B2as_v2` | VM SKU. Probe with `--validate` before changing |
+| `-VmSize` | `Standard_B2as_v2` | Check regional restrictions/quota; listings and `--validate` do not guarantee capacity |
 | `-AdminEmail` | skin `notifications.email` | Email for budget + alert notifications |
 | `-AutoShutdownTime` | `1900` | 24-hour HHMM in `AutoShutdownTimezone` |
 | `-AutoShutdownTimezone` | `Cen. Australia Standard Time` | .NET timezone ID for shutdown |
@@ -178,6 +185,12 @@ Example using only the skin for customer defaults:
 
 The live Arc cook's tour is: inventory, Machine Configuration/TLS 1.2 policy posture, Update Manager, Defender, and ESU. See [`docs/runsheet.md`](docs/runsheet.md) for click-path and talk track.
 
+Infrastructure/monitoring readiness is not endpoint-protection validation. The
+inspected Linux sensors reported healthy/licensed **in passive mode**, with
+real-time protection disabled; extension-reported event-provider issues also
+need separate interpretation. Do not promise active antivirus or fully validated
+EDR from a passing readiness snapshot. See [support boundaries](docs/lifecycle.md).
+
 ## For AI coding agents
 
 If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any other AI coding assistant, **point it at [`AGENTS.md`](AGENTS.md) first**. It contains the constraints, gotchas, and conventions the AI needs to be helpful here.
@@ -190,7 +203,8 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 | [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md) | Fleet schema, legacy OS image approach, and Monitor gating rules |
 | [`docs/container-app-fault.md`](docs/container-app-fault.md) | Optional Container App fault/repair commands and alert mechanism |
 | [`docs/aks-break-scenario.md`](docs/aks-break-scenario.md) | Optional AKS crash-loop/repair commands and alert mechanism |
-| [`docs/runbook.md`](docs/runbook.md) | Historical deep build notes; use README + `docs/runsheet.md` for the current handoff path |
+| [`docs/runbook.md`](docs/runbook.md) | Maintained deployment, preview, validation and operations procedure |
+| [`docs/lifecycle.md`](docs/lifecycle.md) | Explicit-target lifecycle, retained inventory, readiness contract and validation boundaries |
 | [`docs/runsheet.md`](docs/runsheet.md) | Live demo walkthrough — what to click and what to say |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |
 | [`docs/cost.md`](docs/cost.md) | Detailed cost breakdown by state |

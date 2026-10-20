@@ -48,7 +48,7 @@ This means the DTF/customer scenario remains valid because DTF-style Hyper-V or
 VMware-hosted SQL servers are non-Azure machines. The all-Azure demo simulation is
 the part that should not claim supported Arc SQL validation.
 
-Corey's current intent is **not** to stand up a non-Azure VM for this demo. The
+This reusable lab does **not** stand up a non-Azure VM for this demo. The
 real Arc SQL path should remain a customer PoC / future sidecar note, not a
 dependency for the reusable demo.
 
@@ -68,8 +68,8 @@ That path is skipped by default. As written, it is not currently a reliable or
 supportable shareable branch for this Azure-only lab because it tries to do both
 SQL workload installation and Arc SQL extension registration.
 
-Preserved logs under `logs\add-sql2016-*.log` do not contain a clean SQL setup
-failure. They mostly show earlier deployment idempotency failures such as
+Historical spike logs did not establish a clean SQL setup failure. They showed
+earlier deployment idempotency failures such as
 `osDisk.name` / managed disk SKU immutability and budget start-date updates. The
 more recent live run symptom was a long-running SQL setup phase that did not
 complete in the demo window.
@@ -80,8 +80,8 @@ complete in the demo window.
 
 Use this if we need a SQL-flavoured operational signal without claiming Arc SQL:
 
-- Install SQL Server Developer/Express, LocalDB, or a lightweight SQL-shaped worker
-  on `win-sql-01`.
+- Prefer the existing lightweight [SQL-shaped workload simulator](sql-workload-simulation.md)
+  on `win-sql-01`; it installs no SQL Server engine or Arc SQL extension.
 - Emit Windows Application events, service state, and optional perf signals.
 - Alert on the workload signal through Azure Monitor.
 - Let SRE Agent diagnose the incident as a SQL workload on an Arc-enabled server
@@ -101,14 +101,20 @@ Server 2016+ machine with SQL Server 2014+ installed.
    - `aka.ms`
    - `*.web.core.windows.net`
    - `*.<region>.arcdataservices.com` on TCP 443
-3. Register providers:
+3. Only in that separately approved non-Azure SQL lab, register needed providers:
+
    ```powershell
-   az provider register --namespace Microsoft.HybridCompute
-   az provider register --namespace Microsoft.AzureArcData
+   az provider register --subscription <SUB> --namespace Microsoft.HybridCompute
+   az provider register --subscription <SUB> --namespace Microsoft.AzureArcData
    ```
-4. Install the SQL extension:
+
+4. With installation/licensing approval, install the SQL extension using settings
+   appropriate to the real host's license (the example Paid setting is not a
+   default licensing recommendation):
+
    ```powershell
    az connectedmachine extension create `
+     --subscription <SUB> `
      --machine-name <arc-machine-name> `
      --resource-group <arc-resource-group> `
      --location <region> `
@@ -117,11 +123,12 @@ Server 2016+ machine with SQL Server 2014+ installed.
      --type WindowsAgent.SqlServer `
      --settings '{"SqlManagement":{"IsEnabled":true}, "LicenseType":"Paid", "AzureBestPracticesAssessment":{"IsEnabled":true}}'
    ```
+
 5. Validate in **Azure Arc > SQL Server**.
 6. Wait 30-60 minutes before expecting Best Practices Assessment results.
 
 This is the right path for a customer-owned Hyper-V/VMware SQL Server estate, but
-it is out of scope for Corey's reusable Azure-only demo unless a customer PoC
+it is out of scope for this reusable Azure-only demo unless a customer PoC
 provides the real host.
 
 ### Option C - keep this demo Azure-only and skip SQL
@@ -174,6 +181,6 @@ Also avoid:
 ## Open work if SQL becomes a must-have live beat
 
 1. Decide whether the demo needs SQL-shaped workload signals.
-2. If yes, build a SQL workload simulation that does not use `WindowsAgent.SqlServer`.
+2. If yes, explicitly deploy/validate the existing [workload simulator](sql-workload-simulation.md), which does not use `WindowsAgent.SqlServer`. Do not claim it ran merely because its source is present.
 3. If a customer later wants true Arc SQL, use their real non-Azure SQL host and run
    the documented `WindowsAgent.SqlServer` extension install there.

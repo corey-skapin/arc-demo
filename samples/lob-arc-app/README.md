@@ -21,9 +21,10 @@ The runtime reads `C:\ProgramData\ArcSreLobApp\appsettings.json`:
 
 ## How it is deployed
 
-Do not run this directly from the repo during the demo. The companion
-[`sre-agent-demo`](https://github.com/corey-skapin/sre-agent-demo) repo deploys it
-to an Arc-enabled Windows server with:
+Do not run this directly from the repo during the demo. After separately
+approving the deployment/guest execution scope, use the companion
+[`sre-agent-demo`](https://github.com/corey-skapin/sre-agent-demo) helper to deploy
+it to an Arc-enabled Windows server:
 
 ```powershell
 .\scripts\Invoke-LobArcAppOnArc.ps1 `
@@ -32,22 +33,23 @@ to an Arc-enabled Windows server with:
   -SkinPath .\config\demo-skin.json `
   -Action Deploy `
   -SourceRepositoryUrl https://github.com/corey-skapin/arc-demo `
-  -SourceCommit <THIS_REPO_COMMIT_SHA> `
+  -SourceCommit <PINNED_SOURCE_COMMIT_SHA> `
   -SourcePath samples/lob-arc-app/LobArcBridgeApp.ps1
 ```
 
 The deploy helper stamps the repository URL, commit, and source path into the app
 config and event messages so an SRE investigation has public code context.
+The pin must identify the source actually deployed, not merely this repo's
+current HEAD. Source presence alone does not prove the guest workload is running.
 
 ## SRE Agent knowledge-base setup
 
 For the LOB-on-Arc demo:
 
-1. Open the SRE Agent portal.
-2. Open the `sre-arc-demo` parent agent.
-3. Go to **Builder > Knowledge base**.
-4. Add `https://github.com/corey-skapin/arc-demo`.
-5. Confirm SRE can cite `samples/lob-arc-app/LobArcBridgeApp.ps1` when investigating the T11 alert.
+1. Follow the companion repo's current knowledge-base/code-context setup for its parent agent; portal navigation can change.
+2. Register `https://github.com/corey-skapin/arc-demo` using that procedure.
+3. Verify access/indexing and the deployed source pin rather than assuming a URL alone supplies working context.
+4. Confirm the investigation can actually cite `samples/lob-arc-app/LobArcBridgeApp.ps1`. Code context is not proof of an executed repair.
 
 ## Relationship to the demo repos
 

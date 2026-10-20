@@ -86,6 +86,11 @@ in their own surfaces; a provisioned extension is not proof of telemetry or
 completed assessment. Policy scores and CT cycles may take substantially longer
 than infrastructure provisioning.
 
+For Linux, inspect direct sensor health separately from MDE extension state.
+The approved diagnostics found healthy/licensed sensors in passive mode with
+real-time protection disabled, and retained an extension/direct-health
+event-provider discrepancy. A Monitor pass is not active AV or full EDR proof.
+
 Rehearse the [20-30 minute Arc/Monitor story](runsheet.md). The optional companion
 SRE repo consumes these existing alerts; it does not replace the standalone Arc
 operations plane. Reset/induce faults only as separately authorized scenario
@@ -107,6 +112,12 @@ Activation restores outbound NAT first, starts retained workloads and reconnects
 agents where needed. It does not reset faults. Optional AKS can take longer and
 requires a 15-30 minute stop/start separation; capacity is not guaranteed.
 Nightly VM auto-shutdown is not whole-lab hibernation.
+
+Retain runtime target/skin/fleet inputs and deployment history outside git.
+If SRE is attached, park that dependent layer first through its own maintained
+procedure; on wake, restore Arc/Monitor and verify Ready before SRE resumes.
+Hibernation is not cleanup: it does not delete groups, disks, Arc identities,
+Key Vault secrets, onboarding credentials, DCRs or the workspace.
 
 ## 6. Remove permanently (separate destructive approval)
 
@@ -133,3 +144,5 @@ Pester is development-only, installed in CI; it is not a deployment dependency.
 Fresh deploy, double deploy, park/wake and teardown/recreate remain separate
 live smoke tests needing a disposable lab and explicit approval. See
 [troubleshooting](troubleshooting.md) for known failure modes.
+The approved eight-host active/readiness proof is not evidence that these
+separate deployment or lifecycle cycles have been exercised.

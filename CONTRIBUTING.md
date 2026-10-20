@@ -4,28 +4,42 @@ Pull requests welcome. Quick rules:
 
 1. Read [`AGENTS.md`](AGENTS.md) first — it captures all the gotchas the scripts work around. Don't undo those workarounds.
 2. Lint passes locally before pushing:
+
    ```powershell
    Invoke-ScriptAnalyzer -Path .\scripts\ -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
+   Invoke-Pester -Path .\tests -CI
    az bicep build --file .\bicep\main.bicep --stdout > $null
    ```
+
 3. If you hit a new failure mode, **add it to [`docs/troubleshooting.md`](docs/troubleshooting.md)** in the same PR with a verified fix.
-4. Scripts must remain **idempotent** — running them twice in a row should be a no-op against an already-correct state. Test with a real deploy.
+4. Scripts must remain **idempotent** — preserve correct state, credentials and fault flags on rerun. Start with mocked tests; real double deployment requires a separately approved disposable lab, never an in-use demo.
 5. Bicep modules go in `bicep/modules/`; top-level template stays in `bicep/main.bicep`.
 6. Keep `Common.psm1` lean — only put a helper there if it's used in 2+ scripts.
 
 ## Testing changes
 
-The cheapest reliable test is to deploy into a temp prefix:
+Run the existing parser/Pester/analyzer/Bicep checks first. Documentation is
+linted in CI, but the Markdown job is advisory; inspect its actual output.
+If live smoke testing is explicitly approved, use a disposable prefix and the
+same confirmed target/skin throughout:
+
 ```powershell
-.\scripts\Deploy-ArcDemo.ps1 -NamePrefix arctest -SubscriptionId ... -TenantId ... -AdminEmail ...
+$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; NamePrefix = 'arctest'; SkinPath = '.\config\demo-skin.json' }
+.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
+.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL>
 # ... verify in portal ...
-.\scripts\Hibernate-ArcDemo.ps1 -NamePrefix arctest
-.\scripts\Activate-ArcDemo.ps1 -NamePrefix arctest
-.\scripts\Remove-ArcDemo.ps1 -NamePrefix arctest
+.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json
+.\scripts\Hibernate-ArcDemo.ps1 @target
+.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Hibernated -OutputFormat Json
+.\scripts\Activate-ArcDemo.ps1 @target
+.\scripts\Remove-ArcDemo.ps1 @target -WhatIf
+# Execute removal only under the separately approved destructive-test scope.
 ```
 
-Total cost of a smoke test: ~AUD 5 if you tear it down within a few hours.
+Reprice runtime, storage, networking and retained services; no fixed smoke-test
+cost is guaranteed. See [cost.md](docs/cost.md) and [lifecycle.md](docs/lifecycle.md).
 
 ## Reporting issues
 
-Use the bug template at `.github/ISSUE_TEMPLATE/bug.md`. Include the full PowerShell error transcript — redact tenant/sub IDs if needed.
+Use `.github/ISSUE_TEMPLATE/bug.md`. Include the smallest useful error/reproduction
+excerpt; redact credentials, tokens, onboarding payloads, private IDs and mailboxes.

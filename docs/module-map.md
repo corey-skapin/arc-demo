@@ -36,7 +36,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Hibernate-ArcDemo.ps1` | Exact VM deallocation, AKS stop, Container App revision deactivation, then NAT removal; retains faults/data |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; optional identity/Defender changes |
 | `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table, Ready/Hibernated, bounded pending retries, exit 0/1/2 |
-| `scripts/lib/Common.psm1` | Skin/fleet validation, explicit-context checked CLI/REST, retained inventory, bounded waits/jobs/guest markers, capacity/quota, readiness checks |
+| `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, `@file` guest-script transport/markers, capacity/quota, readiness checks |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
 
 All four lifecycle/deployment scripts require explicit subscription/tenant and
@@ -61,6 +61,9 @@ Resource existence/provisioning is different from guest health, data arrival,
 policy compliance and patch completion. The readiness contract states exactly
 what is checked. No live full teardown/recreate or double-deploy claim follows
 from local mocked tests.
+The inspected Linux sensors' healthy/licensed passive-mode state is not proof of
+active antivirus or complete EDR; preserve the event-provider/direct-health
+discrepancy described in [lifecycle.md](lifecycle.md).
 
 ## Configuration, story and validation
 
@@ -80,4 +83,5 @@ consuming the same alerts, not a prerequisite or replacement.
 classification, retained additive manifests, ShouldProcess previews, guest/job
 failures and the JSON/exit-code contract without a cloud deployment.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile
-and documentation lint. Pester is development-only.
+and advisory documentation lint. Inspect the Markdown log rather than treating
+the job's success alone as lint-clean. Pester is development-only.

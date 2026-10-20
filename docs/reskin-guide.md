@@ -20,11 +20,13 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 ## Swap list
 
 Change per customer:
+
 - `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
 - `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. Leave `workloads.installSql` as `false` unless you intentionally want the experimental SQL branch.
 - `workloads.onPremFleetPath` for a custom OS mix.
 
 Keep constant unless the lab requirement changes:
+
 - Bicep modules, DCR streams, workbook templates, alert mechanics, Defender/Policy choices, hibernate/activate flow.
 - The repo separation: `arc-demo` remains standalone and does not require `sre-agent`.
 
@@ -35,13 +37,16 @@ Keep constant unless the lab requirement changes:
 3. Set `notifications.email` to the demo operator or customer-approved distribution list.
 4. Choose workload toggles.
 5. Run scripts without repeating those variables:
+
    ```powershell
    .\scripts\Deploy-ArcDemo.ps1 `
      -SubscriptionId <SUBSCRIPTION_ID> `
      -TenantId <TENANT_ID> `
      -SkinPath .\config\demo-skin.json
    ```
+
 6. Use the same skin for lifecycle commands:
+
    ```powershell
    .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
    .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -OutputFormat Json
@@ -64,6 +69,9 @@ subscription Defender by default. See [lifecycle.md](lifecycle.md) for exact
 scope, retained deployment manifests, optional-workload costs and the readiness
 JSON/exit-code contract. Changing skin toggles alone does not delete previously
 deployed workloads; lifecycle still accounts for retained manifests.
+Keep the chosen runtime target, skin/fleet files and deployment history in a
+private operator handoff for reactivation; do not copy live IDs/secrets into the
+customer skin. Park an attached SRE layer first through its own procedure.
 
 ## Examples
 
@@ -73,4 +81,4 @@ Dummy customer: compare with `config\dummy-customer.demo-skin.json`; it changes 
 
 ## Remaining constants
 
-The following strings intentionally remain in code/docs because they identify the reusable spine, not a customer skin: repo names (`arc-demo`, `sre-agent`), feature flags (`SIMULATE_CRASH`, `CRASH_LOOP`), built-in workbook names from the vendored Nic Seilaz library, sample host names (`win-app-01`), and sample commands in historical runbooks. Live scripts now read customer-facing deploy defaults from the skin file.
+The following strings intentionally remain in code/docs because they identify the reusable spine, not a customer skin: repo names (`arc-demo`, `sre-agent`), feature flags (`SIMULATE_CRASH`, `CRASH_LOOP`), built-in workbook names from the vendored Nic Seilaz library and sample host names (`win-app-01`). Substitute the chosen names in examples; maintained lifecycle scripts use retained IDs and customer-facing defaults from the skin.
