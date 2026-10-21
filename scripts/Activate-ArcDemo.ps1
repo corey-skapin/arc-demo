@@ -3,8 +3,11 @@
     Restores outbound networking, starts retained workloads and validates the demo.
 .DESCRIPTION
     Uses retained deployment manifests and actual VM OS metadata, not name prefixes.
-    Does not reset workload faults or credentials. Patch assessment submission is
-    asynchronous; readiness checks telemetry separately. -WhatIf is read-only.
+    Does not reset workload faults or credentials. Every run verifies guest health
+    without restarting already-connected/running hosts. Windows AMA is checked by
+    its MonAgentCore process, not an assumed Windows service. Patch assessments
+    are submitted unless explicitly skipped; submission is not completion.
+    -WhatIf is read-only. Optional ResultPath preserves per-host outcomes.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -14,7 +17,8 @@ param(
     [string]$Location = 'australiaeast',
     [string]$SkinPath = '',
     [switch]$SkipValidate,
-    [switch]$SkipPatchAssessment
+    [switch]$SkipPatchAssessment,
+    [string]$ResultPath = ''
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
@@ -29,71 +33,130 @@ $missing = @($inventory.Machines | Where-Object { -not $_.Actual })
 if ($missing) { throw "Missing expected VMs: $($missing.Name -join ', '). Reconcile deployment before activation." }
 if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Restore NAT, start VMs/AKS/Container Apps and submit patch assessments (without fault reset)')) { return }
 
-$infraRg = $inventory.InfraRg
-$natId = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Network/natGateways/natgw-$NamePrefix"
-$pip = @($inventory.Resources | Where-Object { $_.type -eq 'Microsoft.Network/publicIPAddresses' -and $_.name -eq "pip-natgw-$NamePrefix" })
-if (-not $pip) {
-    Invoke-DemoAz -Arguments @('network', 'public-ip', 'create', '-g', $infraRg, '-n', "pip-natgw-$NamePrefix", '-l', $Location, '--sku', 'Standard', '--allocation-method', 'Static', '-o', 'none') | Out-Null
+$result = [ordered]@{
+    schemaVersion = 1; workload = 'arc-demo-activation'
+    startedAtUtc = [DateTime]::UtcNow.ToString('o'); completedAtUtc = $null
+    subscriptionId = "$SubscriptionId"; tenantId = "$TenantId"; status = 'running'
+    guestChecks = @(); patchAssessments = @()
+    patchAssessment = if ($SkipPatchAssessment) { 'skipped' } else { 'not-run' }
+    readiness = 'not-run'; error = $null
 }
-if ($natId -notin $inventory.Resources.id) {
-    Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'create', '-g', $infraRg, '-n', "natgw-$NamePrefix", '-l', $Location, '--public-ip-addresses', "pip-natgw-$NamePrefix", '--idle-timeout', '10', '-o', 'none') | Out-Null
-}
-$subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '-g', $infraRg, '--vnet-name', "vnet-$NamePrefix", '-n', 'snet-vms', '-o', 'json') | ConvertFrom-Json
-if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { throw 'Demo subnet has an unexpected NAT Gateway; refusing to overwrite it.' }
-if ($subnet.natGateway.id -ne $natId) {
-    Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'update', '--ids', $subnet.id, '--nat-gateway', $natId, '-o', 'none') | Out-Null
-}
-$startedVmIds = @()
-foreach ($machine in $inventory.Machines) {
-    if ($machine.Actual.powerState -ne 'VM running') {
-        Invoke-DemoAz -Arguments @('vm', 'start', '--ids', $machine.Id, '--no-wait', '-o', 'none') | Out-Null
-        $startedVmIds += $machine.Id
+if ($ResultPath) {
+    if (-not (Test-Path -LiteralPath (Split-Path ([System.IO.Path]::GetFullPath($ResultPath))) -PathType Container)) {
+        throw 'ResultPath parent directory must already exist; use a private path outside git.'
     }
+    $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ResultPath -Encoding utf8
 }
-Wait-Until -Message 'expected VM identities running' -Condition {
-    $vms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '--show-details', '-o', 'json') | ConvertFrom-Json)
-    @($inventory.Machines | Where-Object { $_.Id -notin @($vms | Where-Object powerState -eq 'VM running' | ForEach-Object id) }).Count -eq 0
-} | Out-Null
+$guest = $null
+$assessment = $null
+try {
+    $infraRg = $inventory.InfraRg
+    $natId = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Network/natGateways/natgw-$NamePrefix"
+    $pip = @($inventory.Resources | Where-Object { $_.type -eq 'Microsoft.Network/publicIPAddresses' -and $_.name -eq "pip-natgw-$NamePrefix" })
+    if (-not $pip) {
+        Invoke-DemoAz -Arguments @('network', 'public-ip', 'create', '-g', $infraRg, '-n', "pip-natgw-$NamePrefix", '-l', $Location, '--sku', 'Standard', '--allocation-method', 'Static', '-o', 'none') | Out-Null
+    }
+    if ($natId -notin $inventory.Resources.id) {
+        Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'create', '-g', $infraRg, '-n', "natgw-$NamePrefix", '-l', $Location, '--public-ip-addresses', "pip-natgw-$NamePrefix", '--idle-timeout', '10', '-o', 'none') | Out-Null
+    }
+    $subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '-g', $infraRg, '--vnet-name', "vnet-$NamePrefix", '-n', 'snet-vms', '-o', 'json') | ConvertFrom-Json
+    if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { throw 'Demo subnet has an unexpected NAT Gateway; refusing to overwrite it.' }
+    if ($subnet.natGateway.id -ne $natId) {
+        Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'update', '--ids', $subnet.id, '--nat-gateway', $natId, '-o', 'none') | Out-Null
+    }
+    $startedVmIds = @()
+    foreach ($machine in $inventory.Machines) {
+        if ($machine.Actual.powerState -ne 'VM running') {
+            Invoke-DemoAz -Arguments @('vm', 'start', '--ids', $machine.Id, '--no-wait', '-o', 'none') | Out-Null
+            $startedVmIds += $machine.Id
+        }
+    }
+    Wait-Until -Message 'expected VM identities running' -Condition {
+        $vms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '--show-details', '-o', 'json') | ConvertFrom-Json)
+        @($inventory.Machines | Where-Object { $_.Id -notin @($vms | Where-Object powerState -eq 'VM running' | ForEach-Object id) }).Count -eq 0
+    } | Out-Null
 
-foreach ($id in $inventory.AksClusterIds) {
-    $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
-    if ($cluster.provisioningState -ne 'Succeeded') { throw "AKS $($cluster.name) is $($cluster.provisioningState). Wait for the current operation to finish, then retry; do not start during stop." }
-    if ($cluster.powerState.code -eq 'Stopped') { Invoke-DemoAz -Arguments @('aks', 'start', '-g', $infraRg, '-n', ($id -split '/')[-1], '--no-wait', '-o', 'none') | Out-Null }
-    elseif ($cluster.powerState.code -ne 'Running') { throw "Unexpected AKS power state: $($cluster.powerState.code)" }
-}
-foreach ($id in $inventory.ContainerAppIds) {
-    $app = Invoke-DemoAz -Arguments @('containerapp', 'show', '--ids', $id, '-o', 'json') | ConvertFrom-Json
-    $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $infraRg, '-n', $app.name, '-o', 'json') | ConvertFrom-Json)
-    if (@($revisions | Where-Object { $_.properties.active }).Count -eq 0) {
-        Invoke-DemoAz -Arguments @('containerapp', 'revision', 'activate', '-g', $infraRg, '--revision', $app.properties.latestRevisionName, '-o', 'none') | Out-Null
+    foreach ($id in $inventory.AksClusterIds) {
+        $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
+        if ($cluster.provisioningState -ne 'Succeeded') { throw "AKS $($cluster.name) is $($cluster.provisioningState). Wait for the current operation to finish, then retry; do not start during stop." }
+        if ($cluster.powerState.code -eq 'Stopped') { Invoke-DemoAz -Arguments @('aks', 'start', '-g', $infraRg, '-n', ($id -split '/')[-1], '--no-wait', '-o', 'none') | Out-Null }
+        elseif ($cluster.powerState.code -ne 'Running') { throw "Unexpected AKS power state: $($cluster.powerState.code)" }
     }
-}
-$arcBeforeRestart = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
-$reconnectIds = @()
-foreach ($machine in $inventory.Machines) {
-    $wasConnected = $machine.ArcId -in @($arcBeforeRestart | Where-Object status -eq 'Connected' | ForEach-Object id)
-    if ($machine.Id -notin $startedVmIds -and ($machine.Native -or $wasConnected)) { continue }
-    $reconnectIds += $machine.Id
-    $services = @()
-    if (-not $machine.Native) { $services += if ($machine.OsType -eq 'Windows') { 'himds' } else { 'himdsd' } }
-    if ($machine.Monitor) { $services += if ($machine.OsType -eq 'Windows') { 'AzureMonitorAgent' } else { 'azuremonitoragent' } }
-    if (-not $services) { continue }
-    $script = if ($machine.OsType -eq 'Windows') {
-        "`$ErrorActionPreference='Stop'; Restart-Service $($services -join ',') -Force; 'ARC_DEMO_OK'"
-    } else { "set -e; sudo systemctl restart $($services -join ' '); echo ARC_DEMO_OK" }
-    Invoke-DemoGuestCommand -Machine $machine -Script $script
-}
-Wait-Until -Message 'expected Arc identities connected' -Condition {
-    $arc = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
-    @($inventory.Machines | Where-Object { -not $_.Native -and $_.ArcId -notin @($arc | Where-Object status -eq 'Connected' | ForEach-Object id) }).Count -eq 0
-} | Out-Null
-if (-not $SkipPatchAssessment -and $reconnectIds.Count -gt 0) {
-    foreach ($machine in $inventory.Machines | Where-Object { -not $_.Native }) {
-        Invoke-DemoAz -Arguments @('connectedmachine', 'assess-patches', '--ids', $machine.ArcId, '--no-wait', '-o', 'none') | Out-Null
+    foreach ($id in $inventory.ContainerAppIds) {
+        $app = Invoke-DemoAz -Arguments @('containerapp', 'show', '--ids', $id, '-o', 'json') | ConvertFrom-Json
+        $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $infraRg, '-n', $app.name, '-o', 'json') | ConvertFrom-Json)
+        if (@($revisions | Where-Object { $_.properties.active }).Count -eq 0) {
+            Invoke-DemoAz -Arguments @('containerapp', 'revision', 'activate', '-g', $infraRg, '--revision', $app.properties.latestRevisionName, '-o', 'none') | Out-Null
+        }
     }
+    $arcBeforeRestart = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
+    foreach ($machine in $inventory.Machines) {
+        $wasConnected = $machine.ArcId -in @($arcBeforeRestart | Where-Object status -eq 'Connected' | ForEach-Object id)
+        $restart = $machine.Id -in $startedVmIds -or (-not $machine.Native -and -not $wasConnected)
+        $services = @()
+        if (-not $machine.Native) { $services += if ($machine.OsType -eq 'Windows') { 'himds' } else { 'himdsd' } }
+        if ($machine.Monitor -and $machine.OsType -eq 'Linux') { $services += 'azuremonitoragent' }
+        if (-not $services -and -not $machine.Monitor) { continue }
+        $script = if ($machine.OsType -eq 'Windows') {
+            $commands = @("`$ErrorActionPreference='Stop'")
+            if ($services) {
+                if ($restart) { $commands += "Restart-Service $($services -join ',') -Force" }
+                $commands += ('if (@(Get-Service -Name {0} | Where-Object {{ $_.Status -ne ''Running'' }}).Count) {{ throw ''Required Arc service is not running.'' }}' -f ($services -join ','))
+            }
+            if ($machine.Monitor) {
+                $commands += @'
+$deadline = [DateTime]::UtcNow.AddMinutes(3)
+while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonAgentCore').Count) {
+    if ([DateTime]::UtcNow -ge $deadline) { throw 'Windows AMA MonAgentCore process did not start within 180 seconds.' }
+    Start-Sleep -Seconds 2
 }
-if (-not $SkipValidate) {
-    & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 600
-    if ($LASTEXITCODE -ne 0) { throw 'Activation completed but readiness failed or remains pending. Review the readiness checks above.' }
+'@
+            }
+            $commands += "'ARC_DEMO_OK'"
+            $commands -join "`n"
+        } else {
+            $restartCommand = if ($restart) { "sudo systemctl restart $($services -join ' ')" } else { '' }
+            "set -e`n$restartCommand`nfor service in $($services -join ' '); do sudo systemctl is-active --quiet `"`$service`"; done`necho ARC_DEMO_OK"
+        }
+        $guest = [ordered]@{
+            machineName = $machine.Name; resourceId = $machine.Id; status = 'pending'
+            restartedServices = @(if ($restart) { $services })
+            monitorCheck = if (-not $machine.Monitor) { 'not-required' } elseif ($machine.OsType -eq 'Windows') { 'MonAgentCore process' } else { 'azuremonitoragent service' }
+            completion = $null
+        }
+        $result.guestChecks += $guest
+        $guest.completion = Invoke-DemoGuestCommand -Machine $machine -Script $script -PassThru
+        $guest.status = 'pass'
+        Write-Ok "Guest activation verified: $($machine.Name)"
+    }
+    Wait-Until -Message 'expected Arc identities connected' -Condition {
+        $arc = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
+        @($inventory.Machines | Where-Object { -not $_.Native -and $_.ArcId -notin @($arc | Where-Object status -eq 'Connected' | ForEach-Object id) }).Count -eq 0
+    } | Out-Null
+    if (-not $SkipPatchAssessment) {
+        foreach ($machine in $inventory.Machines | Where-Object { -not $_.Native }) {
+            $assessment = [ordered]@{ machineName = $machine.Name; resourceId = $machine.ArcId; status = 'pending' }
+            $result.patchAssessments += $assessment
+            Invoke-DemoAz -Arguments @('connectedmachine', 'assess-patches', '--ids', $machine.ArcId, '--no-wait', '-o', 'none') | Out-Null
+            $assessment.status = 'submitted'
+            Write-Ok "Patch assessment submitted: $($machine.Name)"
+        }
+        $result.patchAssessment = if ($result.patchAssessments.Count) { 'submitted' } else { 'not-required' }
+    }
+    if (-not $SkipValidate) {
+        & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 600
+        if ($LASTEXITCODE -ne 0) { throw 'Activation completed but readiness failed or remains pending. Review the readiness checks above.' }
+        $result.readiness = 'pass'
+    } else { $result.readiness = 'skipped' }
+    $result.status = 'pass'
+} catch {
+    $result.status = 'fail'
+    $result.error = $_.Exception.Message
+    if ($guest -and $guest.status -eq 'pending') { $guest.status = 'fail' }
+    if ($assessment -and $assessment.status -eq 'pending') { $assessment.status = 'fail' }
+    throw
+} finally {
+    $result.completedAtUtc = [DateTime]::UtcNow.ToString('o')
+    if ($ResultPath) { $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ResultPath -Encoding utf8 }
 }
 Write-Ok 'Activation finished. Existing fault flags were preserved; assessment submissions are not assessment completion.'

@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "customer": {
-    "name": "SA DTF",
-    "shortName": "DTF",
-    "scenarioLabel": "Infrastructure Modernisation Program"
+    "name": "Example Organization",
+    "shortName": "DEMO",
+    "scenarioLabel": "Hybrid Operations Demo"
   },
   "azure": {
     "namePrefix": "arc-demo",
     "location": "australiaeast"
   },
   "notifications": {
-    "email": "you@contoso.com"
+    "email": "operator@example.com"
   },
   "workloads": {
     "deployArcOnPrem": true,

@@ -44,9 +44,9 @@ The SQL Server enabled by Azure Arc prerequisites page states:
   SQL Server in containers, SQL Server 2012 and older, and Windows Server versions
   earlier than Windows Server 2016.
 
-This means the DTF/customer scenario remains valid because DTF-style Hyper-V or
-VMware-hosted SQL servers are non-Azure machines. The all-Azure demo simulation is
-the part that should not claim supported Arc SQL validation.
+Real non-Azure Hyper-V or VMware-hosted SQL servers can follow the Arc SQL path
+when they meet its documented requirements. The all-Azure demo simulation must
+not claim supported Arc SQL validation.
 
 This reusable lab does **not** stand up a non-Azure VM for this demo. The
 real Arc SQL path should remain a customer PoC / future sidecar note, not a

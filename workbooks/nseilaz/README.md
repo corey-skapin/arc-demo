@@ -5,6 +5,12 @@ These workbook templates come from **[github.com/nseilaz/AzureArc_Workbooks](htt
 **License:** MIT — see [`LICENSE.upstream`](LICENSE.upstream).
 **Credit:** All workbook content authored by [Nic Seilaz](https://github.com/nseilaz).
 
+The asset inventory template's incoming sample subscription/workspace selection
+has been cleared for handoff. Deployment binds workspace selectors by their
+parameter names/labels to the explicitly targeted demo workspace; no upstream
+operator's resource ID should be shipped as a default. Public policy-initiative
+lookup constants and required upstream attribution are retained.
+
 ## What's in here
 
 | File | Workbook | What it shows |

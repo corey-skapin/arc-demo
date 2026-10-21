@@ -467,7 +467,8 @@ function Invoke-DemoGuestCommand {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Machine,
-        [Parameter(Mandatory)][string]$Script
+        [Parameter(Mandatory)][string]$Script,
+        [switch]$PassThru
     )
     $cmd = if ($Machine.OsType -eq 'Windows') { 'RunPowerShellScript' } else { 'RunShellScript' }
     $scriptPath = $null
@@ -488,9 +489,23 @@ function Invoke-DemoGuestCommand {
     } finally {
         if ($scriptPath) { [System.IO.File]::Delete($scriptPath) }
     }
-    $messages = @($result.value | ForEach-Object { $_.message }) -join "`n"
-    if ($result.value.code -match 'failed' -or $messages -notmatch '(?m)^ARC_DEMO_OK\s*$') {
-        throw "Guest command failed on $($Machine.Name); required completion marker absent or failure reported. Review VM Run Command output."
+    $entries = @($result.value | Where-Object { $_ })
+    $stdout = @($entries | Where-Object {
+        $_.code -match '^ComponentStatus/StdOut/succeeded$|^ProvisioningState/succeeded$'
+    } | ForEach-Object { $_.message }) -join "`n"
+    $marker = $stdout -match '(?m)^ARC_DEMO_OK\r?$'
+    $failed = @($entries | Where-Object { $_.code -match 'failed|error' -or $_.level -eq 'Error' })
+    $stderrPresent = @($entries | Where-Object { $_.code -match '^ComponentStatus/StdErr/' -and $_.message }).Count -gt 0
+    $codes = @($entries | ForEach-Object { [string]$_.code })
+    if (-not $entries -or $failed -or -not $marker) {
+        # Do not expose arbitrary guest output: onboarding scripts can contain secrets.
+        throw "Guest command failed on $($Machine.Name); stdout completion marker=$marker; stderr present=$stderrPresent; status codes=$($codes -join ', '). Required completion marker absent or failure reported."
+    }
+    if ($PassThru) {
+        [pscustomobject]@{
+            machineName = $Machine.Name; resourceId = $Machine.Id; status = 'pass'
+            completionMarker = 'ARC_DEMO_OK'; statusCodes = $codes; stderrPresent = $stderrPresent
+        }
     }
 }
 

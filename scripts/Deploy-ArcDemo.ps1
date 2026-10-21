@@ -175,7 +175,7 @@ if ($PSBoundParameters.ContainsKey('SkipSqlInstall')) {
 if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
     throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
 }
-if ($AdminEmail -ieq 'you@contoso.com') {
+if ($AdminEmail -in @('you@contoso.com', 'operator@example.com')) {
     throw "AdminEmail is still the placeholder '$AdminEmail'. Pass -AdminEmail with a real operator email or update notifications.email in the skin file before deploying."
 }
 

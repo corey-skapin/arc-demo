@@ -69,3 +69,8 @@ If the image is unavailable, use one of these demo-safe patterns:
 
 `bicep/params/mixed-legacy-fleet.bicepparam` contains a validation fixture with
 WS2012R2, WS2016, WS2019, WS2022, and a represented WS2008R2 placeholder.
+Its IDs/mailbox are synthetic, and its password is read from the process-local
+`ARC_DEMO_ADMIN_PASSWORD` environment variable, not stored in the fixture.
+See [Bicep parameter-file environment inputs](https://learn.microsoft.com/azure/azure-resource-manager/bicep/parameter-files#define-parameters-file).
+This file is a validation reference, not an existing estate's retained input.
+Do not print or commit compiled parameter JSON containing the supplied password.

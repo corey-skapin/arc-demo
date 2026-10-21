@@ -38,6 +38,40 @@ forced green. A missing MDE status file is not proof of working endpoint protect
 Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
 restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
 
+## Activation fails at Windows guest completion even though Monitor becomes Ready
+
+**Observed cause** - The old script attempted
+`Restart-Service himds,AzureMonitorAgent`. On the inspected Windows Arc host,
+`himds` was running but no `AzureMonitorAgent` SCM service existed. A separately
+approved read-only guest invocation returned a valid stdout completion marker;
+the marker/transport was not broken. Do not treat its absence in the original
+failed command as evidence that the guest script never ran.
+
+**Fix** - Activation checks Windows Arc AMA through `MonAgentCore`, as described
+in [Microsoft's Windows Arc troubleshooting guidance](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc),
+and restarts only real required services on newly started/disconnected hosts.
+Already-running hosts receive read-only guest health checks on a retry. Missing
+services/processes, failed status entries and absent stdout markers still fail.
+The helper reports safe status metadata without logging potentially sensitive
+guest output. Optional `-ResultPath` retains per-host outcomes and failures.
+
+With scoped activation approval, rerun the corrected script with the same
+explicit target and retained skin. Do not add skip switches, reinstall AMA,
+restart the VM/extension host or equate an independent Ready snapshot with a
+successful activation. Assessment submissions still run unless explicitly skipped;
+they are asynchronous, not proof of completed update inventory.
+
+## An Arc Linux extension child is absent but the VM-path extension is present
+
+Inspect the exact `Microsoft.HybridCompute/machines/extensions` and
+`Microsoft.Compute/virtualMachines/extensions` IDs separately. Post-startup
+observations found absent Arc MDE/patch children while the three Linux VM-path
+AMA, Change Tracking and MDE extension models reported Succeeded. That neither
+identifies who removed an Arc child nor establishes active sensor/AV/EDR health.
+Update Manager can manage temporary assessment extensions. Keep these observations
+separate from guest service/marker failures; do not delete/reinstall extensions
+or change policy to make resource counts match.
+
 ## Linux MDE timed out, but the installed sensor reports healthy
 
 The inspected MDE.Linux operations failed with `ResourceOperationFailure` /
