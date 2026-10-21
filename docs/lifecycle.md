@@ -244,6 +244,14 @@ was an incorrect Windows AMA service assumption, not a missing completion-marker
 transport fix. Keep the script outcome and runtime snapshot separate, and retain
 the corrected attempt's per-host results rather than skipping guest validation.
 
+An approved corrected activation retry on 21 October 2026 completed normally:
+all eight guest checks passed without unnecessary service restarts, all eight
+Arc assessments were submitted, and independent readiness passed all 79 checks
+with fresh expected-ID Heartbeats and the healthy, non-faulted Container App.
+That retry reused the already-running estate/network from the earlier partial
+attempt; it does not prove a fresh cold-start run of every corrected branch.
+Private timestamped results remain outside git.
+
 A fresh deployment, double-deploy idempotency, AKS park/start and delete/recreate
 remain separate validation exercises. Operational hibernation only proves the
 parked state actually observed, not future activation or fresh deployment.

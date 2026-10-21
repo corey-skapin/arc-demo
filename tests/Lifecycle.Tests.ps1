@@ -50,6 +50,35 @@ Describe 'Skin and fleet validation' {
     }
 }
 
+Describe 'Portable workbook workspace defaults' {
+    BeforeAll {
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'scripts\Deploy-ArcDemo.ps1'), [ref]$tokens, [ref]$errors)
+        $function = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Set-WorkbookWorkspaceDefaults'
+        }, $true)
+        if (-not $function -or $errors) { throw 'Workbook binding function could not be loaded for isolated tests.' }
+        . ([scriptblock]::Create($function.Extent.Text))
+        $serialized = Get-Content (Join-Path $repo 'workbooks\nseilaz\Asset_Inventory_Workbook_Example.json') -Raw
+    }
+    It 'ships no upstream operator workspace selection' {
+        $workbook = $serialized | ConvertFrom-Json -Depth 100
+        $selector = @($workbook.items.content.parameters | Where-Object label -like '*Log Analytics Workspace*')
+        $selector.Count | Should -Be 1
+        [string]::IsNullOrEmpty($selector[0].defaultValue) | Should -BeTrue
+        [string]::IsNullOrEmpty($selector[0].value) | Should -BeTrue
+    }
+    It 'binds the cleared selector to the supplied deployment workspace' {
+        $workspace = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.OperationalInsights/workspaces/law-fixture'
+        $bound = Set-WorkbookWorkspaceDefaults -SerializedData $serialized -DefaultWorkspaceId $workspace | ConvertFrom-Json -Depth 100
+        $selector = @($bound.items.content.parameters | Where-Object label -like '*Log Analytics Workspace*')
+        $selector[0].defaultValue | Should -Be $workspace
+        $selector[0].value | Should -Be $workspace
+    }
+}
+
 Describe 'Retained workload identity classification' {
     InModuleScope Common {
         BeforeEach {
@@ -212,6 +241,14 @@ Describe 'WhatIf lifecycle safety' {
     }
     It 'activation performs no mutations' {
         & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -WhatIf
+        Should -Invoke Invoke-DemoAz -Times 0
+    }
+    It 'rejects the bundled <SkinFile> placeholder mailbox before any deployment work' -TestCases @(
+        @{ SkinFile = 'demo-skin.json' }
+        @{ SkinFile = 'dummy-customer.demo-skin.json' }
+    ) {
+        param($SkinFile)
+        { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -SkinPath (Join-Path $repo "config\$SkinFile") -WhatIf } | Should -Throw '*placeholder*'
         Should -Invoke Invoke-DemoAz -Times 0
     }
     It 'hibernation performs no mutations' {

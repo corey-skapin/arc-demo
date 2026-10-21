@@ -16,7 +16,7 @@
     Optional Entra object ID to use when Graph signed-in-user lookup is blocked.
 
 .EXAMPLE
-    .\Test-Prerequisites.ps1 -SubscriptionId 6ff7d039-... -TenantId 4a2e6a7b-...
+    .\Test-Prerequisites.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID>
 #>
 [CmdletBinding()]
 param(

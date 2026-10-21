@@ -15,6 +15,9 @@ Pull requests welcome. Quick rules:
 4. Scripts must remain **idempotent** — preserve correct state, credentials and fault flags on rerun. Start with mocked tests; real double deployment requires a separately approved disposable lab, never an in-use demo.
 5. Bicep modules go in `bicep/modules/`; top-level template stays in `bicep/main.bicep`.
 6. Keep `Common.psm1` lean — only put a helper there if it's used in 2+ scripts.
+7. Keep real customer labels, contacts, owner repository URLs, runtime identifiers,
+   credentials and evidence outside tracked source. Use synthetic examples and
+   runtime parameters; preserve public Azure built-in IDs and upstream licenses.
 
 ## Testing changes
 

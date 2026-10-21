@@ -2,7 +2,7 @@
 
 > A scripted demo environment for showing Azure Arc + Azure Monitor to customers. Plan a preparation window; readiness, not elapsed time, determines when it is ready.
 
-[![Lint](https://github.com/corey-skapin/arc-demo/actions/workflows/lint.yml/badge.svg)](https://github.com/corey-skapin/arc-demo/actions/workflows/lint.yml)
+[CI workflow](.github/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## What you get
@@ -56,8 +56,12 @@ For lab repeatability, use a clean/new subscription in the **same tenant** you w
 
 ### Deploy
 
+Copy a bundled synthetic skin to a private file outside git and use that
+`<PRIVATE_SKIN_PATH>` consistently. Do not overwrite an existing lab's retained
+runtime skin with the handoff example.
+
 ```powershell
-git clone https://github.com/corey-skapin/arc-demo C:\src\arc-demo
+git clone <ARC_REPOSITORY_URL> C:\src\arc-demo
 cd C:\src\arc-demo
 
 # Sign in to the target tenant
@@ -77,7 +81,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUB> `
   -TenantId <TENANT> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -DeployAzureVMs $true `
   -DeployContainerApps $true
 ```
@@ -92,15 +96,30 @@ When it finishes, open the workbook URL printed at the end, or search for
 
 Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor walkthrough with optional Azure-native workload beats.
 
+### Sharing and runtime inputs
+
+Tracked skins use fictitious organizations and a reserved example mailbox.
+Replace repository URL placeholders with the handoff repositories, and supply
+the operator-approved email and explicit subscription/tenant at runtime.
+For an existing estate, keep its exact retained skin/fleet, targets, manifests
+and evidence privately outside git; the sanitized default is not its runtime
+configuration and must not silently replace it.
+
+Public Azure role/schema IDs and required upstream workbook attribution remain.
+Git history, commit authors, remotes and hosting metadata are not de-identified
+by editing tracked files. For a source-only handoff, export the sanitized tracked
+tree without `.git` and review the destination's metadata separately. History
+has not been rewritten; never put credentials or private evidence in source.
+
 ### Off state / activate
 
 ```powershell
 # After explicit operator approval: deallocates VMs, stops AKS, deactivates Container Apps, removes NAT
-.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
+.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH>
 
 # Before the next demo; no automatic fault reset or credential rotation
-.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
-.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -OutputFormat Json -TimeoutSeconds 600
+.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH>
+.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH> -OutputFormat Json -TimeoutSeconds 600
 ```
 
 This is distinct from cleanup deletion: it preserves resource groups, Arc records,

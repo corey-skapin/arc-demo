@@ -56,8 +56,8 @@
               },
               "showDefault": true
             },
-            "defaultValue": "/subscriptions/7e949884-b256-4bf7-9638-030195178e14/resourceGroups/arcdemo-01/providers/Microsoft.OperationalInsights/workspaces/LAWArcDemo",
-            "value": "/subscriptions/7e949884-b256-4bf7-9638-030195178e14/resourceGroups/arcdemo-01/providers/Microsoft.OperationalInsights/workspaces/LAWArcDemo",
+            "defaultValue": "",
+            "value": "",
             "queryType": 1,
             "resourceType": "microsoft.resourcegraph/resources"
           },

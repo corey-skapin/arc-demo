@@ -7,7 +7,7 @@ the standalone Arc + Azure Monitor demo.
 
 ```text
 You are deploying the reusable Azure Arc + Azure Monitor demo from
-https://github.com/corey-skapin/arc-demo.
+<ARC_REPOSITORY_URL> supplied by the operator.
 
 Read AGENTS.md, README.md, docs/runsheet.md, docs/troubleshooting.md, and
 docs/sql-arc-spike.md before running commands.
@@ -16,7 +16,7 @@ Inputs:
 - Subscription ID: <SUBSCRIPTION_ID>
 - Tenant ID: <TENANT_ID>
 - Notification email: <EMAIL>
-- Customer skin file to use or create: config/demo-skin.json
+- Private runtime skin file: <PRIVATE_SKIN_PATH>, copied from a bundled synthetic example
 - Desired workloads:
   - Arc/on-prem simulation: yes
   - Azure-native VM: <yes/no>
@@ -28,7 +28,7 @@ Inputs:
 Do:
 1. Confirm Azure CLI is signed in to the specified tenant and subscription.
 2. Run scripts/Test-Prerequisites.ps1.
-3. Review config/demo-skin.json and update only customer-facing skin values.
+3. Copy config/demo-skin.json outside git; put approved customer-facing/runtime values only in that private skin.
 4. Deploy with scripts/Deploy-ArcDemo.ps1 using the skin and selected workload flags.
 5. Run Test-ArcDemoReadiness.ps1 with the same explicit target/skin; preserve JSON evidence outside source. Verify guest/workload signals separately.
 6. Record any manual follow-up clearly.
@@ -59,7 +59,7 @@ Do not:
 ## Deployment order
 
 ```powershell
-git clone https://github.com/corey-skapin/arc-demo C:\src\arc-demo
+git clone <ARC_REPOSITORY_URL> C:\src\arc-demo
 cd C:\src\arc-demo
 
 az login --tenant <TENANT_ID>
@@ -72,7 +72,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -AdminEmail <EMAIL> `
   -DeployAzureVMs $true `
   -DeployContainerApps $true
@@ -87,7 +87,7 @@ First read [lifecycle.md](lifecycle.md). Use:
 
 ```powershell
 .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600
+  -SkinPath <PRIVATE_SKIN_PATH> -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600
 ```
 
 JSON v1 uses exact resource IDs and exit 0 pass, 1 fail/error, 2 pending.
@@ -126,14 +126,14 @@ claim for this Azure-only lab.
 Hibernate only after the user explicitly approves parking this lab:
 
 ```powershell
-.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
+.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH>
 ```
 
 Verify:
 
 ```powershell
 .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> `
-  -SkinPath .\config\demo-skin.json -DesiredState Hibernated -OutputFormat Json
+  -SkinPath <PRIVATE_SKIN_PATH> -DesiredState Hibernated -OutputFormat Json
 ```
 
 Expected hibernated state: all VMs deallocated, no NAT Gateway/Public IP, optional
@@ -149,7 +149,7 @@ assessments; targeted VM-start/readiness evidence does not validate that whole p
 After this repo is deployed, use the companion repo:
 
 ```powershell
-git clone https://github.com/corey-skapin/sre-agent-demo C:\src\sre-agent
+git clone <SRE_REPOSITORY_URL> C:\src\sre-agent
 ```
 
 Then follow `C:\src\sre-agent\docs\ai-deploy-handbook.md`.

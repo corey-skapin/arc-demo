@@ -1,15 +1,15 @@
 # Reskin guide — Arc/Monitor foundation
 
-The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a customer **skin** in `config\demo-skin.json`. Defaults reproduce the DTF baseline without private subscription, tenant, or mailbox details; change `notifications.email` before a live deploy.
+The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a customer **skin** in `config\demo-skin.json`. Bundled skins are fictitious handoff examples, not a live customer's configuration; change `notifications.email` before a live deploy.
 
 ## Variable surface
 
 | Path | Purpose | Default |
 |---|---|---|
-| `customer.*` | Customer name, short name, and scenario label for docs/talk track. | SA DTF / DTF / Infrastructure Modernisation Program |
+| `customer.*` | Fictitious organization name, short name, and scenario label. | Example Organization / DEMO / Hybrid Operations Demo |
 | `azure.namePrefix` | Resource name prefix: `rg-<prefix>`, `law-<prefix>`, alerts, NAT GW, optional workloads. | `arc-demo` |
 | `azure.location` | Azure region. | `australiaeast` |
-| `notifications.email` | Budget and Action Group email receiver. | `you@contoso.com` placeholder |
+| `notifications.email` | Budget and Action Group email receiver. | `operator@example.com` placeholder, rejected until replaced |
 | `workloads.*` | Act-1 and optional workload toggles. | Arc on-prem simulation on; optional Azure VM/Container App/AKS/SQL off |
 | `compute.vmSize` | VM SKU for Arc-simulated and optional native VMs. | `Standard_B2as_v2` |
 | `operations.*` | Auto-shutdown schedule. | 19:00 Cen. Australia Standard Time |
@@ -32,7 +32,7 @@ Keep constant unless the lab requirement changes:
 
 ## Retarget steps
 
-1. Copy `config\demo-skin.json` or start from `config\dummy-customer.demo-skin.json`.
+1. Copy `config\demo-skin.json` or `config\dummy-customer.demo-skin.json` to a private runtime file outside git.
 2. Set `azure.namePrefix` to 3-20 lowercase letters/digits/hyphens, starting with a letter and ending with a letter/digit. Workload toggles must be JSON booleans, not strings. Missing or malformed skins fail explicitly.
 3. Set `notifications.email` to the demo operator or customer-approved distribution list.
 4. Choose workload toggles.
@@ -42,16 +42,16 @@ Keep constant unless the lab requirement changes:
    .\scripts\Deploy-ArcDemo.ps1 `
      -SubscriptionId <SUBSCRIPTION_ID> `
      -TenantId <TENANT_ID> `
-     -SkinPath .\config\demo-skin.json
+     -SkinPath <PRIVATE_SKIN_PATH>
    ```
 
 6. Use the same skin for lifecycle commands:
 
    ```powershell
-   .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
-   .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -OutputFormat Json
-   .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
-   .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
+   .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH>
+   .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH> -OutputFormat Json
+   .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH> -WhatIf
+   .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH> -WhatIf
    ```
 
 ## Off state vs cleanup
@@ -75,9 +75,9 @@ customer skin. Park an attached SRE layer first through its own procedure.
 
 ## Examples
 
-DTF/default: use `config\demo-skin.json` as-is, replacing only `notifications.email` and runtime subscription/tenant.
+Generic default: copy `config\demo-skin.json`, replacing `notifications.email` and supplying the runtime subscription/tenant. Keep real customer names, recipients and resource targets outside tracked source.
 
-Dummy customer: compare with `config\dummy-customer.demo-skin.json`; it changes the prefix to `contoso-arc`, workbook title to `Contoso — Hybrid Estate Overview`, turns on Azure VM + Container App, and leaves the optional advanced SQL branch disabled.
+Fictitious alternative: `config\dummy-customer.demo-skin.json` changes the prefix to `example-arc`, workbook title to `Example — Hybrid Estate Overview`, turns on Azure VM + Container App, and leaves the optional advanced SQL branch disabled. Replace its example mailbox too.
 
 ## Remaining constants
 

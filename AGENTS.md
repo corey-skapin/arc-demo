@@ -101,7 +101,7 @@ These are *not* hypothetical. Every one of them broke the original build. The sc
 
 ```powershell
 # 1. Clone & cd
-git clone https://github.com/corey-skapin/arc-demo C:\src\arc-demo
+git clone <ARC_REPOSITORY_URL> C:\src\arc-demo
 cd C:\src\arc-demo
 
 # 2. Sign in to the target tenant
@@ -112,7 +112,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 .\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
 
 # 4. Deploy
-.\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail you@contoso.com
+.\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail <OPERATOR_EMAIL>
 
 # 5. After the demo, hibernate
 .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
@@ -158,10 +158,10 @@ Invoke-Pester -Path .\tests -CI
 az bicep build --file .\bicep\main.bicep --stdout > $null
 
 # Dry-run deploy (validates Bicep + checks RBAC, no resources created)
-.\scripts\Deploy-ArcDemo.ps1 -WhatIf -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail test@example.com
+.\scripts\Deploy-ArcDemo.ps1 -WhatIf -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail <OPERATOR_EMAIL>
 
 # Full smoke test cycle (~45 min total). Run manually with prefix "arctest":
-.\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail you@contoso.com -NamePrefix arctest
+.\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail <OPERATOR_EMAIL> -NamePrefix arctest
 .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -NamePrefix arctest
 .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -NamePrefix arctest
 .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -NamePrefix arctest
