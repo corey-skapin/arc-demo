@@ -21,7 +21,8 @@
     "onPremFleetPath": ""
   },
   "compute": {
-    "vmSize": "Standard_B2as_v2"
+    "vmSize": "Standard_B2as_v2",
+    "osDiskStorageAccountType": "StandardSSD_LRS"
   },
   "operations": {
     "autoShutdownTime": "1900",

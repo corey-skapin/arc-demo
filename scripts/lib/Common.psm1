@@ -463,6 +463,23 @@ function Get-DemoInventory {
         AksClusterIds = $clusterIds; Outputs = $deployments[0].properties.outputs; Resources = $resources }
 }
 
+function Assert-DemoOsDiskStorageAccountType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Machines,
+        [Parameter(Mandatory)][ValidateSet('Standard_LRS', 'StandardSSD_LRS')][string]$StorageAccountType
+    )
+    foreach ($machine in $Machines) {
+        $diskId = [string]$machine.storageProfile.osDisk.managedDisk.id
+        if (-not $diskId) { throw "Cannot verify retained OS disk for $($machine.name). Deployment will not infer or convert its tier." }
+        $observed = Invoke-DemoAz -Arguments @('disk', 'show', '--ids', $diskId, '--query', 'sku.name', '-o', 'tsv')
+        if ([string]::IsNullOrWhiteSpace($observed)) { throw "OS disk tier unreadable for $($machine.name); inspect the retained disk before deployment." }
+        if ($observed.Trim() -ne $StorageAccountType) {
+            throw "OS disk tier mismatch on $($machine.name): existing $($observed.Trim()), requested $StorageAccountType. Preserve the existing tier with -OsDiskStorageAccountType or compute.osDiskStorageAccountType. Disk conversion requires a separately approved stop/deallocate/restart window; deployment will not perform it."
+        }
+    }
+}
+
 function Invoke-DemoGuestCommand {
     [CmdletBinding()]
     param(

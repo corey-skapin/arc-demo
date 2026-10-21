@@ -22,6 +22,10 @@ param adminPassword string
 @description('VM SKU for Azure-native VMs.')
 param vmSize string
 
+@description('OS disk tier passed through to the shared VM module.')
+@allowed(['Standard_LRS', 'StandardSSD_LRS'])
+param osDiskStorageAccountType string = 'StandardSSD_LRS'
+
 @description('Auto-shutdown time HHmm (24h) in the given timezone.')
 param autoShutdownTime string
 
@@ -58,6 +62,7 @@ module vmMods 'vm.bicep' = [for vm in azureVms: {
       monitorTier: 'azure-native-ama'
     })
     vmSize: vmSize
+    osDiskStorageAccountType: osDiskStorageAccountType
     subnetId: subnetId
     adminUsername: adminUsername
     adminPassword: adminPassword

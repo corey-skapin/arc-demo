@@ -42,6 +42,11 @@
     Current VM admin password as a SecureString for existing labs without the
     saved Key Vault secret. Never pass a new password for routine reconciliation.
 
+.PARAMETER OsDiskStorageAccountType
+    StandardSSD_LRS for new OS disks; Standard_LRS is an explicit retained-lab
+    choice. Existing disk tiers must already match; deployment never performs
+    an incidental conversion. HDD OS disks retire on 8 September 2028.
+
 .PARAMETER OnboardingSecret
     Existing onboarding SP secret as a SecureString when new machines need
     onboarding. Existing credentials are never reset by routine deployment.
@@ -129,6 +134,7 @@ param(
     [ValidateRange(1, 20)][int]$WindowsVmCount = 5,
     [ValidateRange(0, 20)][int]$LinuxVmCount = 3,
     [string]$VmSize = 'Standard_B2as_v2',
+    [ValidateSet('Standard_LRS', 'StandardSSD_LRS')][string]$OsDiskStorageAccountType = 'StandardSSD_LRS',
     [string]$AutoShutdownTime = '1900',
     [string]$AutoShutdownTimezone = 'Cen. Australia Standard Time',
     [int]$BudgetAmount = 200,
@@ -156,6 +162,7 @@ if (-not $PSBoundParameters.ContainsKey('DeployContainerApps')) { $DeployContain
 if (-not $PSBoundParameters.ContainsKey('DeployAks')) { $DeployAks = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployAks' -Default $DeployAks) }
 if (-not $PSBoundParameters.ContainsKey('OnPremFleetPath')) { $OnPremFleetPath = Get-DemoSkinValue -Skin $skin -Path 'workloads.onPremFleetPath' -Default $OnPremFleetPath }
 if (-not $PSBoundParameters.ContainsKey('VmSize')) { $VmSize = Get-DemoSkinValue -Skin $skin -Path 'compute.vmSize' -Default $VmSize }
+if (-not $PSBoundParameters.ContainsKey('OsDiskStorageAccountType')) { $OsDiskStorageAccountType = Get-DemoSkinValue -Skin $skin -Path 'compute.osDiskStorageAccountType' -Default $OsDiskStorageAccountType }
 if (-not $PSBoundParameters.ContainsKey('AutoShutdownTime')) { $AutoShutdownTime = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTime' -Default $AutoShutdownTime }
 if (-not $PSBoundParameters.ContainsKey('AutoShutdownTimezone')) { $AutoShutdownTimezone = Get-DemoSkinValue -Skin $skin -Path 'operations.autoShutdownTimezone' -Default $AutoShutdownTimezone }
 if (-not $PSBoundParameters.ContainsKey('BudgetAmount')) { $BudgetAmount = [int](Get-DemoSkinValue -Skin $skin -Path 'cost.monthlyBudgetAmount' -Default $BudgetAmount) }
@@ -614,6 +621,13 @@ if ($null -eq $onPremFleet) {
     $onPremFleet = @($template.parameters.onPremFleet.defaultValue)
 }
 Test-DemoFleet -Fleet $onPremFleet
+$nativePrefix = $NamePrefix.Replace('-', '')
+$expectedNativeVmName = "az-$($nativePrefix.Substring(0, [Math]::Min(9, $nativePrefix.Length)))-01"
+$diskTierTargets = @($existingVms | Where-Object {
+    ($DeployArcOnPrem -and $_.name -in @($onPremFleet | Where-Object deploymentMode -eq 'azure-vm').name) -or
+    ($DeployAzureVMs -and $_.name -eq $expectedNativeVmName)
+})
+Assert-DemoOsDiskStorageAccountType -Machines $diskTierTargets -StorageAccountType $OsDiskStorageAccountType
 $additionalVmCount = 0
 if ($DeployArcOnPrem) {
     foreach ($entry in $onPremFleet | Where-Object deploymentMode -eq 'azure-vm') {
@@ -662,6 +676,7 @@ $templateParameters = @{
     adminUsername           = @{ value = 'azureuser' }
     adminPassword           = @{ value = $adminPwd }
     vmSize                  = @{ value = $VmSize }
+    osDiskStorageAccountType = @{ value = $OsDiskStorageAccountType }
     autoShutdownTime        = @{ value = $AutoShutdownTime }
     autoShutdownTimezone    = @{ value = $AutoShutdownTimezone }
     adminEmail              = @{ value = $AdminEmail }

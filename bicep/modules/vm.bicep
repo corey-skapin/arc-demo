@@ -13,6 +13,10 @@ param tags object
 @description('VM SKU')
 param vmSize string
 
+@description('OS disk tier. Use Standard SSD for new OS disks; HDD is an explicit retained-lab choice with migration required before 8 September 2028.')
+@allowed(['Standard_LRS', 'StandardSSD_LRS'])
+param osDiskStorageAccountType string = 'StandardSSD_LRS'
+
 @description('Subnet ID to attach the NIC to')
 param subnetId string
 
@@ -88,7 +92,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
         // it as ${vmName}-osdisk works on a fresh deploy but blocks any delta
         // update because Azure refuses to rename the OS disk of an existing VM.
         createOption: 'FromImage'
-        managedDisk: { storageAccountType: 'StandardSSD_LRS' }
+        managedDisk: { storageAccountType: osDiskStorageAccountType }
       }
     }
     networkProfile: {
