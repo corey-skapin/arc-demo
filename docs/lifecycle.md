@@ -62,10 +62,26 @@ targets are distinct sets. Heartbeat compares `_ResourceId`, not computer counts
 Activation restores NAT before starting VMs, starts stopped AKS, and reactivates
 the latest Container App revision only if none is active. It restarts guest
 agents only for newly started/disconnected machines. Already-running/connected
-machines are not restarted. Patch assessments are submitted after reconnect;
-submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
+machines are not restarted, but **every activation verifies guest health**, including
+on a retry after partial failure. Windows Arc checks the `himds` service and,
+for monitored hosts, the `MonAgentCore` process with a bounded startup wait.
+It does not assume the Windows client/MSI `AzureMonitorAgent` service exists or
+restart the extension host. Linux checks each required service individually.
+See [Windows Arc AMA troubleshooting](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc).
+
+Unless skipped explicitly, **each activation submits assessments for all retained
+Arc hosts**, even when they were already running/connected. This completes the
+normal assessment phase on a retry; native Azure VMs are not Arc assessment
+targets. Submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
 `-SkipValidate` opts out of final readiness and must never be reported as a
 validated demo. Activation never changes workload fault flags.
+
+Use `-ResultPath <PRIVATE_EXISTING_DIRECTORY>\activation-attempt.json` to retain
+schema-versioned per-host guest checks, restarted service names, assessment
+submission states, final readiness and failure information outside git. Use a new
+file per attempt. This report does not include arbitrary guest output or scripts.
+Completion must come from stdout with no failed/Error-level result; a marker in
+stderr alone is not success. `-WhatIf` neither invokes guests nor writes this report.
 
 Fresh deployment creates NAT/PIP before backing compute/extension provisioning;
 it does not rely on implicit default outbound. Redeployment preserves an existing
@@ -221,10 +237,15 @@ pre-fault snapshot, not an ongoing health guarantee. Windows Heartbeats arrived
 after Arc reconnected without an agent repair; keep pending status until fresh
 expected-ID telemetry is actually visible.
 
-Those approved targeted VM starts did not execute the full
-`Activate-ArcDemo.ps1` agent-restart/patch-assessment path. A fresh deployment,
-double-deploy idempotency, AKS park/start, a complete hibernate/activate cycle and
-delete/recreate remain separate validation exercises. An approved operational
-hibernation only proves the parked state actually observed; it does not prove
-future activation or fresh deployment. Run full/destructive smoke cycles only
-in an explicitly approved disposable lab, never incidentally against an in-use demo.
+Targeted VM starts and a passing readiness snapshot do not prove the full
+`Activate-ArcDemo.ps1` guest-check/assessment path succeeded. An approved activation
+attempt reached Monitor Ready after its Windows guest step failed; the failure
+was an incorrect Windows AMA service assumption, not a missing completion-marker
+transport fix. Keep the script outcome and runtime snapshot separate, and retain
+the corrected attempt's per-host results rather than skipping guest validation.
+
+A fresh deployment, double-deploy idempotency, AKS park/start and delete/recreate
+remain separate validation exercises. Operational hibernation only proves the
+parked state actually observed, not future activation or fresh deployment.
+Run full/destructive smoke cycles only in an explicitly approved disposable lab,
+never incidentally against an in-use demo.

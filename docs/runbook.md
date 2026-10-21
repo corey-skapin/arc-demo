@@ -109,7 +109,12 @@ actions. Do not claim Arc SQL validation; see [SQL stance](sql-arc-spike.md).
 Hibernation verifies exact VM deallocation, stops optional AKS, deactivates
 Container App revisions, then removes NAT/PIP. Data and fault flags remain.
 Activation restores outbound NAT first, starts retained workloads and reconnects
-agents where needed. It does not reset faults. Optional AKS can take longer and
+agents where needed. Every run verifies guests, including already-connected hosts,
+without unnecessary restarts; Windows Arc AMA uses a `MonAgentCore` process check.
+Default assessment submissions also run on retries. Use optional `-ResultPath`
+in an existing private directory to preserve per-host outcomes, and distinguish
+script completion from Monitor Ready and asynchronous assessment completion.
+It does not reset faults. Optional AKS can take longer and
 requires a 15-30 minute stop/start separation; capacity is not guaranteed.
 Nightly VM auto-shutdown is not whole-lab hibernation.
 

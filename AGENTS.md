@@ -55,6 +55,14 @@ Classify OS using actual VM metadata, distinguish native/Arc/Monitor/patch
 targets, and compare IDs, never counts or `win-*` naming. Missing/ambiguous
 resources and mandatory wait/job/CLI failures must stop with actionable errors.
 
+Activation must verify guests on retries, not skip a previously failed phase
+because the VMs/Arc records now look running/connected. Windows Arc AMA is checked
+through `MonAgentCore`, not an assumed `AzureMonitorAgent` SCM service. Restart
+only real required services where needed; do not restart the extension host.
+Default patch submissions run for retained Arc targets on every activation;
+submission is not completion. Preserve optional `-ResultPath` evidence outside
+git, and do not equate Monitor Ready with successful full-script completion.
+
 ## Mandatory pre-flight checks
 
 Before running **any** deployment command, the agent MUST:

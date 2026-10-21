@@ -106,10 +106,15 @@ Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor 
 This is distinct from cleanup deletion: it preserves resource groups, Arc records,
 workbooks, DCRs, alerts, disks, and Log Analytics so the demo can be reactivated.
 Use `Remove-ArcDemo.ps1` only when you want to delete the estate permanently.
-Activation also starts on-demand Azure Update Manager patch assessments after
-the Arc machines reconnect. The assessment job runs asynchronously, so open the
+Every activation checks guest health, including already-running hosts on a
+retry, without restarting already-correct services. Windows Arc AMA is checked
+through its `MonAgentCore` process, not an assumed Windows service.
+Activation also submits on-demand Azure Update Manager patch assessments for
+all retained Arc hosts unless explicitly skipped. The job runs asynchronously, so open the
 Update Manager blade later in the walkthrough or allow several minutes for the
-portal data to refresh.
+portal data to refresh. Optional `-ResultPath` saves per-host outcomes in an
+existing private directory outside git. Monitor Ready alone does not prove the
+entire activation script completed.
 
 Retain the confirmed runtime target, skin/fleet files and subscription deployment
 history outside public source. Hibernation preserves identities, credentials and

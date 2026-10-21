@@ -169,6 +169,29 @@ Describe 'Checked guest execution and jobs' {
             Mock Receive-DemoJobs { '{"value":[{"code":"ProvisioningState/failed","message":"ARC_DEMO_OK"}]}' }
             { Invoke-DemoGuestCommand -Machine $script:machine -Script 'partial' } | Should -Throw
         }
+        It 'accepts the observed stdout/stderr result without exposing guest output' {
+            Mock Receive-DemoJobs {
+                '{"value":[{"code":"ComponentStatus/StdOut/succeeded","level":"Info","message":"ARC_DIAGNOSTIC_SERVICES=[{\"Name\":\"himds\",\"State\":\"Running\",\"StartMode\":\"Auto\"}]\nARC_DEMO_OK"},{"code":"ComponentStatus/StdErr/succeeded","level":"Info","message":""}]}'
+            }
+            $result = Invoke-DemoGuestCommand -Machine $script:machine -Script 'valid' -PassThru
+            $result.status | Should -Be 'pass'
+            $result.statusCodes | Should -Contain 'ComponentStatus/StdOut/succeeded'
+            $result.stderrPresent | Should -BeFalse
+            $result | ConvertTo-Json | Should -Not -Match 'ARC_DIAGNOSTIC_SERVICES'
+        }
+        It 'rejects <Reason>' -TestCases @(
+            @{ Reason = 'a marker only in stderr'; Json = '{"value":[{"code":"ComponentStatus/StdOut/succeeded","message":""},{"code":"ComponentStatus/StdErr/succeeded","message":"ARC_DEMO_OK"}]}' }
+            @{ Reason = 'failed stderr despite a stdout marker'; Json = '{"value":[{"code":"ComponentStatus/StdOut/succeeded","message":"ARC_DEMO_OK"},{"code":"ComponentStatus/StdErr/failed","message":"private-fixture-output"}]}' }
+            @{ Reason = 'an Error-level entry despite successful status codes'; Json = '{"value":[{"code":"ComponentStatus/StdOut/succeeded","message":"ARC_DEMO_OK"},{"code":"ComponentStatus/StdErr/succeeded","level":"Error","message":"private-fixture-output"}]}' }
+            @{ Reason = 'an unknown result code with a marker'; Json = '{"value":[{"code":"Unknown","message":"ARC_DEMO_OK"}]}' }
+            @{ Reason = 'an empty result'; Json = '{"value":[]}' }
+        ) {
+            param($Reason, $Json)
+            $global:ArcGuestTransportFixture.responseJson = $Json
+            Mock Receive-DemoJobs { $global:ArcGuestTransportFixture.responseJson }
+            $errorRecord = { Invoke-DemoGuestCommand -Machine $script:machine -Script 'partial' } | Should -Throw -PassThru
+            $errorRecord.Exception.Message | Should -Not -Match 'private-fixture-output'
+        }
         It 'surfaces failed background job state and cleans it up' {
             $job = Start-Job { throw 'extension failure' }
             { Receive-DemoJobs -Jobs @($job) -TimeoutSeconds 10 } | Should -Throw
@@ -239,11 +262,31 @@ Describe 'WhatIf lifecycle safety' {
 }
 
     Describe 'Idempotent lifecycle state transitions' {
+        BeforeAll {
+            # These guest-only Windows cmdlets also need mockable names in Linux CI.
+            function Get-Service {
+                param([string[]]$Name)
+                throw "Unmocked guest service check: $Name"
+            }
+            function Restart-Service {
+                param([string[]]$Name, [switch]$Force)
+                throw "Unmocked guest service restart: $Name"
+            }
+        }
         BeforeEach {
             Mock Import-Module {}
             Mock Initialize-DemoContext {}
             Mock Assert-DemoSkinInventory {}
-            Mock Invoke-DemoGuestCommand { throw 'Already-correct guests must not be restarted' }
+            Mock Invoke-DemoGuestCommand {
+                param($Machine, $Script)
+                $global:ArcLifecycleFixture.guestScript = $Script
+                if ($global:ArcLifecycleFixture.executeGuestScript) { & ([scriptblock]::Create($Script)) | Out-Null }
+                [pscustomobject]@{ machineName = $Machine.Name; status = 'pass'; completionMarker = 'ARC_DEMO_OK' }
+            }
+            Mock Restart-Service { throw 'Already-correct guests must not be restarted' }
+            Mock Get-Service { [pscustomobject]@{ Name = 'himds'; Status = 'Running' } } -ParameterFilter { $Name -eq 'himds' }
+            Mock Get-Service { throw 'AzureMonitorAgent is not a Windows Arc AMA service' } -ParameterFilter { $Name -eq 'AzureMonitorAgent' }
+            Mock Get-Process { [pscustomobject]@{ ProcessName = 'MonAgentCore' } }
             $script:root = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-retail-demo-infra/providers'
             $script:machine = [pscustomobject]@{
                 Name = 'az-retail-01'; Id = "$script:root/Microsoft.Compute/virtualMachines/az-retail-01"
@@ -270,7 +313,11 @@ Describe 'WhatIf lifecycle safety' {
                 switch ($command) {
                     'network vnet' { return (@{ id = "$($f.root)/Microsoft.Network/virtualNetworks/vnet-retail-demo/subnets/snet-vms"; natGateway = @{ id = $f.nat } } | ConvertTo-Json -Depth 5) }
                     'vm list' { return (ConvertTo-Json -InputObject @($f.machine.Actual) -Depth 5) }
-                    'connectedmachine list' { return '[]' }
+                    'connectedmachine list' {
+                        if ($f.machine.Native) { return '[]' }
+                        return (ConvertTo-Json -InputObject @(@{ id = $f.machine.ArcId; status = 'Connected' }))
+                    }
+                    'connectedmachine assess-patches' { return }
                     'aks show' { return (@{ name = 'retail-demo-aks'; powerState = @{ code = $f.clusterState }; provisioningState = 'Succeeded' } | ConvertTo-Json -Depth 5) }
                     'resource list' { return (ConvertTo-Json -InputObject $f.resources -Depth 5) }
                     default { throw "Unexpected mutation or inspection: $command" }
@@ -280,9 +327,87 @@ Describe 'WhatIf lifecycle safety' {
         }
         It 'does not restart or update an already-running native Windows VM and AKS' {
             & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
-            Should -Invoke Invoke-DemoGuestCommand -Times 0
+            Should -Invoke Invoke-DemoGuestCommand -Times 1 -ParameterFilter { $Script -match 'MonAgentCore' -and $Script -notmatch 'Restart-Service|AzureMonitorAgent' }
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'start' -in $Arguments -or 'create' -in $Arguments -or 'update' -in $Arguments }
             Should -Invoke Invoke-DemoAz -Times 1 -ParameterFilter { $Arguments[0] -eq 'aks' -and '-g' -in $Arguments -and '-n' -in $Arguments -and '--ids' -notin $Arguments }
+        }
+        It 'validates a connected Windows Arc host with no AMA service and submits assessments on retry' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            $f.executeGuestScript = $true
+            $path = Join-Path $TestDrive 'activation-retry.json'
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -ResultPath $path
+            Should -Invoke Get-Service -Times 1 -ParameterFilter { $Name -eq 'himds' }
+            Should -Invoke Get-Service -Times 0 -ParameterFilter { $Name -eq 'AzureMonitorAgent' }
+            Should -Invoke Restart-Service -Times 0
+            Should -Invoke Invoke-DemoAz -Times 1 -ParameterFilter { $Arguments[1] -eq 'assess-patches' -and '/arc/machines/windows-fixture' -in $Arguments -and '--no-wait' -in $Arguments }
+            $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            $report.status | Should -Be 'pass'
+            $report.guestChecks.Count | Should -Be 1
+            $report.guestChecks[0].restartedServices.Count | Should -Be 0
+            $report.guestChecks[0].status | Should -Be 'pass'
+            $report.patchAssessments[0].status | Should -Be 'submitted'
+            $report.readiness | Should -Be 'skipped'
+        }
+        It 'reports an unhealthy Arc service and does not submit assessments after guest failure' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            $f.executeGuestScript = $true
+            Mock Get-Service { [pscustomobject]@{ Name = 'himds'; Status = 'Stopped' } } -ParameterFilter { $Name -eq 'himds' }
+            $path = Join-Path $TestDrive 'activation-failure.json'
+            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -ResultPath $path } | Should -Throw '*Required Arc service is not running*'
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+            $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            $report.status | Should -Be 'fail'
+            $report.guestChecks[0].status | Should -Be 'fail'
+        }
+        It 'restarts only himds after starting a parked Windows Arc host' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            $f.machine.Actual.powerState = 'VM deallocated'
+            $f.executeGuestScript = $true
+            Mock Invoke-DemoAz { $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM running' } -ParameterFilter { $Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'start' }
+            Mock Restart-Service {}
+            $path = Join-Path $TestDrive 'activation-started.json'
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment -ResultPath $path
+            Should -Invoke Restart-Service -Times 1 -ParameterFilter { $Name -eq 'himds' -and $Force }
+            Should -Invoke Get-Service -Times 0 -ParameterFilter { $Name -eq 'AzureMonitorAgent' }
+            $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            $report.guestChecks[0].restartedServices | Should -Be @('himds')
+            $report.patchAssessments.Count | Should -Be 0
+        }
+        It 'fails a missing AMA process after a bounded startup wait without a service restart' {
+            $global:ArcLifecycleFixture.executeGuestScript = $true
+            Mock Get-Process { @() }
+            Mock Start-Sleep { throw 'bounded AMA wait observed' }
+            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment } | Should -Throw '*bounded AMA wait observed*'
+            $global:ArcLifecycleFixture.guestScript | Should -Match 'AddMinutes\(3\)'
+            $global:ArcLifecycleFixture.guestScript | Should -Match 'did not start within 180 seconds'
+            Should -Invoke Restart-Service -Times 0
+        }
+        It 'checks each Linux service individually without restarting an already-connected host' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine.OsType = 'Linux'
+            $f.machine | Add-Member ArcId '/arc/machines/linux-fixture'
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            $f.guestScript | Should -Match 'for service in himdsd azuremonitoragent; do sudo systemctl is-active --quiet "\$service"; done'
+            $f.guestScript | Should -Not -Match 'systemctl restart'
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+        }
+        It 'records assessment submission failures instead of reporting completed activation' {
+            $global:ArcLifecycleFixture.machine.Native = $false
+            $global:ArcLifecycleFixture.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            Mock Invoke-DemoAz { throw 'injected assessment failure' } -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+            $path = Join-Path $TestDrive 'activation-assessment-failed.json'
+            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -ResultPath $path } | Should -Throw '*injected assessment failure*'
+            $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            $report.status | Should -Be 'fail'
+            $report.guestChecks[0].status | Should -Be 'pass'
+            $report.patchAssessments[0].status | Should -Be 'fail'
         }
         It 'does not repeat completed deallocation or delete absent NAT on a hibernation rerun' {
             $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM deallocated'
