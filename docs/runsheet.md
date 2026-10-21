@@ -310,15 +310,21 @@ see [the SQL support decision](sql-arc-spike.md).
 
 ## Optional SRE handoff
 
-At the end of step 3 (or after the Arc tour), keep the selected alert/rule open.
+After completing the Arc tour, keep the selected alert/rule bookmarked.
 State its resource, signal, severity and timestamp. If there is no historical
 alert, say that explicitly: the next segment may only use its own preexisting
 incident evidence, not imply a newly detected outage.
 
 Open the companion repository supplied by the operator and continue its
-`docs\delivery-runsheet.md` **after the Arc/Monitor segment**, using its private
-agent URL and approved existing incident. The companion `docs\README.md` chooses
-the SRE presenter path and optional scenarios. Do not guess an **Investigate**
+`docs\delivery-runsheet.md#4-present-the-combined-demo` at the **11:00 governance**
+row, optionally showing its short existing **T11 Event** query first. Do not repeat
+the full Arc timeline. Use its private agent URL and approved existing incident;
+the companion `docs\README.md` chooses the SRE presenter path and optional scenarios.
+Prepare the existing healthy app, exact private targets, read-only SRE Inspect
+result and bookmarked existing investigation, if present. Ordinary navigation
+practice needs no fault, guest Status command, notification or agent chat.
+SRE Agent Administrator access is only needed for a separately authorized live
+approval, not this read-only handoff. Do not guess an **Investigate**
 button, send a new agent prompt, approve a repair or induce a fault as part of
 this read-only handoff. Review mode and a configured handler are not proof an
 automated repair executed; the SRE guide owns that evidence/approval distinction.
