@@ -2,6 +2,9 @@
 
 This optional beat gives the Arc demo a DBA-relevant signal without claiming
 **SQL Server enabled by Azure Arc**.
+It is an optional operator procedure, not required presenter reading; start at
+[the docs index](README.md) and [runsheet.md](runsheet.md).
+Use the retained private skin and actual host name for approved operations.
 
 ## What it is
 
@@ -36,7 +39,7 @@ cd C:\src\arc-demo
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -MachineName win-sql-01 `
   -Action Deploy
 ```
@@ -47,7 +50,7 @@ Check status:
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -MachineName win-sql-01 `
   -Action Status
 ```
@@ -60,7 +63,7 @@ Connection timeout:
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -MachineName win-sql-01 `
   -Action InduceFault `
   -FaultMode ConnectionTimeout
@@ -72,7 +75,7 @@ Blocking/degradation:
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -MachineName win-sql-01 `
   -Action InduceFault `
   -FaultMode Blocking
@@ -84,7 +87,7 @@ Reset:
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -MachineName win-sql-01 `
   -Action ResetFault
 ```
@@ -125,7 +128,7 @@ simulator configuration/task and its fault mode; it is not simulator removal.
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `
   -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -MachineName win-sql-01 `
   -Action Remove
 ```

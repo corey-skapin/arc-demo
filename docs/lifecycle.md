@@ -1,5 +1,8 @@
 # Demo lifecycle and readiness contract
 
+**Operator/integrator reference.** For presenting without changing the lab, use
+[the docs index](README.md) and [the presenter guide](runsheet.md).
+
 This is a deliberately un-hardened, single-region demo, not a production
 reference. The maintained entry points are the PowerShell scripts. Always pass
 the **confirmed** subscription and tenant at runtime; neither belongs in a skin.
@@ -8,7 +11,7 @@ Use the same skin/prefix throughout. CLI defaults are not changed by the scripts
 ## Supported operations
 
 ```powershell
-$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '.\config\demo-skin.json' }
+$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVATE_SKIN_PATH>' }
 .\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 .\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json

@@ -1,5 +1,10 @@
 # AKS crash-loop scenario
 
+**Optional scenario/operator procedure, not a presenter prerequisite.**
+Use [the docs index](README.md) to choose the default read-only tour.
+Use the retained private skin and actual names; this document is not approval
+to deploy, execute cluster commands or send alert notifications.
+
 Optional workload behind `-DeployAks $true`. It creates a one-node AKS cluster
 `<prefix>-aks` in the chosen region (default `australiaeast`), enables Container Insights against the shared
 Log Analytics workspace, applies a tiny Kubernetes deployment in namespace
@@ -16,7 +21,7 @@ Break/reset require a separately approved bounded window and fallback plan.
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <subscription-id> `
   -TenantId <tenant-id> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -DeployAks $true
 ```
 

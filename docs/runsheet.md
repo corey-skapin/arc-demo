@@ -1,386 +1,388 @@
-# Arc Demo — Act-1 Arc/Monitor runsheet
+# Arc/Monitor presenter guide
 
-> Story-first walkthrough for a standalone Azure Arc + Azure Monitor demo. No Azure SRE Agent dependency. The later `sre-agent` repo is optional and can consume the alerts produced here.
->
-> Plan **20-30 min** for the Arc/Monitor narrative with discussion and selected optional beats; a compressed core tour is 12-15 min. SQL Server/Arc SQL/BPA remains experimental and skipped by default.
+The canonical first-time-presenter walkthrough for this repository. Start with
+[the documentation index](README.md) if you are unsure what to read.
+**Read-only by default:** no deployment, activation, guest commands, fault
+injection, alert tests, email sends, patch scans or remediation during this tour.
 
-## 0. Lab shape and workload toggles
+Plan **20-30 minutes** including discussion and selected posture beats. The
+core workbook -> telemetry -> alert -> Arc identity story takes 12-15 minutes.
+The lab operator prepares the estate separately using [runbook.md](runbook.md)
+and [lifecycle.md](lifecycle.md); these are not additional presenter scripts.
 
-Use a clean/new subscription in the **same tenant** you plan to use for any later optional SRE Agent lab. Keep tenant/subscription IDs as runtime inputs; do not hard-code private subscription details.
+## Before you start
 
-Default resource naming uses `-NamePrefix arc-demo`:
+### Understand what you are showing
 
-- Arc/observability RG: `rg-arc-demo`
-- Backing lab/optional workload RG: `rg-arc-demo-infra`
-- Workbook: **Arc Demo — Estate Overview**
+"We have servers outside Azure and want one operational view of inventory,
+performance, change, patch/security posture and alerts. Arc supplies the resource
+identity; Azure Monitor supplies the evidence and alerting. Investigation can
+then continue into an optional SRE Agent."
 
-These defaults come from `config\demo-skin.json`. To retarget for another customer, update the skin file and run scripts with `-SkinPath`; see [`reskin-guide.md`](reskin-guide.md).
+This is an Azure-hosted **simulation** of on-premises servers, using
+`MSFT_ARC_TEST=true`. Default fleet: five Windows Server 2016/2019/2022 hosts and
+three Ubuntu 22.04 hosts. Backing Azure VMs are in a separate infrastructure
+group; Arc identities and monitoring are in the presentation group. Explain
+the simulation honestly rather than hiding it if asked.
 
-| Goal | Deploy switches |
+No SQL Server engine, Arc SQL/BPA, native comparison VM, AKS or SRE is required.
+A SQL-capable hostname is not a database. A mixed-legacy fixture may include
+represented-not-running entries; never count them as connected live machines.
+See [support boundaries](lifecycle.md#linux-monitoring-and-support-stance).
+
+### Obtain a private input card from the operator
+
+Fill this in outside git before rehearsal. Examples below use synthetic/default
+names: substitute the actual retained skin/prefix, not a new public example skin.
+
+| Input | Default/example / what to obtain |
 |---|---|
-| Core Act-1 Arc/Monitor estate | *(defaults: `-DeployArcOnPrem $true`; all optional workloads false)* |
-| Arc estate + Azure-native VM comparison | `-DeployAzureVMs $true` |
-| Arc estate + Container App fault alert | `-DeployContainerApps $true` |
-| Arc estate + AKS crash-loop alert | `-DeployAks $true` |
-| All implemented optional workloads (validate the chosen lab separately) | `-DeployAzureVMs $true -DeployContainerApps $true -DeployAks $true` |
-| Azure-native scenarios only | `-DeployArcOnPrem $false -DeployAzureVMs $true -DeployContainerApps $true` |
-| Optional SQL workload beat | Future option: SQL Server on an Azure VM can simulate workload signals, but do not claim SQL Server enabled by Azure Arc in this Azure-only lab; see [`sql-arc-spike.md`](sql-arc-spike.md). |
+| Tenant, subscription, private skin/fleet | Confirmed runtime IDs, exact private paths and any retained overrides; never infer these from CLI defaults. |
+| Presentation / infrastructure groups | `rg-arc-demo` / `rg-arc-demo-infra`. |
+| Log Analytics workspace | `law-arc-demo` in the presentation group, not a subscription governance workspace. |
+| Saved workbook | Skin `labels.workbookDisplayName`, normally `Arc Demo - Estate Overview` (dash typography can differ). Search `Estate Overview`; do not pick a gallery template. |
+| Arc Windows / Linux example | `win-app-01` / `lnx-app-01`, or actual operator-selected monitored hosts. |
+| Heartbeat rule / action group | `alert-arc-demo-host-missing-heartbeat` / `ag-arc-demo`. Keep the actual notification recipient private. |
+| Optional policy assignments | `mcsb-arc-demo` / `nist-arc-demo`; display names normally **Microsoft cloud security benchmark (Arc Demo)** / **NIST SP 800-53 Rev. 5 (Arc Demo)**. Confirm the actual retained assignments. |
+| Optional app / restart rule | Only if retained: `ca-arc-demo-fault` / `alert-arc-demo-containerapp-restarts` in the infrastructure group. |
+| Evidence and access | Latest dated Ready JSON, successful activation result if waking was needed, known gaps; approved historical alert/incident and timestamps, if any. |
+| Optional SRE handoff | Companion repository location, its canonical `docs\delivery-runsheet.md`, actual agent URL and approved existing incident. |
 
-Example deploy:
+The presenter needs already-granted read access to the chosen resources,
+workbooks, logs and alert history. A workbook can open while its underlying data
+queries are denied: verify both. Monitoring Reader and Log Analytics Reader are
+relevant built-in roles; security views need the appropriate existing security
+read access too. Deployment Owner/UAA rights are **not** a prerequisite for
+presenting. Ask the operator to resolve access before the meeting; do not grant
+roles, consent, change accounts or troubleshoot authentication live.
 
-```powershell
-az login --tenant <TENANT_ID>
-az account set --subscription <SUBSCRIPTION_ID>
+## Prepare and practise once
 
-.\scripts\Test-Prerequisites.ps1 `
-  -SubscriptionId <SUBSCRIPTION_ID> `
-  -TenantId <TENANT_ID>
+Allow at least a 30-45 minute preparation window after an operator-approved wake,
+and longer if assessment/policy/inventory data is missing. Time alone does not
+make the lab ready. A parked lab needs the operator's separately approved
+lifecycle procedure, not a presenter improvising VM starts.
 
-.\scripts\Deploy-ArcDemo.ps1 `
-  -SubscriptionId <SUBSCRIPTION_ID> `
-  -TenantId <TENANT_ID> `
-  -SkinPath .\config\demo-skin.json `
-  -DeployAzureVMs $true `
-  -DeployContainerApps $true
-```
-
-For custom legacy mixes, pass `-OnPremFleetPath <fleet.json>` using the schema in [`legacy-os-fleet.md`](legacy-os-fleet.md). The file must be a JSON array of fleet objects; use the `onPremFleet` entries in `bicep/params/mixed-legacy-fleet.bicepparam` as the validation reference for WS2012R2, WS2016, WS2019, WS2022, and represented WS2008R2.
-
-## 1. OS-tier talk track
-
-| Tier | What to show | What not to promise |
-|---|---|---|
-| **WS2016/WS2019/WS2022** | Full Azure Monitor path: AMA, core DCR, Heartbeat, performance/events, VM Insights map, Change Tracking, Defender, Update Manager/Machine Configuration surfaces, alerts/workbooks. | Monitor readiness does not prove endpoint health, policy results or completed assessment. |
-| **Ubuntu 22.04** | AMA + core DCR + Change Tracking/syslog inventory in the shared workspace. | VM Insights dependency map is intentionally off until Dependency Agent support is validated for the chosen distro/kernel. |
-| **WS2008/WS2012-era** | Arc-control-plane-only value: Azure Resource Graph inventory, tags (`osTier`, `monitorTier`, `esuEligible`), ESU conversation, Update Manager assessment where supported, Defender, Machine Configuration/TLS 1.2 policy posture, RBAC/audit. | Do **not** claim AMA, VM Insights, or Change Tracking. AMA is intentionally gated off for pre-2016 Windows. |
-| **Represent-not-run legacy** | Use as a narrative placeholder when the Marketplace image is unavailable. | Do not claim a live deployed server exists. |
-
-## 2. Before the meeting (T-30 min)
-
-1. Select the lab subscription:
+1. Open <https://portal.azure.com> in the already-authorized browser profile.
+   Confirm the operator's tenant and subscription. Use portal resource/search
+   filters to stay within that subscription and the two demo groups.
+2. Have the operator supply fresh Ready evidence, or run this **read-only**
+   command locally with the actual private inputs and existing Azure sign-in:
 
    ```powershell
-   az account set --subscription <SUBSCRIPTION_ID>
+   .\scripts\Test-ArcDemoReadiness.ps1 `
+     -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> `
+     -SkinPath <PRIVATE_SKIN_PATH> `
+     -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600
+   $LASTEXITCODE
    ```
 
-2. If the environment is hibernated, activate it:
+   Exit 0 means required Monitor/infrastructure checks pass; 1 means failure,
+   2 means still pending. Keep the timestamp and expected-ID results privately.
+   A prior 79/79 snapshot is not today's guarantee; check count varies with
+   retained workloads. This does not certify patch completion, policy scores,
+   every workbook query, guest applications or active endpoint protection.
+   Do not rerun activation just to refresh this evidence.
+3. Open/bookmark the workbook, workspace Logs, chosen Arc machine, Monitor
+   Alerts/Alert rules/Action groups and any selected posture pages using the
+   steps below. Confirm data access and resource identity before bookmarking.
+4. Run each chosen query once. Record one actual host, one CPU row, one CT or
+   syslog row, and an existing alert timestamp if available. If there is no
+   alert history, rehearse the **rule-only** fallback; do not create an incident.
+5. Practise the flow below once with a timer. Say each quoted line, point to
+   the specified visible result, then move on. Budget at most 60 seconds for
+   a missing optional tile before using its fallback. If workbook/log access
+   or required readiness is broken, stop and ask the operator to investigate;
+   do not label an evidence-only or partial tour fully live.
+6. Record which optional posture/scenario beats you will omit. For a combined
+   demo, rehearse the handoff with the SRE presenter rather than repeating Arc.
+   Store private screenshots/evidence securely; use only sanitized, explicitly
+   dated historical evidence as a fallback, never as a live screen.
 
-   ```powershell
-   .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> -SkinPath .\config\demo-skin.json
-   .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID> -SkinPath .\config\demo-skin.json -OutputFormat Json
-   ```
+Activation normally checks all retained guests and submits asynchronous patch
+assessments **on each run unless explicitly skipped**, including retries against
+running hosts. Submission is not assessment completion. Linux rows can lag;
+Windows assessment rows were the more reliable observed proof point. CT cycles
+and policy evaluation may take longer still. Do not reinstall agents, trigger
+scans or change security policy to improve a presentation.
 
-   After a start/reconnect, activation submits on-demand Update Manager patch
-   assessments before final readiness. An already-running/connected rerun does
-   not submit another assessment. Activation preserves fault flags; submission
-   is not scan completion. Allow several minutes before the Update Manager beat.
-3. Open tabs:
-   - **Arc Demo — Estate Overview** workbook.
-   - **Azure Arc** > **Machines**, filtered to resource group `rg-arc-demo`.
-     Fallback: open resource group `rg-arc-demo` and filter resource type to
-     `Microsoft.HybridCompute/machines`.
-   - **Resource Graph Explorer** for tag and inventory queries.
-   - **Machine configuration** or **Azure Policy → Compliance**, filtered to the demo Arc machines if the tenant exposes those blades.
-   - Open **Azure Update Manager**, then **Machines**, filtered to the demo RG.
-   - Open **Defender for Cloud**, then **Recommendations** and **Regulatory compliance**.
-   - Portal search: **SQL Server instances - Azure Arc** only if the optional advanced SQL path was enabled with `-InstallSql`.
-   - Resource group `rg-arc-demo`, then **Alerts** and **Action group**.
-   - If deployed: Container App, AKS cluster, and Azure-native VM in `rg-arc-demo-infra`.
-4. Sanity-check Monitor-supported hosts are reporting:
+## Present the Arc/Monitor demo
 
-   ```kql
-   Heartbeat
-   | where TimeGenerated > ago(10m)
-   | summarize LastHeartbeat=max(TimeGenerated) by ResourceId=tolower(_ResourceId), Computer, OSType
-   | order by Computer asc
-   ```
+### 1. Lead with the estate workbook (3 minutes)
 
-   In workbook and Logs pickers, use **`law-arc-demo` in `rg-arc-demo`**. Do not
-   use the `McapsGovernance` / `mcaps...-la` workspace; that is a subscription
-   governance workspace and is not part of this demo.
+**Go:** Portal search -> **Monitor** -> **Workbooks**. In the gallery, select
+the **Workbooks** tab and search for the saved title on your input card.
+If necessary use **Browse across galleries**. Select the saved workbook for
+the intended subscription/group. An operator-provided workbook link from the
+deployment is another starting point. Do not select **New**, a public template
+or **Edit**. [Microsoft's current workbook navigation][workbooks].
 
-   Treat this Logs view as a presenter aid, not the readiness gate: the script
-   verifies every expected full Arc/native resource ID. After startup, Arc can
-   reconnect before fresh Heartbeats become queryable. Keep pending status and
-   allow bounded convergence; do not reinstall/restart agents just for that delay.
+**Show:** In the custom Estate Overview workbook, point to these source-defined
+tiles in order: **Estate connectivity (last 15m)**,
+**Hosts beating over time (24h)**, **Per-host CPU utilisation (24h)**,
+**Configuration changes (24h)**, **Top 25 applications across the estate**.
+Scroll to a populated tile rather than promising every tile contains data.
+Later tiles include tagging hygiene, Windows errors and Linux syslog activity.
 
-## 3. Live flow
+**Expect:** Recent Windows/Linux connectivity and historical telemetry for the
+operator's expected fleet. Deallocation gaps in the 24-hour chart are normal
+after hibernation; they are not continuous customer uptime. These summary tiles
+group by computer name and can omit wholly silent hosts; exact-ID readiness is
+the separate gate, not an eight-host bar chart.
 
-Presenter gate: [readiness](lifecycle.md) must pass or the missing surface must be
-explicitly disclosed. A healthy infrastructure snapshot does not prove policy
-scores, CT inventory cycles or patch assessments are complete. Optional AKS needs
-a longer prep window; never hibernate/restart it mid-demo. The approved Linux CT
-repair has separate guest and telemetry evidence, not a claim of full lab
-teardown/recreate validation. Keep fault induction/reset as explicit, approved
-scenario actions.
+**Say:** "Start with what the platform team needs: which servers are reporting,
+how they are performing, and what changed. This is evidence from the estate,
+not a server-by-server login exercise."
 
-### 3.1 Frame: the problem (1 min)
+**Fallback:** Verify the selected workbook/workspace and read access. If a tile
+is empty, use the corresponding workspace query in step 2. If the whole workbook
+is unavailable, show only the working logs and disclose the missing dashboard.
+Do not claim this custom workbook has policy/compliance tiles: it does not.
 
-"This is for customers who already have a hybrid estate and need one operations plane: inventory, config, patch/security posture, logs, alerts, and a path to modern AI-assisted ops later. Today is Act 1: Arc + Monitor. It stands alone."
+### 2. Diagnose with scoped logs (4 minutes)
 
-Presenter rule from Nic's runthrough: do not open the Arc server resource list
-first. Lead with the workbook and operational outcomes, then let the customer ask
-how the estate got there.
+**Go:** Portal search -> **Log Analytics workspaces** -> the input-card
+workspace -> **Logs**. Check the workspace name/scope before running anything.
+If the editor opens in **Simple mode**, choose **KQL mode** from the top-right
+mode dropdown. Use a new query tab, paste **one** query, select **Run**, and
+read its **Results**. Use a matching time range (24 hours for these examples;
+7 days for the CT query). [Mode switch][logs-mode], [query interface][logs].
 
-### 3.2 Estate overview workbook (2 min)
+Replace `rg-arc-demo` in all queries if using a different presentation group.
+These queries are read-only presenter aids, not replacements for the exact-ID
+readiness checks. Query errors and empty results are different conditions.
 
-Open **Arc Demo — Estate Overview**.
-
-- Show connected hosts and OS mix.
-- Call out default WS2016/2019/2022 + Ubuntu fleet.
-- If using a mixed legacy fleet, point to `monitorTier=full-monitor` versus `arc-control-plane-only`.
-- If populated, use software/application inventory as the start of an application
-  rationalisation conversation.
-- Message: "This is what a head of platform wants to see on Monday morning:
-  estate, health, drift, risk. Arc is how the on-prem estate enters Azure
-  operations."
-
-### 3.3 Inventory and Resource Graph (2 min)
-
-Open **Azure Arc** > **Machines**, then filter to resource group `rg-arc-demo`.
-If that navigation moves, open resource group `rg-arc-demo` and filter resource
-type to `Microsoft.HybridCompute/machines`. This machine list is the reliable
-portal inventory view; there is no separate **Inventory** blade in the current
-Azure Arc portal experience. Use **Resource Graph Explorer** for the tag-based
-inventory query below.
-
-- Show tags: `osTier`, `monitorTier`, `esuEligible`, `inventory=arc`, `updateManager=assessment`, `defender=plan2`, `machineConfig=enabled`.
-- For 2008/2012-era entries, explain: "No AMA. Still useful in the Azure control plane for inventory, governance, ESU planning, Defender/Update Manager/Machine Configuration surfaces where supported."
-
-Useful Azure Resource Graph query:
+**Show A - freshness and identity:**
 
 ```kql
-resources
-| where type =~ 'microsoft.hybridcompute/machines'
-| project name, osTier=tostring(tags.osTier), monitorTier=tostring(tags.monitorTier), esuEligible=tostring(tags.esuEligible)
-| order by name asc
+Heartbeat
+| where TimeGenerated > ago(10m)
+| where _ResourceId contains "/resourceGroups/rg-arc-demo/"
+| summarize LastHeartbeat=max(TimeGenerated) by ResourceId=tolower(_ResourceId), Computer, OSType
+| order by Computer asc
 ```
 
-### 3.4 Machine Configuration / TLS 1.2 beat (2 min)
+**Expect:** Recent timestamps and the **Arc** resource IDs in the presentation
+group for each monitored host; compare with the private expected list. A host
+missing from this query has no fresh matching row, not a zero-valued success.
 
-Open **Machine configuration** if it is available in the portal, or use
-**Azure Policy → Compliance** filtered to the demo assignments and Arc machines.
-Use the compliance workbook if the tenant hides or delays the Machine
-configuration blade.
-
-Talk track:
-
-- "Arc makes server configuration policy-addressable from Azure. TLS 1.2 is the easy customer-relevant example: audit first, then enforce/remediate through policy once agreed."
-- "This repo surfaces the Machine Configuration beat and tags machines for it; use a live TLS policy assignment only if you have pre-staged one in the lab."
-
-### 3.5 Update Manager and ESU beat (3 min)
-
-Open **Azure Update Manager**, then **Machines**, filtered to `rg-arc-demo`.
-
-- Periodic assessment should be enabled on all demo Arc machines. If the portal
-  still says machines do not have periodic assessment enabled, refresh after a
-  few minutes; `Deploy-ArcDemo.ps1` sets `assessment-mode=AutomaticByPlatform`
-  on the Arc machine OS profile.
-- Show patch assessment/compliance. `Activate-ArcDemo.ps1` starts an on-demand
-  patch assessment during wake-up; if the blade is still empty, refresh or come
-  back after the assessment finishes.
-- In the current lab, Windows assessment data is the reliable live proof point.
-  Linux rows can lag while the `LinuxOsUpdateExtension` is provisioning; do not
-  pause the demo waiting for Linux rows.
-- For WS2016+: tie patch posture to the full Monitor path.
-- For WS2008/WS2012-era: pivot to ESU eligibility and lifecycle risk.
-- Message: "Arc lets the platform team discuss patching and ESU from one Azure place, even before migration."
-
-### 3.6 Defender for Cloud (3 min)
-
-Open **Defender for Cloud**, then **Recommendations** and **Regulatory compliance**.
-
-- Show Defender for Servers Plan 2 at subscription scope.
-- Verify Defender for Servers Plan 2 and actual endpoint health separately.
-  Use independently verified Windows endpoint evidence for the security beat.
-  Approved Linux diagnostics found healthy/licensed sensors **in passive mode**,
-  with real-time protection disabled and the engine not loaded. MDE provisioning
-  reached Succeeded after approved startup, but two extension health payloads
-  still recorded event-provider issues differing from direct sensor health.
-  Disclose these limits: neither Monitor PASS nor successful onboarding proves
-  active antivirus or complete EDR/event delivery. Do not change AV policy or
-  reinstall healthy AMA/CT to make the story greener.
-- Use live recommendations as the co-sell: the lab currently surfaces examples
-  such as missing periodic update checks, Windows Defender Exploit Guard,
-  Linux SSH key authentication, and secure protocol recommendations.
-- Open a machine recommendation or vulnerability finding if populated. If
-  vulnerability findings are available, show CVE/CVSS context and link it back
-  to Defender for Servers Plan 2 coverage.
-- Do not promise CVE/CVSS drill-down unless the Defender vulnerability blade is
-  visibly populated at demo time. The reliable claim is posture, recommendations
-  and MDE coverage.
-- Show MCSB/NIST assignments; remind that policy/compliance can take hours to populate.
-- Message: "Security sees the same governance plane for Azure and hybrid
-  resources. This is the same conversation whether the server is Azure, VMware,
-  or another connected environment."
-
-### 3.7 Monitor deep dive: 2016+ full path (4 min)
-
-Use a WS2016/2019/2022 host.
-
-- **Logs**: Heartbeat, Perf, Event, ConfigurationChange.
-- **VM Insights**: dependency map for supported Windows tiers.
-- **Change Tracking**: software/service/file/registry drift.
-- **Performance**: CPU and memory trends from Perf/InsightsMetrics.
-
-Queries:
+**Show B - Windows CPU, not an average of unrelated perf counters:**
 
 ```kql
 Perf
-| where TimeGenerated > ago(30m)
-| summarize AvgCpu=avg(CounterValue) by Computer, bin(TimeGenerated, 5m)
+| where TimeGenerated > ago(24h)
+| where _ResourceId contains "/resourceGroups/rg-arc-demo/"
+| where CounterName has "Processor Time" and InstanceName in ("_Total", "total")
+| summarize AvgCPU=avg(CounterValue), MaxCPU=max(CounterValue), P95=percentile(CounterValue, 95) by Computer
+| order by P95 desc
 ```
+
+**Expect:** CPU percentage rows for reporting hosts. Do not call missing Linux
+rows a sensor failure or use idle samples as a cold-start/patch/SQL sizing
+benchmark. These counters demonstrated Windows utilization in the reviewed lab.
+
+**Show C - pick one actual change/inventory or Linux signal:**
 
 ```kql
 ConfigurationChange
 | where TimeGenerated > ago(7d)
-| summarize Changes=count() by Computer, ConfigChangeType
+| where _ResourceId contains "/resourceGroups/rg-arc-demo/"
+| summarize Changes=count(), LastChange=max(TimeGenerated) by Computer, ConfigChangeType
+| order by LastChange desc
 ```
 
-Key line: "2016+ gets the full Monitor story; pre-2016 stays Arc-control-plane-only by design."
-
-Optional customer-value line: "This is the evidence that stops a sizing or SQL
-licensing conversation being driven by fear. If the actual peak is modest, the
-answer may be right-size and govern, not automatically buy bigger."
-
-### 3.8 SQL workload simulation (optional DBA beat, 2 min)
-
-Skip this beat in the default Azure-only demo unless you have deployed the SQL
-workload simulator. This is a SQL-shaped workload signal from an Arc-enabled
-Windows server, not SQL Server enabled by Azure Arc. See
-[`sql-workload-simulation.md`](sql-workload-simulation.md) and
-[`sql-arc-spike.md`](sql-arc-spike.md).
-
-- Show `win-sql-01`.
-- Show `ArcSqlWorkloadDemo` Application events in Log Analytics.
-- Position BPA, Defender for SQL, and SQL inventory as a future/customer-real SQL
-  host follow-on, not as a claim in this Azure-only lab.
-
-### 3.9 Alerts and action group (2 min)
-
-Open resource group `rg-arc-demo`, then **Alerts**.
-
-- Show `alert-arc-demo-host-missing-heartbeat`.
-- Show Action Group email receiver.
-- Explain that this Action Group is the seam a later optional `sre-agent` repo can consume; this repo itself stops at Azure Monitor alerting.
-- ITSM line: "In a customer environment, this Action Group can also carry a
-  webhook into ServiceNow, PagerDuty, or another HTTP endpoint. The demo keeps
-  email as the simplest visible proof."
-
-Optional force alert (separate explicit approval; not part of preflight):
-
-Do not run this during a separately owned SRE fault window. Agree a bounded
-observation/reset plan first and verify connectivity/Heartbeat after recovery.
-
-```powershell
-az vm deallocate --subscription <SUBSCRIPTION_ID> -g rg-arc-demo-infra -n win-app-01
-# Reset after the demo:
-az vm start --subscription <SUBSCRIPTION_ID> -g rg-arc-demo-infra -n win-app-01
+```kql
+Syslog
+| where TimeGenerated > ago(24h)
+| where _ResourceId contains "/resourceGroups/rg-arc-demo/"
+| summarize Events=count(), LastSeen=max(TimeGenerated) by Computer, Facility, SeverityLevel
+| order by LastSeen desc
 ```
 
-### 3.10 Only now open the Arc server resource (2 min)
+**Say:** "Fresh heartbeat establishes who is reporting. Performance and change
+records narrow a hypothesis. Logs, Arc connection and endpoint security are
+different checks; none of these alone proves an application is healthy."
 
-After the customer has seen the workbook, security, operations, performance, and
-alert story, open **Azure Arc** > **Machines** and drill into one machine.
-Fallback: open `rg-arc-demo` and select any `Microsoft.HybridCompute/machines`
-resource.
+**Fallback:** Confirm workspace, time range and permission. No CT changes can
+mean no observed changes or an incomplete collection cycle; show a rehearsed
+populated syslog/CPU result and state the gap. No fresh Heartbeat means stop
+calling that host live-ready. Never manufacture change/error records.
 
-- Show the resource identity and tags.
-- Show extensions, RBAC, Activity log, and the Azure-side management surface.
-- Key line: "The machine owner still has control. Platform teams get inventory,
-  policy, monitoring, and audit without starting from RDP or server-by-server
-  tooling."
+### 3. Connect diagnosis to an alert and routing (3 minutes)
 
-## 4. Optional workload beats
+**Go:** Portal search -> **Monitor** -> **Alerts** -> **Alert rules**.
+Filter to the target subscription and presentation group; select the named
+heartbeat rule on your input card. Read its existing scope, condition, severity,
+evaluation/window and associated action group without editing.
+[Rule navigation][rules].
 
-### 4.1 Azure-native VM comparison (`-DeployAzureVMs $true`)
+**Show:** The workspace-scoped heartbeat rule, severity 2, five-minute
+evaluation, 15-minute window and >10-minute stale-heartbeat query.
+It evaluates observed `Heartbeat` rows grouped by computer, not a complete
+expected-inventory anti-join. A never-seen host or one absent beyond the query
+window may not appear: do not promise complete outage detection or a fixed
+ten-minute notification. This is the configured demo rule, not a production
+monitoring design.
 
-Open the Azure-native VM in `rg-arc-demo-infra` (default `az-arcdemo-01`) and Azure Monitor.
+From **Monitor** -> **Alerts**, select **Action groups**, then the named group.
+Inspect the configured **email** notification without exposing its address.
+Do not select **Test**, create/edit receivers or send a test notification.
+Configuration is not delivery proof: current Microsoft guidance also describes
+recipient verification requirements. Use only operator-provided dated delivery
+evidence if claiming an email was received. [Action groups][actions].
 
-- Show it is a native `Microsoft.Compute/virtualMachines` resource, not an Arc machine.
-- Show AMA + DCR associations to the same Log Analytics workspace.
-- Message: "Arc and native Azure VMs land in the same operations plane."
+For previous events, return to **Alerts**, set the subscription/group/time
+filters to an existing operator-approved occurrence and select its row for
+**Alert details**. Alternatively open the rule's **History**.
+Read fired/resolved condition, affected resource and timestamp; do not
+acknowledge/close it. [Instances][instances], [rule history][rules].
 
-### 4.2 Container App fault (`-DeployContainerApps $true`)
+**Say:** "The signal becomes an actionable alert. Email is the deployed baseline;
+an action group can integrate with other systems, but this repo does not deploy
+a Logic Apps, ServiceNow or PagerDuty workflow. An optional SRE layer can
+investigate these alerts under its own configuration and approval model."
 
-Break/reset require a separately approved, bounded fault window and a verified
-fallback reset. If the companion SRE owner is running the scenario, do not run
-competing commands or treat its intentional transient fault as drift.
+**Fallback:** A healthy lab can have no current alerts. Show the rule and routing,
+say "configured, not a live firing or delivery test", and move on. If retained,
+the optional Container App restart rule is in the **infrastructure** group:
+switch the group filter, inspect its existing rule/history, and identify its
+metric rather than calling it a heartbeat log alert. No break/reset is needed.
 
-Break:
+### 4. Reveal the Arc identity and inventory (2 minutes)
 
-```powershell
-az containerapp update `
-  --subscription <SUBSCRIPTION_ID> `
-  --resource-group rg-arc-demo-infra `
-  --name ca-arc-demo-fault `
-  --set-env-vars SIMULATE_CRASH=true
+**Go:** Portal search -> **Azure Arc** -> **Machines**; filter to the target
+subscription and presentation group. The portal home can also expose
+**Machines - Azure Arc**. Select the input-card Windows machine.
+If the hub layout differs, use portal resource search to find that exact
+machine and confirm its group and type **Machine - Azure Arc** /
+`Microsoft.HybridCompute/machines`, not its backing Azure VM.
+
+**Show:** Connection state, OS information and tags on the Arc resource. Point
+out `osTier` and `monitorTier` where present. Tags such as `defender=plan2`,
+`machineConfig=enabled` and `esuEligible` express configuration/story metadata,
+not proof of working security, a TLS assignment or purchased ESU.
+
+**Say:** "This is the Azure resource identity that makes a non-Azure server
+addressable by governance and operations. It is distinct from this lab's backing
+Azure VM. We did not start with RDP."
+
+**Fallback:** Use the following inventory query rather than guessing an
+**Inventory** blade in the Arc hub. Portal search **Resource Graph Explorer**,
+use **Directory** to scope to the confirmed subscription, paste the query into
+**Query 1**, select **Run query**, then **Results**. [Resource Graph][arg].
+
+```kql
+resources
+| where type =~ "microsoft.hybridcompute/machines"
+| where resourceGroup =~ "rg-arc-demo"
+| project name, osTier=tostring(tags.osTier), monitorTier=tostring(tags.monitorTier), status=tostring(properties.status)
+| order by name asc
 ```
 
-Show **RestartCount** metric and `alert-arc-demo-containerapp-restarts` routed to the same Action Group. Repair:
+Do not save/pin the query during presentation. Reader visibility can change
+returned inventory; compare against the operator's expected resource list.
 
-```powershell
-az containerapp update `
-  --subscription <SUBSCRIPTION_ID> `
-  --resource-group rg-arc-demo-infra `
-  --name ca-arc-demo-fault `
-  --set-env-vars SIMULATE_CRASH=false
-```
+### 5. Choose posture beats for the full tour (6-10 minutes)
 
-Full commands: [`container-app-fault.md`](container-app-fault.md).
-Verify the fault flag, actual serving revision and HTTP response after reset;
-alert recovery is asynchronous. Distinguish an operator reset from a
-read-back/audit-proven SRE repair.
+These screens are **optional evidence beats**, not prerequisites for the
+12-15 minute core. Rehearse the ones with useful current data. Follow the linked
+current Microsoft pages if tenant layout differs; do not improvise a legacy
+menu path or enable a feature to populate a page.
 
-### 4.3 AKS crash-loop (`-DeployAks $true`)
+| Beat and time | Go / select / show | Expected evidence, talk track and honest fallback |
+|---|---|---|
+| Updates, 3 min | Portal search **Azure Update Manager** -> **Machines**. Filter subscription/group to Arc resources; select the rehearsed Windows machine for its existing assessment details/history. | Show **Last assessed time** and actual missing-update/status rows. "Central visibility before an agreed patch window." Assessment submission is not completion or installed updates. If **No updates data**, show that state and explain the gap; do not select **Check for updates**, **Assess now**, **One-time update** or change schedules. [Current status/history navigation][updates]. |
+| Security, 3 min | Portal search **Defender for Cloud** -> **Recommendations**. Scope to the target lab; select one rehearsed recommendation whose affected asset is a demo machine. Read **Overview** and **Remediation steps**, without applying them. | Show the actual finding, affected asset and recommendation. "Shared posture, not a claim the server is secure." Do not promise a specific CVE, score, attack path or paid CSPM feature. Flat/resource/title grouping and grouped-to-individual preview findings vary. If no lab finding is visible, omit the drill-down rather than showing another customer's resource. [Current Azure-portal experience][security]. |
+| Governance, 2 min | Portal search **Policy** -> **Compliance**; set **Scope** to the confirmed subscription and select the actual demo MCSB/NIST initiative assignment from the input card. | Show evaluated compliance details only if populated. "Assigned policy and evaluated compliance are different." A tag is not a TLS 1.2 policy test. No data: **Policy** -> **Assignments**, same scope, named assignment, is configuration-only evidence; do not request a scan or remediate. [Compliance navigation and evaluation timing][policy]. |
+| Legacy/ESU discussion, 1 min | Return to the Arc resource's actual OS/tags or rehearsed inventory results. | Default fleet starts at WS2016. Discuss older OS only as a support-gated customer follow-on; no represented WS2008/2012 placeholder is a running host and no ESU entitlement is bought by this repo. [Fleet reference](legacy-os-fleet.md). |
 
-Only if actually deployed and separately approved; this lab's active eight-host
-proof does not validate AKS deployment or stop/start. Agree a bounded reset first.
+For the security beat, preserve the inspected Linux limitation: sensors reported
+healthy/licensed **in passive mode**, real-time protection disabled, with
+extension/direct-health event-provider discrepancies. Monitor PASS,
+onboarding or subscription Plan 2 configuration is not active AV/full EDR proof.
+Windows endpoint proof also needs its own evidence. Do not change AV policy.
 
-Break:
+Windows VM Insights dependency maps are an additional rehearsed-only surface,
+not required for this tour. Linux dependency mapping is intentionally disabled.
+Use the already-demonstrated CPU/CT/syslog data if a map is absent; never install
+a Dependency Agent mid-demo. SQL/Arc SQL/BPA is not an optional portal shortcut:
+see [the SQL support decision](sql-arc-spike.md).
 
-```powershell
-az aks command invoke `
-  --subscription <SUBSCRIPTION_ID> `
-  --resource-group rg-arc-demo-infra `
-  --name arc-demo-aks `
-  --command "kubectl set env deployment/crashloop-demo -n arc-demo-aks CRASH_LOOP=true"
-```
+## Optional SRE handoff
 
-Show Container Insights data and `alert-arc-demo-aks-pod-restarts`. Repair:
+At the end of step 3 (or after the Arc tour), keep the selected alert/rule open.
+State its resource, signal, severity and timestamp. If there is no historical
+alert, say that explicitly: the next segment may only use its own preexisting
+incident evidence, not imply a newly detected outage.
 
-```powershell
-az aks command invoke `
-  --subscription <SUBSCRIPTION_ID> `
-  --resource-group rg-arc-demo-infra `
-  --name arc-demo-aks `
-  --command "kubectl set env deployment/crashloop-demo -n arc-demo-aks CRASH_LOOP=false && kubectl rollout status deployment/crashloop-demo -n arc-demo-aks --timeout=180s"
-```
+Open the companion repository supplied by the operator and continue its
+`docs\delivery-runsheet.md` **after the Arc/Monitor segment**, using its private
+agent URL and approved existing incident. The companion `docs\README.md` chooses
+the SRE presenter path and optional scenarios. Do not guess an **Investigate**
+button, send a new agent prompt, approve a repair or induce a fault as part of
+this read-only handoff. Review mode and a configured handler are not proof an
+automated repair executed; the SRE guide owns that evidence/approval distinction.
 
-Full commands: [`aks-break-scenario.md`](aks-break-scenario.md).
+Container App, AKS, native-VM and SQL-shaped scenarios are opt-ins, not extra
+default prerequisites. Their operator instructions remain in
+[container-app-fault.md](container-app-fault.md),
+[aks-break-scenario.md](aks-break-scenario.md) and
+[sql-workload-simulation.md](sql-workload-simulation.md). Live break/reset
+requires a separate agreed owner, approval, deadline and verified fallback
+recovery; none is authorized by reading or rehearsing this guide.
 
-## 5. Close (1 min)
+## Close and hand back
 
-"This repo is the reusable Arc + Monitor spine. It runs on its own. For a later Act 2, an optional SRE Agent repo can attach to these Azure Monitor alerts, but nothing here depends on that."
+"Arc provides identity and governance; Monitor provides telemetry and alerts.
+We can start with the existing estate and add investigation without pretending
+this demo lab is a hardened production architecture."
 
-## 6. After the meeting
+Finish on the workbook. Hand the lab back to its operator unchanged.
+If parking is requested separately, park the companion SRE layer first, then
+Arc, following [lifecycle.md](lifecycle.md). Wake in the reverse dependency
+order. Nightly VM shutdown is not whole-stack hibernation. Data/disks/services
+still cost money while parked; see [cost.md](cost.md).
+Retained HDD is a deliberate existing-lab choice, not a new saving or a default
+for new OS disks; SSD remains the fresh default and HDD OS support retires
+8 September 2028. Do not convert tiers during a demo.
 
-1. Reset optional faults only if explicitly authorized; lifecycle commands preserve them.
-2. If SRE is attached, finish its fault window and park that layer using its own maintained procedure first. With operator approval, then preview and hibernate Arc:
+## Portal grounding and observation limits
 
-   ```powershell
-   .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
-   .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
-   .\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -DesiredState Hibernated -OutputFormat Json
-   ```
+**Documentation checked 21 October 2026.** The links below are the current
+Microsoft Learn pages retrieved during this review, not old video click paths.
+Portal home was inspected read-only in an authenticated lab: global search,
+**Azure Update Manager**, **Azure Arc**, **Machines - Azure Arc**, and the
+workspace resource link were visible. The workspace page did not render
+reliably after navigation; a stale accessibility tree was not treated as blade
+verification. No fresh end-to-end workbook/Logs/alert/posture UI rehearsal or
+new runtime readiness test is claimed by this documentation-only review.
 
-   Keep runtime target/skin/fleet and deployment history outside git for wake-up.
-   Hibernation is not permanent cleanup and does not rotate credentials or reset
-   `SIMULATE_CRASH`. On wake, restore Arc/Monitor and verify Ready before SRE.
+Thus steps 1-3 and the posture blade details are **Microsoft-documented, not
+locally UI-verified** in this pass. Workbook tile names, alert settings and
+workload defaults were checked against repo source. Earlier operational
+readiness/activation evidence is described in [lifecycle.md](lifecycle.md),
+not evidence that every portal pane is currently populated. Rehearse and retain
+actual bookmarks before presenting. If a documented surface is absent, use the
+specified query/rule-only fallback or omit the beat; do not invent new labels.
 
-3. For separately approved permanent cleanup only:
+| Surface | Authoritative grounding / why it matters |
+|---|---|
+| Saved workbook, permissions and gallery | [Azure Workbooks][workbooks]; avoids assuming a resource-group **Workbooks** blade or selecting a template. |
+| Logs entry, query scope and Simple/KQL switch | [Log Analytics tutorial][logs], [current mode selector][logs-mode]; queries must use the intended workspace. |
+| Scoped resource inventory | [Resource Graph portal quickstart][arg]; **Directory**, **Query 1**, **Run query**, **Results**. |
+| Alert rule/history and instance details | [Manage rules][rules], [manage instances][instances]; existing configuration differs from an actual firing. |
+| Email versus optional automation | [Action groups][actions]; read receiver configuration, do not send tests or assume delivery/verification. |
+| Assessment rows/history | [Update Manager status][updates]; asynchronous assessment and missing-data states differ from patch installation. |
+| Current security view | [Review recommendations, Azure portal pivot][security]; grouping/preview can vary, avoid legacy fixed CVE drill-down claims. |
+| Compliance scope/timing | [Get policy compliance data][policy]; evaluation has no guaranteed completion deadline. |
 
-   ```powershell
-   .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json -WhatIf
-   .\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
-   ```
+[workbooks]: https://learn.microsoft.com/azure/azure-monitor/visualize/workbooks-overview
+[logs]: https://learn.microsoft.com/azure/azure-monitor/logs/log-analytics-tutorial
+[logs-mode]: https://learn.microsoft.com/azure/azure-monitor/logs/log-analytics-simple-mode#switch-modes
+[arg]: https://learn.microsoft.com/azure/governance/resource-graph/first-query-portal
+[rules]: https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-manage-alert-rules
+[instances]: https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-manage-alert-instances
+[actions]: https://learn.microsoft.com/azure/azure-monitor/alerts/action-groups
+[updates]: https://learn.microsoft.com/azure/update-manager/manage-multiple-machines
+[security]: https://learn.microsoft.com/azure/defender-for-cloud/review-security-recommendations
+[policy]: https://learn.microsoft.com/azure/governance/policy/how-to/get-compliance-data

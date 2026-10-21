@@ -2,6 +2,10 @@
 
 > A scripted demo environment for showing Azure Arc + Azure Monitor to customers. Plan a preparation window; readiness, not elapsed time, determines when it is ready.
 
+**Presenting an existing lab? Start with [the docs index](docs/README.md), then
+the [first-time presenter guide](docs/runsheet.md).** You do not need to deploy,
+induce a fault or read every operator reference to present the demo.
+
 [CI workflow](.github/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -75,7 +79,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUB> `
   -TenantId <TENANT> `
-  -SkinPath .\config\demo-skin.json
+  -SkinPath <PRIVATE_SKIN_PATH>
 
 # Example: add Azure-native VM + Container App alert scenario
 .\scripts\Deploy-ArcDemo.ps1 `
@@ -86,15 +90,19 @@ az account set --subscription <SUBSCRIPTION_ID>
   -DeployContainerApps $true
 ```
 
-When it finishes, open the workbook URL printed at the end, or search for
-**Workbooks** in the Azure portal and select **Arc Demo - Estate Overview** in
-`rg-arc-demo`.
+When it finishes, open the workbook URL printed at the end, or open
+**Monitor** > **Workbooks** and select the saved **Arc Demo - Estate Overview** (or skin
+title), not a template. The [presenter guide](docs/runsheet.md) explains scope,
+current navigation, expected data and fallback checks.
 
 > **Optional SQL stance:** Installing SQL Server on an Azure VM is fine for workload simulation, but this Azure-VM-backed demo should not claim **SQL Server enabled by Azure Arc** validation. Keep SQL skipped by default until a SQL workload simulation is deliberately added. See [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md).
 
 ### Use it
 
-Follow [`docs/runsheet.md`](docs/runsheet.md) — a 20-30 min Act-1 Arc/Monitor walkthrough with optional Azure-native workload beats.
+Follow [`docs/runsheet.md`](docs/runsheet.md): one practice pass followed by a
+20-30 minute Arc/Monitor story, or a 12-15 minute core. The default presentation
+is read-only. Optional live faults have separate approval/procedure; this repo
+deploys email routing, not a Logic Apps/ITSM workflow.
 
 ### Sharing and runtime inputs
 
@@ -156,7 +164,11 @@ contract, retained manifests, explicit targeting, retry/credential behavior,
 optional-workload parking, cleanup scope and validation boundaries. Removal
 preserves subscription Defender by default; identity deletion is separately opt-in.
 
-Customer-specific values live in [`config\demo-skin.json`](config/demo-skin.json). Change that file to retarget the demo name, resource prefix, region, notification email, workload toggles, workbook labels, and tags; see [`docs/reskin-guide.md`](docs/reskin-guide.md) for the swap-list and dummy-customer example. Runtime command-line parameters still override the skin when you need a one-off change.
+Customer-specific values belong in a **private copy** of
+[`config\demo-skin.json`](config/demo-skin.json), outside git. Retarget the
+demo name, prefix, region, recipient, workload toggles, workbook labels and tags
+there; see [reskin-guide.md](docs/reskin-guide.md). Runtime arguments override
+the skin; preserve an existing lab's effective inputs.
 
 Deployment parameters (lifecycle scripts expose a smaller, documented subset):
 
@@ -174,6 +186,7 @@ Deployment parameters (lifecycle scripts expose a smaller, documented subset):
 | `-WindowsVmCount` | `5` | Deprecated compatibility generator for an all-WS2022 count-based fleet |
 | `-LinuxVmCount` | `3` | Deprecated compatibility generator for an Ubuntu count-based fleet |
 | `-VmSize` | `Standard_B2as_v2` | Check regional restrictions/quota; listings and `--validate` do not guarantee capacity |
+| `-OsDiskStorageAccountType` | `StandardSSD_LRS` | Fresh OS disks use SSD; select explicit `Standard_LRS` for a retained HDD lab. Existing-tier mismatch is refused, not converted. See [cost.md](docs/cost.md). |
 | `-AdminEmail` | skin `notifications.email` | Email for budget + alert notifications |
 | `-AutoShutdownTime` | `1900` | 24-hour HHMM in `AutoShutdownTimezone` |
 | `-AutoShutdownTimezone` | `Cen. Australia Standard Time` | .NET timezone ID for shutdown |
@@ -185,7 +198,7 @@ Example using only the skin for customer defaults:
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <SUB> `
   -TenantId <TENANT> `
-  -SkinPath .\config\demo-skin.json
+  -SkinPath <PRIVATE_SKIN_PATH>
 ```
 
 ### Common workload combinations
@@ -207,7 +220,10 @@ Example using only the skin for customer defaults:
 | Ubuntu 22.04 | AMA + core DCR + Change Tracking; VM Insights map is intentionally off until Dependency Agent support is validated |
 | WS2008/WS2012-era | Arc-control-plane-only: inventory/resource graph, tags, ESU eligibility discussion, Update Manager/Defender/Machine Configuration surfaces where available; no AMA/VM Insights/Change Tracking |
 
-The live Arc cook's tour is: inventory, Machine Configuration/TLS 1.2 policy posture, Update Manager, Defender, and ESU. See [`docs/runsheet.md`](docs/runsheet.md) for click-path and talk track.
+Lead with the workbook, then telemetry/diagnosis, alert routing and the Arc
+identity. Add rehearsed patch/security/governance beats if populated.
+[The runsheet](docs/runsheet.md) owns the sequence, current source-grounded
+navigation and honest missing-data fallbacks; a TLS tag is not a TLS policy test.
 
 Infrastructure/monitoring readiness is not endpoint-protection validation. The
 inspected Linux sensors reported healthy/licensed **in passive mode**, with
@@ -221,24 +237,14 @@ If you're using GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, or any
 
 ## Documentation map
 
-| File | Purpose |
-|---|---|
-| [`docs/architecture.md`](docs/architecture.md) | What gets deployed and how it's wired together |
-| [`docs/legacy-os-fleet.md`](docs/legacy-os-fleet.md) | Fleet schema, legacy OS image approach, and Monitor gating rules |
-| [`docs/container-app-fault.md`](docs/container-app-fault.md) | Optional Container App fault/repair commands and alert mechanism |
-| [`docs/aks-break-scenario.md`](docs/aks-break-scenario.md) | Optional AKS crash-loop/repair commands and alert mechanism |
-| [`docs/runbook.md`](docs/runbook.md) | Maintained deployment, preview, validation and operations procedure |
-| [`docs/lifecycle.md`](docs/lifecycle.md) | Explicit-target lifecycle, retained inventory, readiness contract and validation boundaries |
-| [`docs/runsheet.md`](docs/runsheet.md) | Live demo walkthrough — what to click and what to say |
-| [`docs/troubleshooting.md`](docs/troubleshooting.md) | Every failure mode I've hit and how to fix it |
-| [`docs/cost.md`](docs/cost.md) | Detailed cost breakdown by state |
-| [`docs/reskin-guide.md`](docs/reskin-guide.md) | Skin variables schema, swap-list, and retargeting steps |
-| [`docs/ai-deploy-handbook.md`](docs/ai-deploy-handbook.md) | Prompt and checklist for AI-assisted deployment by another SE |
-| [`docs/sql-arc-spike.md`](docs/sql-arc-spike.md) | Decision record for SQL Server / Arc SQL support, blockers, and supported alternatives |
-| [`docs/sql-workload-simulation.md`](docs/sql-workload-simulation.md) | Optional SQL-shaped workload signal on an Arc-enabled Windows server |
-| [`AGENTS.md`](AGENTS.md) | Operating manual for AI coding assistants |
-| [`samples/lob-arc-app`](samples/lob-arc-app) | Public LOB app source used by the SRE Agent T11 code-context demo |
-| [`samples/sql-workload`](samples/sql-workload) | SQL-shaped Application Event simulator for the optional DBA beat |
+[**docs/README.md**](docs/README.md) indexes **every document**, its audience,
+canonical/reference/optional status and the minimal ordered presenter path.
+Use it instead of treating all files as required reading.
+
+- Present: [runsheet.md](docs/runsheet.md).
+- Operate: [runbook.md](docs/runbook.md) and [lifecycle.md](docs/lifecycle.md).
+- Develop: [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md) and
+  [module-map.md](docs/module-map.md).
 
 ## Inspiration & credits
 
