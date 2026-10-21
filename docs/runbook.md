@@ -1,5 +1,7 @@
 # Azure Arc demo build and operations runbook
 
+**Operator procedure, not the presentation script.** Presenters start at
+[the docs index](README.md) and [runsheet.md](runsheet.md).
 The maintained deployment path is `scripts\Deploy-ArcDemo.ps1` plus Bicep. Do not
 replay old ad-hoc portal/CLI builds against a running demo. Start with
 [AGENTS.md](../AGENTS.md), [lifecycle safety/contract](lifecycle.md), and the
@@ -15,11 +17,13 @@ required. No Az PowerShell module, production framework or SRE Agent is required
 ```powershell
 az login --tenant <TENANT>
 az account show --subscription <SUB> --query "{id:id,tenantId:tenantId,user:user.name}" -o table
-$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '.\config\demo-skin.json' }
+$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVATE_SKIN_PATH>' }
 ```
 
-Confirm those values; do not rely on default CLI context. Edit the skin's email,
-labels, prefix and workload toggles. IDs and secrets stay out of source.
+Confirm those values; do not rely on default CLI context. Copy a bundled skin
+outside git for a new lab; edit that private copy's email, labels, prefix and
+workload toggles. Preserve an existing lab's retained inputs instead.
+IDs and secrets stay out of source.
 `config\dummy-customer.demo-skin.json` illustrates portability. An explicit missing
 skin, malformed boolean, invalid prefix or fleet is an error, never a fallback.
 Relative fleet paths resolve against the repo root.
@@ -71,6 +75,12 @@ Key Vault secret; old labs without it must supply their **current**
 `-AdminPassword` as a SecureString. New Arc onboarding with an existing SP
 requires its existing `-OnboardingSecret`; no routine SP credential reset.
 Resolve missing credentials with the operator, never silently rotate them.
+
+Match the effective disk tier too: fresh deployments default to SSD, but an
+existing HDD lab requires `-OsDiskStorageAccountType Standard_LRS` or that value
+in its private skin. The wrapper refuses mismatches even during preview; it
+does not convert disks. Preserve the operator-chosen HDD tier and plan any
+migration separately before HDD OS support retirement. See [cost.md](cost.md).
 
 ## 4. Validate, then rehearse
 

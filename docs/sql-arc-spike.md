@@ -1,5 +1,9 @@
 # SQL Server / Arc SQL spike
 
+**Reference/decision record, not an installation or presenter prerequisite.**
+[The docs index](README.md) explains the default path; [runsheet.md](runsheet.md)
+deliberately omits Arc SQL from this Azure-only lab's live evidence.
+
 ## Decision
 
 Do **not** include **SQL Server enabled by Azure Arc** as a default or

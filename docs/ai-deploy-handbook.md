@@ -2,6 +2,9 @@
 
 Use this when sharing the repo with another SE who wants an AI assistant to deploy
 the standalone Arc + Azure Monitor demo.
+This is an **optional operator aid**, not another presentation guide.
+[runbook.md](runbook.md) and [lifecycle.md](lifecycle.md) own operations;
+[the docs index](README.md) routes first-time presenters to [runsheet.md](runsheet.md).
 
 ## Give this prompt to the AI assistant
 
@@ -9,7 +12,7 @@ the standalone Arc + Azure Monitor demo.
 You are deploying the reusable Azure Arc + Azure Monitor demo from
 <ARC_REPOSITORY_URL> supplied by the operator.
 
-Read AGENTS.md, README.md, docs/runsheet.md, docs/troubleshooting.md, and
+Read AGENTS.md, docs/README.md, docs/runbook.md, docs/lifecycle.md, docs/troubleshooting.md, and
 docs/sql-arc-spike.md before running commands.
 
 Inputs:
@@ -104,15 +107,19 @@ remain; never infer absence from the newest output alone.
 | Arc machines connected | `az connectedmachine list --subscription <SUB> -g rg-arc-demo -o table` |
 | Monitor heartbeat | Readiness requires Heartbeat within 10 minutes by every expected ARM `_ResourceId`, not just host names/counts. |
 | Linux endpoint protection | Direct sensor health, mode and extension health are separate. Passive mode/RTP false is not active-antivirus proof; retain event-provider caveats. |
-| Workbook exists | Search **Workbooks** in the Azure portal and open `Arc Demo - Estate Overview` or the skin title. Fallback: resource group `rg-arc-demo` > Workbooks. |
+| Workbook exists | **Monitor** > **Workbooks** > saved **Workbooks** gallery; open `Arc Demo - Estate Overview` or the skin title, not a template. Use the operator's actual deployment workbook URL as an alternative, not an assumed resource-group Workbooks blade. |
 | Action Group exists | `az monitor action-group show --subscription <SUB> -g rg-arc-demo -n ag-arc-demo` |
 | Container App optional alert | `alert-arc-demo-containerapp-restarts` in `rg-arc-demo-infra` |
 | SQL workload simulation optional | `docs/sql-workload-simulation.md` commands run against `win-sql-01` |
 
 ## Manual steps
 
-None are expected for the Arc/Monitor spine after Azure sign-in and prerequisite
-approval. Portal clicks are only for presenting the demo, not for deployment.
+No ad-hoc portal resource configuration is part of deployment. Sign-in,
+prerequisites and any required recipient verification remain operator-owned.
+An email receiver in the ARM model is not proof of verified delivery; current
+[Action groups guidance](https://learn.microsoft.com/azure/azure-monitor/alerts/action-groups)
+describes recipient-verification requirements. No test send, verification or
+receiver change is authorized by this handbook or a readiness check.
 
 ## SQL stance
 

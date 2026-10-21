@@ -3,6 +3,8 @@
 Known failure modes with verified observations, fixes where established, and
 explicit unresolved boundaries. Confirm the runtime tenant/subscription and get
 scoped approval before any repair, restart, policy scan or fault operation.
+This is a symptom reference, not required presenter reading; use
+[the docs index](README.md) and [runsheet.md](runsheet.md) for the default tour.
 
 ## Directory CLI rejects --subscription
 
@@ -203,7 +205,7 @@ deterministic, so reruns update existing resources instead of duplicating them.
 **Fix** — Fresh deployment now creates a **NAT Gateway** before compute/extension provisioning. Activation recreates it before starting parked VMs. For an older lab missing NAT, after approving activation, run:
 
 ```powershell
-.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath .\config\demo-skin.json
+.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH>
 ```
 
 ## No Heartbeat in Log Analytics for Linux hosts
@@ -346,15 +348,21 @@ az connectedmachine extension show --subscription <SUB> -g rg-arc-demo --machine
 **Symptom** — Policy assignments exist, but the **Regulatory compliance** page
 in Defender for Cloud is blank.
 
-**Cause** — First policy evaluation cycle takes ~12 hours after assignment.
+**Timing boundary** - An assignment starts an asynchronous evaluation; there is
+no guaranteed completion deadline. Standard reevaluation runs every 24 hours.
+A blank Defender page is not proof of one specific root cause: check scope,
+permissions, assignment and available evaluation results separately.
 
-**Fix** — Wait. A separately approved evaluation trigger can request a new scan:
+**First check** - Read **Policy** > **Compliance** in the confirmed scope.
+See [current evaluation and compliance guidance](https://learn.microsoft.com/azure/governance/policy/how-to/get-compliance-data).
+Do not promise a score during a short rehearsal. A separately approved
+evaluation trigger can request a new scan:
 
 ```powershell
 az policy state trigger-scan --subscription <SUB> --resource-group rg-arc-demo
 ```
 
-(Still takes 1-3 hours; "force" is relative.)
+The scan remains asynchronous with no fixed demo-time completion guarantee.
 
 ## Hibernate seems to skip the NAT GW delete
 
@@ -385,7 +393,11 @@ See [`cost.md`](cost.md) for the full breakdown by state. The most common surpri
 
 ## "AGENTS.md says X, but the script does Y"
 
-If you find a mismatch between [`AGENTS.md`](../AGENTS.md) and the actual scripts, **the scripts are the source of truth**. Please open an issue (or PR) so `AGENTS.md` can be brought back in line.
+If [`AGENTS.md`](../AGENTS.md), a procedure and the actual script conflict,
+stop before mutation and reconcile the discrepancy against code, current
+supported behavior and approved scope. Do not bypass a safety rule merely
+because a script permits an action. Update the affected canonical document
+and agent guidance together.
 
 ## Deployment refuses an existing OS disk tier mismatch
 

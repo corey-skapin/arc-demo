@@ -1,5 +1,10 @@
 # Container App fault scenario
 
+**Optional scenario/operator procedure, not the default presenter path.**
+Start with [the docs index](README.md) and [runsheet.md](runsheet.md).
+Use the retained private skin and actual names; merely reading this procedure
+does not authorize deployment, break/reset or a notification test.
+
 Optional workload behind `-DeployContainerApps $true`. It creates a lightweight
 Container Apps environment `cae-<prefix>`, a tiny HTTP Container App
 `ca-<prefix>-fault`, and a metric alert
@@ -21,7 +26,7 @@ the window; do not run competing resets or lifecycle operations.
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <subscription-id> `
   -TenantId <tenant-id> `
-  -SkinPath .\config\demo-skin.json `
+  -SkinPath <PRIVATE_SKIN_PATH> `
   -DeployContainerApps $true
 ```
 

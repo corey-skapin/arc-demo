@@ -3,7 +3,9 @@
 > **This file is read first by AI coding agents** (GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, OpenAI Codex, etc.).
 > Other AIs: also read this file before doing anything in this repo.
 >
-> Humans should follow [`README.md`](README.md) and [`docs/runbook.md`](docs/runbook.md).
+> Humans start at [`docs/README.md`](docs/README.md). Presenters use
+> [`docs/runsheet.md`](docs/runsheet.md); operators use
+> [`docs/runbook.md`](docs/runbook.md) and [`docs/lifecycle.md`](docs/lifecycle.md).
 
 ---
 
@@ -176,6 +178,18 @@ az bicep build --file .\bicep\main.bicep --stdout > $null
 
 ## When something breaks
 
-The first place to look is [`docs/troubleshooting.md`](docs/troubleshooting.md) — every failure mode I've personally hit is documented there with a verified fix.
+Use [`docs/troubleshooting.md`](docs/troubleshooting.md) for known observations,
+verified fixes where established, and unresolved limits. Do not imply every
+failure has a known cause or authorize a repair merely by linking its commands.
 
 If the user reports an issue that isn't in `troubleshooting.md`, **add it** as part of the same change.
+
+## Documentation ownership
+
+Keep `docs/README.md` complete when adding, removing or repurposing documents.
+`docs/runsheet.md` is the single canonical Arc presenter path; update it rather
+than adding competing runsheets. Ground portal navigation in current Microsoft
+guidance and explicitly distinguish actual UI observation from documented paths.
+Beginner rehearsals default to read-only evidence: no activation, fault/reset,
+assessment, alert test/email or remediation is implied. The optional companion
+SRE combined guide is its `docs\delivery-runsheet.md`, resuming after Arc.
