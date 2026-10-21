@@ -386,3 +386,13 @@ See [`cost.md`](cost.md) for the full breakdown by state. The most common surpri
 ## "AGENTS.md says X, but the script does Y"
 
 If you find a mismatch between [`AGENTS.md`](../AGENTS.md) and the actual scripts, **the scripts are the source of truth**. Please open an issue (or PR) so `AGENTS.md` can be brought back in line.
+
+## Deployment refuses an existing OS disk tier mismatch
+
+The requested `OsDiskStorageAccountType` differs from a targeted retained OS
+disk. Select its current tier using the CLI input or private
+`compute.osDiskStorageAccountType`; an existing HDD lab needs explicit
+`Standard_LRS`, while new OS disks default to `StandardSSD_LRS`.
+Do not bypass the check or run an implicit conversion. An approved disk-tier
+migration needs a maintenance window with stop/deallocate/restart; HDD OS
+support retires on 8 September 2028. See [cost.md](cost.md).

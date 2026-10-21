@@ -50,6 +50,54 @@ Describe 'Skin and fleet validation' {
     }
 }
 
+Describe 'Explicit retained OS disk tiers' {
+    InModuleScope Common {
+        BeforeEach {
+            $script:diskVm = [pscustomobject]@{
+                name = 'retained-vm'
+                storageProfile = @{ osDisk = @{ managedDisk = @{ id = '/fixture/disk' } } }
+            }
+        }
+        It 'accepts an existing matching <Tier> disk without a write' -TestCases @(
+            @{ Tier = 'Standard_LRS' }
+            @{ Tier = 'StandardSSD_LRS' }
+        ) {
+            param($Tier)
+            Mock Invoke-DemoAz { $Tier }
+            Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType $Tier
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter {
+                $Arguments[0] -eq 'disk' -and $Arguments[1] -eq 'show' -and '/fixture/disk' -in $Arguments
+            }
+        }
+        It 'blocks an incidental HDD to SSD conversion' {
+            Mock Invoke-DemoAz { 'Standard_LRS' }
+            { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } | Should -Throw '*separately approved*'
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'update' -in $Arguments -or 'deallocate' -in $Arguments }
+        }
+        It 'blocks an incidental SSD to HDD conversion' {
+            Mock Invoke-DemoAz { 'StandardSSD_LRS' }
+            { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType Standard_LRS } | Should -Throw '*tier mismatch*'
+        }
+        It 'does not inspect a disk when no existing VM is targeted' {
+            Mock Invoke-DemoAz { throw 'unexpected disk read' }
+            Assert-DemoOsDiskStorageAccountType -Machines @() -StorageAccountType StandardSSD_LRS
+            Should -Invoke Invoke-DemoAz -Times 0
+        }
+        It 'fails on missing disk identity instead of guessing a tier' {
+            $script:diskVm.storageProfile.osDisk.managedDisk.id = ''
+            { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType Standard_LRS } | Should -Throw '*Cannot verify*'
+        }
+        It 'propagates read failures' {
+            Mock Invoke-DemoAz { throw 'disk access denied' }
+            { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType Standard_LRS } | Should -Throw '*disk access denied*'
+        }
+        It 'fails on an unreadable tier' {
+            Mock Invoke-DemoAz { '' }
+            { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType Standard_LRS } | Should -Throw '*unreadable*'
+        }
+    }
+}
+
 Describe 'Portable workbook workspace defaults' {
     BeforeAll {
         $tokens = $null
@@ -273,6 +321,47 @@ Describe 'WhatIf lifecycle safety' {
         & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -WhatIf
         Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if' }
         Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'register' -in $Arguments -or 'create' -in $Arguments -or 'set' -in $Arguments -or 'reset' -in $Arguments }
+    }
+    It 'forwards explicit HDD input over the SSD skin default in a preview' {
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
+        Mock Test-DemoComputeCapacity {}
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'vm') { return '[]' }
+            if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
+            if ($Arguments[0] -eq 'deployment') {
+                $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
+                $global:ArcDiskPreview = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            }
+        }
+        try {
+            & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -OsDiskStorageAccountType Standard_LRS -WhatIf
+            $global:ArcDiskPreview.parameters.osDiskStorageAccountType.value | Should -Be 'Standard_LRS'
+        } finally {
+            Remove-Variable ArcDiskPreview -Scope Global -ErrorAction SilentlyContinue
+        }
+    }
+    It 'rejects an invalid private skin disk tier before cloud inspection' {
+        $path = Join-Path $TestDrive 'invalid-disk-tier.json'
+        Set-Content $path '{"schemaVersion":1,"compute":{"osDiskStorageAccountType":"PremiumV2_LRS"}}'
+        { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -SkinPath $path -AdminEmail 'test@example.com' -WhatIf } | Should -Throw '*OsDiskStorageAccountType*'
+        Should -Invoke Invoke-DemoAz -Times 0
+    }
+    It 'refuses a retained native disk mismatch even if workload tags are missing' {
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
+        Mock Test-DemoComputeCapacity {}
+        Mock Invoke-DemoAz -ModuleName Common { 'Standard_LRS' }
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'vm') {
+                return '[{"name":"az-arcdemo-01","storageProfile":{"osDisk":{"managedDisk":{"id":"/fixture/disk"}}}}]'
+            }
+            if ($Arguments[0] -eq 'disk') { return 'Standard_LRS' }
+            if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
+            if ($Arguments[0] -eq 'deployment') { throw 'must not reach template preview' }
+        }
+        { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -DeployAzureVMs $true -WhatIf } | Should -Throw '*tier mismatch*'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'deployment' }
     }
     It 'preserves Container App fault and skips AKS sample bootstrap in a redeploy preview' {
         Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }

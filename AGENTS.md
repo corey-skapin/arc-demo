@@ -22,6 +22,13 @@ A scripted deployment of an **Azure Arc + Azure Monitor** demo environment. It s
 not 210, and their unit prices were unverified. Hibernation retains billable
 storage/services; see `docs/cost.md`.
 
+New OS disks default to Standard SSD. Retained HDD labs can explicitly use
+`-OsDiskStorageAccountType Standard_LRS` / `compute.osDiskStorageAccountType`;
+the deploy wrapper refuses existing-tier mismatches, never converting disks
+incidentally. HDD OS support retires 8 September 2028. Preserve the live tier,
+schedule any migration separately, and do not mistake avoided SSD spend for
+new savings on already-HDD resources.
+
 ## Lifecycle safety and readiness
 
 Read `docs/lifecycle.md` before operating an existing lab. All lifecycle commands

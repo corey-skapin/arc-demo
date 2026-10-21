@@ -181,6 +181,10 @@ param onPremFleet array = [
 @description('VM SKU')
 param vmSize string = 'Standard_B2as_v2'
 
+@description('OS disk tier for simulated and native VMs. Retained HDD labs may opt in to Standard_LRS; migrate HDD OS disks before 8 September 2028.')
+@allowed(['Standard_LRS', 'StandardSSD_LRS'])
+param osDiskStorageAccountType string = 'StandardSSD_LRS'
+
 @description('Auto-shutdown time (HHmm)')
 param autoShutdownTime string = '1900'
 
@@ -315,6 +319,7 @@ module vmMods 'modules/vm.bicep' = [for vm in requestedOnPremVms: if (deployArcO
       esuEligible: vm.esuEligible ? 'true' : 'false'
     })
     vmSize: vmSize
+    osDiskStorageAccountType: osDiskStorageAccountType
     subnetId: networkMod.outputs.subnetId
     adminUsername: adminUsername
     adminPassword: adminPassword
@@ -339,6 +344,7 @@ module azureVmsMod 'modules/azure-vms.bicep' = if (deployAzureVMs) {
     adminUsername: adminUsername
     adminPassword: adminPassword
     vmSize: vmSize
+    osDiskStorageAccountType: osDiskStorageAccountType
     autoShutdownTime: autoShutdownTime
     autoShutdownTimezone: autoShutdownTimezone
   }

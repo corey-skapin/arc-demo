@@ -12,6 +12,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 | `notifications.email` | Budget and Action Group email receiver. | `operator@example.com` placeholder, rejected until replaced |
 | `workloads.*` | Act-1 and optional workload toggles. | Arc on-prem simulation on; optional Azure VM/Container App/AKS/SQL off |
 | `compute.vmSize` | VM SKU for Arc-simulated and optional native VMs. | `Standard_B2as_v2` |
+| `compute.osDiskStorageAccountType` | OS disk tier for simulated/native VMs; wrapper rejects existing-tier mismatches rather than converting disks. | `StandardSSD_LRS` for new OS disks; explicit `Standard_LRS` for retained HDD labs only |
 | `operations.*` | Auto-shutdown schedule. | 19:00 Cen. Australia Standard Time |
 | `cost.monthlyBudgetAmount` | Subscription budget threshold. | `200` |
 | `labels.*` | Demo title, workbook display name, opening/closing talk-track labels. | Arc Demo labels |
@@ -24,6 +25,9 @@ Change per customer:
 - `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
 - `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. Leave `workloads.installSql` as `false` unless you intentionally want the experimental SQL branch.
 - `workloads.onPremFleetPath` for a custom OS mix.
+- Match `compute.osDiskStorageAccountType` to the existing OS disks for a
+  retained lab. New labs should keep SSD: HDD OS disks retire on 8 September
+  2028. Tier changes are separately approved maintenance, not reskinning.
 
 Keep constant unless the lab requirement changes:
 
