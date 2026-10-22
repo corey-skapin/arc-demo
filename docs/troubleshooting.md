@@ -55,6 +55,22 @@ propagates authorization, CLI and malformed-JSON errors. Use the corrected sourc
 for both normal `-WhatIf` and activation with the retained target/skin. Do not
 manually create network resources or suppress errors to bypass this check.
 
+## Standalone WhatIf reports a CLI failure with empty error details
+
+**Observed cause** - PowerShell preview can apply `WhatIfPreference` to the
+checked CLI adapter's local stderr redirection, printing `What if: Output to
+File` instead of capturing the error. An expected parked NAT/PIP not-found
+response then loses its recognized error code and fails closed as a generic
+nonzero CLI exit. This is not evidence of an authorization denial.
+
+**Fix** - The adapter temporarily disables preview only within its local command
+transport and restores the preference in `finally`, including on failure.
+Caller `ShouldProcess` boundaries still prevent preview from issuing Azure
+mutations; native Azure CLI commands never honored PowerShell preview themselves.
+Recognized absence, real denials and other nonzero exits retain their stderr.
+Use the corrected normal standalone preview, not error suppression or manual
+resource creation.
+
 ## Activation fails at Windows guest completion even though Monitor becomes Ready
 
 **Observed cause** - The old script attempted

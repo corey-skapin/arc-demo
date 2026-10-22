@@ -376,7 +376,10 @@ function Invoke-DemoAz {
         $Arguments += @('--subscription', $script:DemoSubscription)
     }
     $stderr = [System.IO.Path]::GetTempFileName()
+    $captureWhatIfPreference = $WhatIfPreference
     try {
+        # Caller ShouldProcess guards Azure writes; preview must still capture local stderr.
+        $WhatIfPreference = $false
         if ($Arguments[0] -eq 'ad') {
             if (-not $script:DemoTenant) { throw 'Initialize the explicit demo tenant before a directory operation.' }
             $defaultTenant = & $az account show --query tenantId -o tsv 2> $stderr
@@ -396,6 +399,7 @@ function Invoke-DemoAz {
         if ($detail) { Write-Verbose $detail }
         return $output
     } finally {
+        $WhatIfPreference = $captureWhatIfPreference
         [System.IO.File]::Delete($stderr)
     }
 }

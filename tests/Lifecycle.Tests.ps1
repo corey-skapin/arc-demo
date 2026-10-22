@@ -737,13 +737,36 @@ Describe 'Activation with the real optional-network preflight' {
                 $script:DemoSubscription = $null
                 $script:pwshPath = (Get-Process -Id $PID).Path
             }
-            It 'throws on a nonzero native exit even when stdout looks successful' {
+            It 'throws on a nonzero native exit even when stdout looks successful with preview=<Preview>' -TestCases @(
+                @{ Preview = $false }
+                @{ Preview = $true }
+            ) {
+                param($Preview)
                 Mock Get-Command { [pscustomobject]@{ Source = $script:pwshPath } } -ParameterFilter { $Name -eq 'az' }
+                $WhatIfPreference = $Preview
                 { Invoke-DemoAz -Arguments @('-NoProfile', '-Command', 'Write-Output success; [Console]::Error.WriteLine("denied"); exit 7') } | Should -Throw '*exit 7*denied*'
+                $WhatIfPreference | Should -Be $Preview
             }
-            It 'never treats authentication failures as resource absence' {
+            It 'never treats authentication failures as resource absence with preview=<Preview>' -TestCases @(
+                @{ Preview = $false }
+                @{ Preview = $true }
+            ) {
+                param($Preview)
                 Mock Get-Command { [pscustomobject]@{ Source = $script:pwshPath } } -ParameterFilter { $Name -eq 'az' }
+                $WhatIfPreference = $Preview
                 { Invoke-DemoAz -Arguments @('-NoProfile', '-Command', '[Console]::Error.WriteLine("AuthorizationFailed"); exit 1') -AllowNotFound } | Should -Throw '*AuthorizationFailed*'
+                $WhatIfPreference | Should -Be $Preview
+            }
+            It 'recognizes actual native not-found stderr with preview=<Preview>' -TestCases @(
+                @{ Preview = $false }
+                @{ Preview = $true }
+            ) {
+                param($Preview)
+                Mock Get-Command { [pscustomobject]@{ Source = $script:pwshPath } } -ParameterFilter { $Name -eq 'az' }
+                $WhatIfPreference = $Preview
+                $result = Invoke-DemoAz -Arguments @('-NoProfile', '-Command', '[Console]::Error.WriteLine("(ResourceNotFound) expected parked resource"); exit 3') -AllowNotFound
+                $result | Should -BeNullOrEmpty
+                $WhatIfPreference | Should -Be $Preview
             }
             It 'rejects a tenant mismatch without switching defaults' {
                 Mock Invoke-DemoAz { '{"id":"11111111-1111-1111-1111-111111111111","tenantId":"33333333-3333-3333-3333-333333333333"}' }
