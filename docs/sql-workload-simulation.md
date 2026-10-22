@@ -34,7 +34,7 @@ keeps the useful SQL operations story while avoiding unsupported product claims.
 ## Deploy the simulator
 
 ```powershell
-cd C:\src\arc-demo
+# Run from the arc-demo repository root.
 
 .\scripts\Invoke-SqlWorkloadOnArc.ps1 `
   -SubscriptionId <SUBSCRIPTION_ID> `

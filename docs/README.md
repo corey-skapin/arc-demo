@@ -46,7 +46,7 @@ inside reference documents are dated evidence, not current health guarantees.
 | [cost.md](cost.md) | Operator/budget owner: dated retail assumptions, actual observed footprint, HDD choice/retirement and active versus parked costs. | Reference; no fixed all-in bill or implicit authorization to resize. |
 | [reskin-guide.md](reskin-guide.md) | Operator preparing a different lab: private configuration, labels, fleet and retained-tier inputs. | Canonical customization procedure; unnecessary for an existing lab tour. |
 | [legacy-os-fleet.md](legacy-os-fleet.md) | Operator/architect: fleet schema, support gates and represented-not-running legacy tiers. | Reference; default live fleet does not include every example OS. |
-| [module-map.md](module-map.md) | Maintainer: which Bicep module, script/helper, workbook and test owns each behavior. | Reference; not presenter reading. |
+| [module-map.md](module-map.md) | Maintainer: surface ownership and dated engineering/run evidence moved out of agent instructions. | Engineering reference; not presenter reading or current health proof. |
 | [ai-deploy-handbook.md](ai-deploy-handbook.md) | Operator delegating an approved build to an assistant: prompt, inputs and checks. | Optional operator aid; runbook/lifecycle remain canonical. |
 | [container-app-fault.md](container-app-fault.md) | Scenario operator: optional app, restart alert and separately approved break/reset verification. | Optional scenario procedure; inspect existing evidence during the default tour. |
 | [aks-break-scenario.md](aks-break-scenario.md) | Scenario operator: optional AKS workload, crash-loop alert and break/reset commands. | Optional scenario procedure; absent from the verified eight-host lab, not a default prerequisite. |

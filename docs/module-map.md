@@ -1,6 +1,7 @@
 # Arc demo module map
 
-This is the current maintained surface map; line numbers are intentionally omitted
+**Engineering reference, not presenter reading.** This is the maintained surface map;
+dated observations below are not current health proof. Line numbers are intentionally omitted
 because they become stale as the scripts evolve. For safe operations and the
 readiness contract, see [lifecycle.md](lifecycle.md).
 
@@ -92,3 +93,42 @@ conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile
 and advisory documentation lint. Inspect the Markdown log rather than treating
 the job's success alone as lint-clean. Pester is development-only.
+
+## Dated operational evidence (not presenter material)
+
+These observations belong here rather than in AGENTS.md. Raw targets, timestamps,
+logs and results stay in private operator evidence. They describe earlier merged
+source, **not live validation of the best-effort/concurrent refactor**.
+
+- **Linux monitoring reconciliation:** approved VM-path Change Tracking produced
+  guest success and fresh CT records on three Linux hosts without reboot.
+  Stuck Arc extensions were not deleted. DCRAs remained on Arc IDs; Linux
+  Dependency Agent/VM Insights stayed disabled. This verifies that repair only,
+  not generic extension support on simulated Arc-enabled Azure VMs.
+- **Linux endpoint-protection diagnosis:** direct sensors were healthy/licensed
+  but passive, with real-time protection disabled and engine not loaded.
+  Extension event-provider issues differed from newer direct sensor health.
+  Neither Monitor readiness nor a Succeeded extension proved active AV/full EDR;
+  no AV policy change or manual MDE repair followed from those observations.
+- **20 October 2026 rehearsal:** eight exact VM/Arc/Heartbeat identities and
+  all 79 then-current infrastructure/Monitor checks passed. Windows telemetry
+  followed Arc reconnection without repair. This was a dated snapshot.
+- **21 October activation retry:** all eight guest checks passed without
+  unnecessary service restarts; eight patch assessments were submitted and
+  independent readiness passed with fresh exact-ID Heartbeats and healthy
+  non-faulted ACA. It reused already-running compute/network after an earlier
+  Windows service-name check failure; it was not fresh cold-start validation.
+- **22 October cold start/recovery:** absent-NAT null parsing and standalone
+  WhatIf stderr capture defects were corrected. A later Windows AMA guard
+  expired before natural MonAgentCore startup around five minutes after boot;
+  read-only diagnosis found convergence, not a durable agent defect. A released
+  normal retry passed guest checks and independent Active readiness without
+  repair, timeout inflation or assessments on already-active hosts.
+- **22 October cost parking:** after the companion SRE layer parked, approved
+  normal Arc Hibernate completed and independent cost-state/retained-ID checks
+  passed. The estate was parked, not left Active with an incident still running.
+  This is historical completion, not permission for another cloud read or run.
+
+Fresh deployment, double-deploy, AKS park/start and teardown/recreate are separate
+unverified exercises. See [the proposed disposable smoke cycle](cost.md#proposed-disposable-smoke-cycle-not-executed)
+for approval scope and qualified cost. Retained storage/logs/alerts may still bill.
