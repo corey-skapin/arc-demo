@@ -282,6 +282,7 @@ Describe 'WhatIf lifecycle safety' {
         Mock Import-Module {}
         Mock Initialize-DemoContext {}
         Mock Assert-DemoSkinInventory {}
+        Mock Get-DemoNetworkState {}
         Mock Get-DemoInventory {
             [pscustomobject]@{ Machines = @(); ArcRg = 'rg-retail-demo'; InfraRg = 'rg-retail-demo-infra'; ContainerAppIds = @(); AksClusterIds = @(); Resources = @() }
         }
@@ -429,9 +430,21 @@ Describe 'WhatIf lifecycle safety' {
             Mock Get-DemoInventory {
                 $f = $global:ArcLifecycleFixture
                 [pscustomobject]@{ Machines = @($f.machine); ArcRg = 'rg-retail-demo'; InfraRg = 'rg-retail-demo-infra'
-                    ContainerAppIds = @(); AksClusterIds = @("$($f.root)/Microsoft.ContainerService/managedClusters/retail-demo-aks"); Resources = $f.resources }
+                    ContainerAppIds = @($f.appIds | Where-Object { $_ }); AksClusterIds = @("$($f.root)/Microsoft.ContainerService/managedClusters/retail-demo-aks"); Resources = $f.resources }
             }
             Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/id' 'parked' 'parked' 'pass' }
+            Mock Get-DemoNetworkState {
+                $f = $global:ArcLifecycleFixture
+                if ($f.networkError) { throw $f.networkError }
+                $natId = "$($f.root)/Microsoft.Network/natGateways/natgw-retail-demo"
+                $pipId = "$($f.root)/Microsoft.Network/publicIPAddresses/pip-natgw-retail-demo"
+                [pscustomobject]@{
+                    NatId = $natId; PublicIpId = $pipId
+                    Subnet = @{ id = "$($f.root)/Microsoft.Network/virtualNetworks/vnet-retail-demo/subnets/snet-vms"; natGateway = @{ id = $f.nat } }
+                    Nat = if ($natId -in $f.resources.id) { @{ id = $natId; publicIpAddresses = @(@{ id = $pipId }) } }
+                    PublicIp = $f.resources | Where-Object id -eq $pipId
+                }
+            }
             Mock Invoke-DemoAz {
                 param($Arguments)
                 $f = $global:ArcLifecycleFixture
@@ -455,9 +468,9 @@ Describe 'WhatIf lifecycle safety' {
             & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
             Should -Invoke Invoke-DemoGuestCommand -Times 1 -ParameterFilter { $Script -match 'MonAgentCore' -and $Script -notmatch 'Restart-Service|AzureMonitorAgent' }
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'start' -in $Arguments -or 'create' -in $Arguments -or 'update' -in $Arguments }
-            Should -Invoke Invoke-DemoAz -Times 1 -ParameterFilter { $Arguments[0] -eq 'aks' -and '-g' -in $Arguments -and '-n' -in $Arguments -and '--ids' -notin $Arguments }
+            Should -Invoke Invoke-DemoAz -Times 2 -Exactly -ParameterFilter { $Arguments[0] -eq 'aks' -and '-g' -in $Arguments -and '-n' -in $Arguments -and '--ids' -notin $Arguments }
         }
-        It 'validates a connected Windows Arc host with no AMA service and submits assessments on retry' {
+        It 'validates a connected Windows Arc host without resubmitting assessments on an already-active retry' {
             $f = $global:ArcLifecycleFixture
             $f.machine.Native = $false
             $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
@@ -467,13 +480,14 @@ Describe 'WhatIf lifecycle safety' {
             Should -Invoke Get-Service -Times 1 -ParameterFilter { $Name -eq 'himds' }
             Should -Invoke Get-Service -Times 0 -ParameterFilter { $Name -eq 'AzureMonitorAgent' }
             Should -Invoke Restart-Service -Times 0
-            Should -Invoke Invoke-DemoAz -Times 1 -ParameterFilter { $Arguments[1] -eq 'assess-patches' -and '/arc/machines/windows-fixture' -in $Arguments -and '--no-wait' -in $Arguments }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
             $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             $report.status | Should -Be 'pass'
             $report.guestChecks.Count | Should -Be 1
             $report.guestChecks[0].restartedServices.Count | Should -Be 0
             $report.guestChecks[0].status | Should -Be 'pass'
-            $report.patchAssessments[0].status | Should -Be 'submitted'
+            $report.patchAssessments.Count | Should -Be 0
+            $report.patchAssessment | Should -Be 'not-required'
             $report.readiness | Should -Be 'skipped'
         }
         It 'reports an unhealthy Arc service and does not submit assessments after guest failure' {
@@ -529,11 +543,79 @@ Describe 'WhatIf lifecycle safety' {
             $global:ArcLifecycleFixture.machine | Add-Member ArcId '/arc/machines/windows-fixture'
             Mock Invoke-DemoAz { throw 'injected assessment failure' } -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
             $path = Join-Path $TestDrive 'activation-assessment-failed.json'
-            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -ResultPath $path } | Should -Throw '*injected assessment failure*'
+            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -AssessPatches -ResultPath $path } | Should -Throw '*injected assessment failure*'
             $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             $report.status | Should -Be 'fail'
             $report.guestChecks[0].status | Should -Be 'pass'
             $report.patchAssessments[0].status | Should -Be 'fail'
+        }
+        It 'allows explicitly requested assessment submission on an already-active retry' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -AssessPatches
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' -and '--no-wait' -in $Arguments }
+        }
+        It 'assesses a newly started Arc host by default' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            $f.machine.Actual.powerState = 'VM deallocated'
+            Mock Invoke-DemoAz { $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM running' } -ParameterFilter { $Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'start' }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+        }
+        It 'rejects conflicting assessment switches before inspecting Azure' {
+            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipPatchAssessment -AssessPatches } | Should -Throw '*cannot both*'
+            Should -Invoke Initialize-DemoContext -Times 0
+        }
+        It 'repairs only the missing PIP binding on a retained exclusive NAT' {
+            Mock Get-DemoNetworkState {
+                $f = $global:ArcLifecycleFixture
+                [pscustomobject]@{
+                    NatId = $f.nat; PublicIpId = "$($f.root)/Microsoft.Network/publicIPAddresses/pip-natgw-retail-demo"
+                    PublicIp = $null; Nat = @{ id = $f.nat; publicIpAddresses = @() }
+                    Subnet = @{ id = "$($f.root)/Microsoft.Network/virtualNetworks/vnet-retail-demo/subnets/snet-vms"; natGateway = @{ id = $f.nat } }
+                }
+            }
+            Mock Invoke-DemoAz {} -ParameterFilter { $Arguments[0] -eq 'network' -and $Arguments[1] -eq 'public-ip' -and $Arguments[2] -eq 'create' }
+            Mock Invoke-DemoAz {} -ParameterFilter { $Arguments[0] -eq 'network' -and $Arguments[1] -eq 'nat' -and $Arguments[3] -eq 'update' }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'public-ip' -and $Arguments[2] -eq 'create' }
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'nat' -and $Arguments[3] -eq 'update' -and '--public-ip-addresses' -in $Arguments }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[1] -eq 'nat' -and $Arguments[3] -eq 'create' }
+        }
+        It 'rejects a sharing conflict before activation or hibernation mutates anything' -TestCases @(
+            @{ ScriptName = 'Activate-ArcDemo.ps1' }
+            @{ ScriptName = 'Hibernate-ArcDemo.ps1' }
+        ) {
+            param($ScriptName)
+            $global:ArcLifecycleFixture.networkError = 'shared NAT'
+            { & (Join-Path $repo "scripts\$ScriptName") -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo } | Should -Throw '*shared NAT*'
+            Should -Invoke Invoke-DemoAz -Times 0
+            Should -Invoke Invoke-DemoGuestCommand -Times 0
+        }
+        It 'recovers an interrupted NAT/PIP removal without restarting or redeallocating hosts' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Actual.powerState = 'VM deallocated'
+            $f.clusterState = 'Stopped'
+            $f.failPublicIpDelete = $true
+            Mock Invoke-DemoAz { $global:ArcLifecycleFixture.nat = '' } -ParameterFilter { $Arguments[0] -eq 'network' -and 'subnet' -in $Arguments -and 'update' -in $Arguments }
+            Mock Invoke-DemoAz {
+                $f = $global:ArcLifecycleFixture
+                $f.resources = @($f.resources | Where-Object type -ne 'Microsoft.Network/natGateways')
+            } -ParameterFilter { $Arguments[0] -eq 'network' -and 'gateway' -in $Arguments -and 'delete' -in $Arguments }
+            Mock Invoke-DemoAz {
+                $f = $global:ArcLifecycleFixture
+                if ($f.failPublicIpDelete) { $f.failPublicIpDelete = $false; throw 'injected public IP delete failure' }
+                $f.resources = @($f.resources | Where-Object type -ne 'Microsoft.Network/publicIPAddresses')
+            } -ParameterFilter { $Arguments[0] -eq 'network' -and 'public-ip' -in $Arguments -and 'delete' -in $Arguments }
+            { & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo } | Should -Throw '*public IP delete failure*'
+            & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { 'gateway' -in $Arguments -and 'delete' -in $Arguments }
+            Should -Invoke Invoke-DemoAz -Times 2 -Exactly -ParameterFilter { 'public-ip' -in $Arguments -and 'delete' -in $Arguments }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'deallocate' -in $Arguments -or 'start' -in $Arguments -or 'create' -in $Arguments }
+            $f.resources.Count | Should -Be 0
         }
         It 'does not repeat completed deallocation or delete absent NAT on a hibernation rerun' {
             $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM deallocated'
@@ -542,6 +624,56 @@ Describe 'WhatIf lifecycle safety' {
             $global:ArcLifecycleFixture.resources = @()
             & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'deallocate' -in $Arguments -or 'stop' -in $Arguments -or 'delete' -in $Arguments -or 'update' -in $Arguments }
+        }
+        It 'waits for an in-flight VM start without submitting start again' {
+            $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM starting'
+            Mock Invoke-DemoAz {
+                $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM running'
+                ConvertTo-Json -InputObject @($global:ArcLifecycleFixture.machine.Actual) -Depth 5
+            } -ParameterFilter { $Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'list' }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'start' }
+        }
+        It 'waits for an in-flight AKS start even when optional full readiness is skipped' {
+            $global:ArcLifecycleFixture.clusterReads = 0
+            Mock Invoke-DemoAz {
+                $f = $global:ArcLifecycleFixture
+                $f.clusterReads++
+                @{ name = 'retail-demo-aks'; powerState = @{ code = 'Running' }; provisioningState = if ($f.clusterReads -eq 1) { 'Starting' } else { 'Succeeded' } } | ConvertTo-Json -Depth 5
+            } -ParameterFilter { $Arguments[0] -eq 'aks' -and $Arguments[1] -eq 'show' }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'aks' -and $Arguments[1] -eq 'start' }
+            $global:ArcLifecycleFixture.clusterReads | Should -Be 2
+        }
+        It 'waits for in-flight deallocation without submitting deallocate again' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Actual.powerState = 'VM deallocating'
+            $f.clusterState = 'Stopped'; $f.nat = ''; $f.resources = @()
+            Mock Invoke-DemoAz {
+                $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM deallocated'
+                ConvertTo-Json -InputObject @($global:ArcLifecycleFixture.machine.Actual) -Depth 5
+            } -ParameterFilter { $Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'list' }
+            & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'deallocate' -in $Arguments -or 'start' -in $Arguments }
+        }
+        It 'deactivates only active app revisions and preserves them on a parked retry' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Actual.powerState = 'VM deallocated'
+            $f.clusterState = 'Stopped'; $f.nat = ''; $f.resources = @()
+            $f.appIds = @("$($f.root)/Microsoft.App/containerApps/fixture")
+            $f.revisions = @(
+                @{ name = 'retained'; properties = @{ active = $false } }
+                @{ name = 'active'; properties = @{ active = $true } }
+            )
+            Mock Invoke-DemoAz { ConvertTo-Json -InputObject $global:ArcLifecycleFixture.revisions -Depth 5 } -ParameterFilter { $Arguments[0] -eq 'containerapp' -and $Arguments[2] -eq 'list' }
+            Mock Invoke-DemoAz {
+                ($global:ArcLifecycleFixture.revisions | Where-Object name -eq 'active').properties.active = $false
+            } -ParameterFilter { $Arguments[0] -eq 'containerapp' -and $Arguments[2] -eq 'deactivate' }
+            1..2 | ForEach-Object {
+                & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo
+            }
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[0] -eq 'containerapp' -and $Arguments[2] -eq 'deactivate' -and 'active' -in $Arguments }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'update' -in $Arguments -or 'set' -in $Arguments -or 'start' -in $Arguments -or 'delete' -in $Arguments }
         }
         It 'does not remove outbound NAT when deallocation verification fails' {
             $global:ArcLifecycleFixture.clusterState = 'Stopped'
@@ -640,6 +772,7 @@ Describe 'Readiness CLI contract' {
         InModuleScope Common {
             BeforeEach {
                 $script:DemoSubscription = '11111111-1111-1111-1111-111111111111'
+                Mock Get-DemoNetworkState { [pscustomobject]@{ NatId = '/nat'; PublicIpId = '/pip'; Nat = $null; PublicIp = $null; Subnet = @{ id = '/subnet' } } }
                 Mock Invoke-DemoAz {
                     param($Arguments)
                     if ($Arguments[0] -eq 'group') { return '{"properties":{"provisioningState":"Succeeded"}}' }
@@ -672,10 +805,201 @@ Describe 'Readiness CLI contract' {
         $LASTEXITCODE | Should -Be 2
         ($output | ConvertFrom-Json).status | Should -Be 'pending'
     }
+    It 'keeps schema and exits compatible for Active' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'ready' 'pass' }
+        $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -DesiredState Active -OutputFormat Json
+        $LASTEXITCODE | Should -Be 0
+        ($output | ConvertFrom-Json).desiredState | Should -Be 'Active'
+        Should -Invoke Get-DemoReadinessChecks -Times 1 -ParameterFilter { $DesiredState -eq 'Active' }
+    }
+    It 'passes parked cost state with explicit failed and pending wake diagnostics' {
+        Mock Get-DemoReadinessChecks {
+            New-DemoCheck 'vm/fixture/power' '/vm/fixture' 'VM deallocated' 'VM deallocated' 'pass'
+            New-DemoCheck 'extension/fixture/ama' '/extension/ama' 'Succeeded' 'Failed' 'fail' $false 'Wake-readiness diagnostic'
+            New-DemoCheck 'dcra/fixture/rule' '/fixture' 'rule' $null 'pending' $false 'Wake-readiness diagnostic'
+        }
+        $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -DesiredState Hibernated -OutputFormat Json
+        $LASTEXITCODE | Should -Be 0
+        $result = $output | ConvertFrom-Json
+        $result.status | Should -Be 'pass'
+        $result.checks[1].status | Should -Be 'fail'
+        $result.checks[1].required | Should -BeFalse
+    }
+    It 'inspects Removed without deployment history or live VM inventory' {
+        Mock Get-DemoInventory { throw 'deployment history is absent' }
+        Mock Get-DemoRemovalChecks { New-DemoCheck 'group/fixture' '/rg/fixture' 'absent' 'absent' 'pass' }
+        $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -DesiredState Removed -OutputFormat Json
+        $LASTEXITCODE | Should -Be 0
+        ($output | ConvertFrom-Json).desiredState | Should -Be 'Removed'
+        Should -Invoke Get-DemoInventory -Times 0
+    }
     It 'returns an actionable error record and exit 1 on inspection failure' {
         Mock Get-DemoReadinessChecks { throw 'permission denied' }
         $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json
         $LASTEXITCODE | Should -Be 1
         ($output | ConvertFrom-Json).checks[-1].message | Should -Be 'permission denied'
+    }
+}
+
+    Describe 'Narrow lifecycle network ownership checks' {
+        InModuleScope Common {
+            BeforeEach {
+                $script:DemoSubscription = '11111111-1111-1111-1111-111111111111'
+                $script:networkRoot = "/subscriptions/$script:DemoSubscription/resourceGroups/rg-retail-demo-infra/providers/Microsoft.Network"
+                $script:networkFixture = @{
+                    subnet = @{ id = "$script:networkRoot/virtualNetworks/vnet-retail-demo/subnets/snet-vms"; natGateway = @{ id = "$script:networkRoot/natGateways/natgw-retail-demo" } }
+                    nat = @{ id = "$script:networkRoot/natGateways/natgw-retail-demo"; subnets = @(@{ id = "$script:networkRoot/virtualNetworks/vnet-retail-demo/subnets/snet-vms" }); publicIpAddresses = @(@{ id = "$script:networkRoot/publicIPAddresses/pip-natgw-retail-demo" }) }
+                    pip = @{ id = "$script:networkRoot/publicIPAddresses/pip-natgw-retail-demo"; natGateway = @{ id = "$script:networkRoot/natGateways/natgw-retail-demo" } }
+                }
+                Mock Invoke-DemoAz {
+                    param($Arguments)
+                    switch ($Arguments[0..2] -join ' ') {
+                        'network vnet subnet' { $script:networkFixture.subnet | ConvertTo-Json -Depth 10 }
+                        'network nat gateway' { if ($script:networkFixture.nat) { $script:networkFixture.nat | ConvertTo-Json -Depth 10 } }
+                        'network public-ip show' { if ($script:networkFixture.pip) { $script:networkFixture.pip | ConvertTo-Json -Depth 10 } }
+                        default { throw 'Unexpected operation; network preflight must only inspect exact resources.' }
+                    }
+                }
+            }
+            It 'accepts the expected exclusively used resources' {
+                $state = Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo
+                $state.Nat.id | Should -Be "$script:networkRoot/natGateways/natgw-retail-demo"
+                Should -Invoke Invoke-DemoAz -Times 3 -Exactly -ParameterFilter { 'show' -in $Arguments -and '--ids' -in $Arguments }
+            }
+            It 'accepts already-absent ephemeral resources and detached subnet' {
+                $script:networkFixture.nat = $null
+                $script:networkFixture.pip = $null
+                $script:networkFixture.subnet.natGateway = $null
+                $state = Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo
+                $state.Nat | Should -BeNullOrEmpty
+                $state.PublicIp | Should -BeNullOrEmpty
+            }
+            It 'rejects a foreign subnet association' {
+                $script:networkFixture.subnet.natGateway.id = '/foreign/nat'
+                { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo } | Should -Throw '*unexpected NAT*'
+            }
+            It 'rejects a NAT shared with another subnet' {
+                $script:networkFixture.nat.subnets += @{ id = '/foreign/subnet' }
+                { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo } | Should -Throw '*shared*'
+            }
+            It 'rejects additional NAT public IPs' {
+                $script:networkFixture.nat.publicIpAddresses += @{ id = '/foreign/pip' }
+                { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo } | Should -Throw '*unexpected public IP*'
+            }
+            It 'rejects a PIP bound to another resource' {
+                $script:networkFixture.pip.ipConfiguration = @{ id = '/foreign/nic/ipconfig' }
+                { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo } | Should -Throw '*another resource*'
+            }
+            It 'propagates a genuine read denial instead of treating the NAT as absent' {
+                Mock Invoke-DemoAz { throw 'AuthorizationFailed' } -ParameterFilter { 'gateway' -in $Arguments }
+                { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo } | Should -Throw '*AuthorizationFailed*'
+            }
+        }
+    }
+
+    Describe 'Actual parked checks versus wake diagnostics' {
+        InModuleScope Common {
+            BeforeEach {
+                $script:DemoSubscription = '11111111-1111-1111-1111-111111111111'
+                $script:parkedInventory = [pscustomobject]@{
+                    ArcRg = 'rg-retail-demo'; InfraRg = 'rg-retail-demo-infra'; Resources = @(); AksClusterIds = @(); ContainerAppIds = @()
+                    Machines = @([pscustomobject]@{ Name = 'fixture'; Id = '/vm/fixture'; ArcId = '/arc/fixture'; Native = $false
+                        Monitor = $true; VmInsights = $false; ChangeTracking = $false; OsType = 'Windows'; Actual = @{ powerState = 'VM deallocated' } })
+                }
+                Mock Get-DemoNetworkState { [pscustomobject]@{ NatId = '/nat'; PublicIpId = '/pip'; Nat = $null; PublicIp = $null; Subnet = @{ id = '/subnet' } } }
+                Mock Get-DemoHeartbeatIds { throw 'No live telemetry query while parked' }
+                Mock Invoke-DemoAz {
+                    param($Arguments)
+                    if ($Arguments[0] -eq 'group') { return '{"properties":{"provisioningState":"Succeeded"}}' }
+                    if ($Arguments[0] -eq 'connectedmachine' -and $Arguments[1] -eq 'list') { return '[{"id":"/arc/fixture","status":"Disconnected"}]' }
+                    if ($Arguments[0] -eq 'connectedmachine') { return '[{"name":"AzureMonitorWindowsAgent","properties":{"provisioningState":"Failed"}}]' }
+                    return '[]'
+                }
+            }
+            It 'keeps missing DCRAs and failed extensions visible without failing parked cost state' {
+                $checks = @(Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Hibernated)
+                @($checks | Where-Object { $_.required -and $_.status -ne 'pass' }).Count | Should -Be 0
+                $extension = $checks | Where-Object id -like 'extension/*'
+                $extension.status | Should -Be 'fail'
+                $extension.required | Should -BeFalse
+                $extension.message | Should -Match 'Wake-readiness diagnostic'
+                ($checks | Where-Object id -like 'dcra/*').required | Should -BeFalse
+                Should -Invoke Get-DemoHeartbeatIds -Times 0
+            }
+            It 'still fails mandatory cost checks when expected VM or app state is not parked' {
+                $script:parkedInventory.Machines[0].Actual.powerState = 'VM running'
+                $script:parkedInventory.ContainerAppIds = @('/containerapps/fixture')
+                Mock Invoke-DemoAz { '[{"name":"active","properties":{"active":true}}]' } -ParameterFilter { $Arguments[0] -eq 'containerapp' }
+                $checks = @(Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Hibernated)
+                @($checks | Where-Object { $_.required -and $_.status -eq 'pending' }).Count | Should -Be 2
+            }
+            It 'keeps inspection errors terminating even for optional monitoring diagnostics' {
+                Mock Invoke-DemoAz { throw 'monitoring access denied' } -ParameterFilter { $Arguments[0] -eq 'monitor' }
+                { Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Hibernated } | Should -Throw '*access denied*'
+            }
+        }
+    }
+
+Describe 'Removed ownership boundary' {
+    InModuleScope Common {
+        BeforeEach {
+            $script:DemoSubscription = '11111111-1111-1111-1111-111111111111'
+            Mock Invoke-DemoAz {
+                param($Arguments)
+                if ($Arguments[0] -eq 'group') { return 'false' }
+                if ($Arguments[0] -in @('policy', 'consumption')) { return $null }
+                throw 'Removed verification must not use directory or deployment APIs.'
+            }
+        }
+        It 'verifies owned group policy and budget absence with explicit retained exceptions' {
+            $checks = @(Get-DemoRemovalChecks retail-demo)
+            @($checks | Where-Object required).Count | Should -Be 5
+            @($checks | Where-Object { $_.required -and $_.status -ne 'pass' }).Count | Should -Be 0
+            @($checks | Where-Object { -not $_.required -and $_.status -eq 'skipped' }).Count | Should -Be 2
+        }
+        It 'does not claim Removed while a named policy remains' {
+            Mock Invoke-DemoAz { '{"id":"/remaining-policy"}' } -ParameterFilter { $Arguments[0] -eq 'policy' -and 'mcsb-retail-demo' -in $Arguments }
+            (Get-DemoRemovalChecks retail-demo | Where-Object id -eq 'policy/mcsb-retail-demo').status | Should -Be 'pending'
+        }
+        It 'does not claim Removed while its budget remains' {
+            Mock Invoke-DemoAz { '{"name":"budget-retail-demo"}' } -ParameterFilter { $Arguments[0] -eq 'consumption' }
+            (Get-DemoRemovalChecks retail-demo | Where-Object id -eq 'budget').status | Should -Be 'pending'
+        }
+    }
+}
+
+Describe 'Removal convergence without broad cleanup' {
+    BeforeEach {
+        Mock Import-Module {}
+        Mock Initialize-DemoContext {}
+        Mock Invoke-AzRest { throw 'Already-absent budget must not be deleted again.' }
+        Mock Get-DemoRemovalChecks { New-DemoCheck 'owned' '/fixture' 'absent' 'absent' 'pass' }
+        Mock Wait-Until {
+            param($Condition)
+            if (-not (& $Condition)) { throw 'Owned resources still present.' }
+        }
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'group' -and $Arguments[1] -eq 'exists') { return 'false' }
+            if ($Arguments[0] -in @('policy', 'consumption')) { return $null }
+            throw 'Unexpected cleanup operation.'
+        }
+    }
+    It 'does not write or use Graph when owned resources are already removed' {
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -Confirm:$false
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'delete' -in $Arguments -or 'create' -in $Arguments -or $Arguments[0] -eq 'ad' }
+        Should -Invoke Invoke-AzRest -Times 0
+        Should -Invoke Get-DemoRemovalChecks -Times 1
+    }
+    It 'does not declare success solely because both groups are gone' {
+        Mock Get-DemoRemovalChecks { New-DemoCheck 'budget' '/budget' 'absent' 'exists' 'pending' }
+        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -Confirm:$false } | Should -Throw '*still present*'
+    }
+    It 'checks optional identity sharing before deleting policies budget or groups' {
+        Mock Invoke-DemoAz { '[{"id":"identity-fixture","displayName":"sp-retail-demo-onboard"}]' } -ParameterFilter { $Arguments[0] -eq 'ad' }
+        Mock Invoke-DemoAz { '[{"scope":"/foreign"}]' } -ParameterFilter { $Arguments[0] -eq 'role' }
+        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -RemoveOnboardingIdentity -Confirm:$false } | Should -Throw '*potentially shared*'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'delete' -in $Arguments -or $Arguments[0] -in @('policy', 'consumption', 'group') }
+        Should -Invoke Invoke-AzRest -Times 0
     }
 }

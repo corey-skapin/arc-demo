@@ -121,7 +121,9 @@ Container App revisions, then removes NAT/PIP. Data and fault flags remain.
 Activation restores outbound NAT first, starts retained workloads and reconnects
 agents where needed. Every run verifies guests, including already-connected hosts,
 without unnecessary restarts; Windows Arc AMA uses a `MonAgentCore` process check.
-Default assessment submissions also run on retries. Use optional `-ResultPath`
+Default assessment submissions cover newly started/waking Arc hosts only;
+already-active retries do not resubmit. `-AssessPatches` explicitly requests
+all-host assessments (including assessment-phase retries). Use optional `-ResultPath`
 in an existing private directory to preserve per-host outcomes, and distinguish
 script completion from Monitor Ready and asynchronous assessment completion.
 It does not reset faults. Optional AKS can take longer and
@@ -133,19 +135,31 @@ If SRE is attached, park that dependent layer first through its own maintained
 procedure; on wake, restore Arc/Monitor and verify Ready before SRE resumes.
 Hibernation is not cleanup: it does not delete groups, disks, Arc identities,
 Key Vault secrets, onboarding credentials, DCRs or the workspace.
+Its required acceptance covers parked compute/app state and owned NAT/PIP
+absence/detachment. Failed/pending retained monitoring checks remain visible as
+non-required wake diagnostics; actual inspection/auth errors still fail.
+Use normal lifecycle `-WhatIf`, not deployment Graph/Owner/quota preflight or
+historical whole-group index comparisons. Exact network sharing is checked
+before writes. On partial failure, retry without redeploying or waking compute.
+Enabled alerts can still evaluate/notify and incur charges; there is no automatic
+pause/restore of their previous enabled state.
 
 ## 6. Remove permanently (separate destructive approval)
 
 ```powershell
 .\scripts\Remove-ArcDemo.ps1 @target -WhatIf
 .\scripts\Remove-ArcDemo.ps1 @target
+.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Removed -OutputFormat Json
 ```
 
-This deletes both demo groups and named policies/budget and waits for group
+This deletes both demo groups and named policies/budget and verifies all their
 absence. Defender pricing is preserved unless `-DisableDefender` is explicitly
 requested. `-RemoveOnboardingIdentity` is separately opt-in and rejects shared or
 ambiguous identities. Inspect remaining subscription/tenant resources and delayed
 billing; do not promise zero charges just because group deletion completed.
+Default Removed verification needs no deployment history or Graph lookup;
+tenant identities/applications, shared services and soft-deleted vaults are
+explicit exclusions. Active readiness also accepts the legacy `Ready` name.
 
 ## 7. Local development validation
 

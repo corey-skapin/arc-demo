@@ -10,6 +10,15 @@ Use the same skin/prefix throughout. CLI defaults are not changed by the scripts
 
 ## Supported operations
 
+There are three desired states: **Active**, **Hibernated**, **Removed**.
+`Ready` remains an alias for Active and the compatibility default. Pending/error
+describes an unfinished transition, not a fourth state. Hibernation deallocates
+VM hardware while preserving VM definitions, system-assigned identities, disks
+and NICs. Deleting VM definitions would add reconstruction/identity risk without
+further pay-as-you-go VM compute savings; this is not Azure RAM hibernation.
+See [VM billing states](https://learn.microsoft.com/azure/virtual-machines/states-billing)
+and [managed identity lifecycle](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview).
+
 ```powershell
 $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVATE_SKIN_PATH>' }
 .\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
@@ -26,9 +35,10 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 # Permanent removal: separate, explicit operator approval.
 .\scripts\Remove-ArcDemo.ps1 @target -WhatIf
 .\scripts\Remove-ArcDemo.ps1 @target
+.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Removed -OutputFormat Json
 ```
 
-Preflight is **read-only**: tooling, explicit context, effective inherited/group
+**Deployment** preflight is **read-only**: tooling, explicit context, effective inherited/group
 Owner (or Contributor + User Access Administrator), and needed provider
 registrations. Supplying a deployer principal ID does not bypass RBAC checks.
 Missing registrations must be approved and registered separately. Baseline
@@ -36,6 +46,16 @@ providers include KeyVault, DevTestLab and Consumption. Optional Container Apps
 requires Microsoft.App; AKS additionally needs ContainerService, ManagedIdentity,
 Resources, Storage and ContainerInstance for its deployment script. AzureArcData
 is only needed for the experimental SQL path.
+
+Parking/waking/removal does **not** invoke that deployment Graph/Owner/provider/
+capacity gate. Use the normal explicit context, retained workload inventory and
+`-WhatIf` path; a genuine ARM authorization failure still stops the operation.
+Before any park/wake write, exact subnet/NAT/PIP GETs refuse a foreign NAT,
+another attached subnet/public IP/prefix, or a PIP bound to another resource.
+These narrow sharing guards replace neither normal authorization nor ownership
+review. Do not compare whole resource-group counts or historical generic
+extension indexes as a lifecycle gate. Optional identity removal checks directory
+ownership/access before any removal writes, including on its preview.
 
 Deployment checks the requested VM SKU's location restrictions and regional/family
 vCPU quotas. These checks **do not prove spare physical capacity**; even ARM
@@ -72,10 +92,14 @@ It does not assume the Windows client/MSI `AzureMonitorAgent` service exists or
 restart the extension host. Linux checks each required service individually.
 See [Windows Arc AMA troubleshooting](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc).
 
-Unless skipped explicitly, **each activation submits assessments for all retained
-Arc hosts**, even when they were already running/connected. This completes the
-normal assessment phase on a retry; native Azure VMs are not Arc assessment
-targets. Submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
+Unless skipped, activation submits assessments only for Arc hosts started/waking
+on the attempt. Already-active retries still verify guests but **do not resubmit**
+assessments. Use `-AssessPatches` to explicitly request all-host assessment work,
+including retrying a failed assessment phase after compute is already running.
+It conflicts with `-SkipPatchAssessment`; native VMs are not Arc assessment
+targets. The activation result records `not-required` when no hosts need default
+submission. This is not proof of earlier assessment success or freshness.
+Submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
 `-SkipValidate` opts out of final readiness and must never be reported as a
 validated demo. Activation never changes workload fault flags.
 
@@ -97,6 +121,27 @@ or missing from a running-count query. AKS must report `Stopped` and provisionin
 setting minimum replicas to zero alone does not prevent HTTP scale-out.
 Fault flags, storage, DCRAs and guest configuration are preserved.
 Retries inspect current state and do not repeat completed state transitions.
+In-flight VM deallocation/start and AKS stop/start are waited for, not resubmitted.
+Activation waits for AKS Running even with `-SkipValidate`. Failures leave completed
+parking steps intact: do not wake/redeploy to undo a partial stop. Retry the same
+target to finish remaining known transitions (for example a failed PIP deletion).
+Network sharing is inspected again before removal after compute has stopped.
+
+Hibernated **required** acceptance is VM deallocation, optional deployed AKS
+Stopped/Succeeded, no active Container App revision, and absent/detached owned
+NAT/PIP. Retained groups, Arc records, workspace/DCR/workbook/alert presence and
+extension/DCRA health are **non-required wake diagnostics**. Their fail/pending
+rows remain visible with explanatory messages, but do not change a verified
+parked cost-state result to failure or claim compute remains active. They can
+still prevent the later Active readiness from passing. Actual inspection errors,
+including permission/auth failures, still return failure rather than being
+silently relabeled as harmless drift.
+
+No automatic alert/polling pause is introduced: owned alert definitions remain
+enabled as before and may incur evaluation/notification costs. Safe restoration
+would require preserving exact previous enabled state and reconciling concurrent
+changes/companion routing; a generic disable/enable would be unsafe. Evaluate a
+separate explicit pause only if measured savings justify that added state.
 
 Before parking, preserve the confirmed target, exact skin/fleet files and their
 hashes, prefix/region, deployment-manifest identities and optional revision/fault
@@ -104,7 +149,7 @@ state in a private operator handoff outside git. Hibernation needs no VM passwor
 or onboarding secret and does not rotate either. Keep the existing Key Vault and
 tenant onboarding identity for later approved deployment/reconciliation.
 
-If the optional SRE layer is attached, finish/reset its approved fault window and
+If the optional SRE layer is attached, finish its approved fault window and
 hibernate that layer first under its own procedure. Then preview and run Arc
 hibernation. Wake Arc/Monitor and verify Ready before resuming the dependent SRE
 layer. Readiness requires no active Container App revisions while parked; its
@@ -117,12 +162,18 @@ and start, and do not interleave operations. Stopped state is retained for up to
 billable. See [AKS stop/start](https://learn.microsoft.com/azure/aks/start-stop-cluster)
 and [Container App revision management](https://learn.microsoft.com/azure/container-apps/revisions-manage).
 
-Removal waits for both resource groups to disappear. Subscription-wide Defender
+Removal waits for both resource groups **and** named subscription policies/budget
+to disappear; a rerun skips already-absent objects. `Removed` read-only verification
+needs no deployment history, VM inventory or directory lookup. Its mandatory
+boundary is those Azure-owned objects, not tenant-wide cleanup. Subscription-wide Defender
 pricing is **preserved by default**; only `-DisableDefender` changes it, and this
 can affect other workloads. `-KeepDefender` remains a compatibility switch.
 `-RemoveOnboardingIdentity` is separately opt-in and refuses ambiguous identities
 or identities with assignments outside the Arc group. Soft-deleted Key Vaults and
-retained tenant applications may need operator review. Do not promise a zero bill.
+retained tenant applications are explicit exceptions, not verified absence.
+Default removal deliberately retains the tenant onboarding identity; opt-in SP
+deletion does not claim application-object deletion. No purge is performed.
+Review these exclusions/delayed billing separately; do not promise a zero bill.
 
 ## Credentials and partial deployments
 
@@ -154,7 +205,8 @@ Ready checks pending; disclose it instead of silently resetting it.
 $LASTEXITCODE
 ```
 
-`-DesiredState` is `Ready` or `Hibernated`; `-OutputFormat` is `Json` or `Table`.
+`-DesiredState` is `Active`, `Ready` (compatible alias/default), `Hibernated` or
+`Removed`; `-OutputFormat` is `Json` or `Table`. The supplied state name is echoed.
 Default timeout is zero (one snapshot); 0-600 seconds bounds eventual-consistency
 retries. Individual CLI reads and service response times still contribute to total
 wall time. A hard failure stops retries. There is no fault induction or repair.
@@ -193,7 +245,12 @@ Checks cover retained groups, core resources/workbook presence, exact VM power,
 Arc connection, supported extension provisioning, DCRA identities, recent
 Heartbeat by expected ARM ID, NAT attachment/presence, AKS power/provisioning and
 active Container App revision health. `RunningAtMinScale`/`RunningAtMaxScale` are
-valid healthy revision states. Hibernated hosts intentionally skip Heartbeat.
+valid healthy revision states. Hibernated hosts intentionally skip Heartbeat;
+monitor/retained-configuration rows have `required:false` with diagnostic messages.
+Removed checks group/policy/budget absence and emits non-required skipped rows
+for retained tenant/shared/soft-delete exceptions. SchemaVersion 1 and existing
+0/1/2 exit meanings are unchanged: consumers must honor each row's `required`
+flag, not fail merely because any diagnostic row is red.
 This is **infrastructure/monitor readiness**, not proof of every guest workload,
 Kubernetes pod, policy compliance result, CT inventory cycle, or completed patch
 assessment or Defender sensor/AV/EDR health. Demonstrate those separately; never
@@ -260,3 +317,7 @@ remain separate validation exercises. Operational hibernation only proves the
 parked state actually observed, not future activation or fresh deployment.
 Run full/destructive smoke cycles only in an explicitly approved disposable lab,
 never incidentally against an in-use demo.
+
+The simplified predicates, retry handling and Removed inspection are covered by
+local mocked regression checks, not a newly authorized live park/wake/teardown
+exercise. Prior operational evidence above does not validate these source changes.

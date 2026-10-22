@@ -150,6 +150,13 @@ Keep the runtime target, skin/fleet inputs, revision/fault state and deployment
 history outside git. An attached SRE layer must be parked first through its own
 procedure. Activation can restart guest agents and submit asynchronous patch
 assessments; targeted VM-start/readiness evidence does not validate that whole path.
+Use normal lifecycle context/inventory/network preview, not the deployment
+Graph/Owner/capacity preflight as a parking gate. Hibernated required checks cover
+cost state; non-required monitoring failures are wake diagnostics, not running
+compute. Never swallow real read/authorization failures. Already-active activation
+retries verify guests without resubmitting assessments; `-AssessPatches` is the
+explicit all-host assessment request. User-facing states are Active, Hibernated
+and Removed, with Ready retained as the compatibility alias for Active.
 
 ## Hand off to SRE Agent
 

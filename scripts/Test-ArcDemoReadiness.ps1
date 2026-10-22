@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory)][guid]$TenantId,
     [string]$NamePrefix = 'arc-demo',
     [string]$SkinPath = '',
-    [ValidateSet('Ready', 'Hibernated')][string]$DesiredState = 'Ready',
+    [ValidateSet('Active', 'Ready', 'Hibernated', 'Removed')][string]$DesiredState = 'Ready',
     [ValidateSet('Json', 'Table')][string]$OutputFormat = 'Table',
     [ValidateRange(0, 600)][int]$TimeoutSeconds = 0
 )
@@ -25,9 +25,13 @@ try {
     Assert-DemoName $NamePrefix
     Initialize-DemoContext $SubscriptionId $TenantId
     do {
-        $inventory = Get-DemoInventory $NamePrefix
-        Assert-DemoSkinInventory $skin $inventory
-        $checks = @(Get-DemoReadinessChecks -Inventory $inventory -NamePrefix $NamePrefix -DesiredState $DesiredState)
+        $checks = if ($DesiredState -eq 'Removed') {
+            @(Get-DemoRemovalChecks -NamePrefix $NamePrefix)
+        } else {
+            $inventory = Get-DemoInventory $NamePrefix
+            Assert-DemoSkinInventory $skin $inventory
+            @(Get-DemoReadinessChecks -Inventory $inventory -NamePrefix $NamePrefix -DesiredState $DesiredState)
+        }
         $status = if (@($checks | Where-Object { $_.required -and $_.status -eq 'fail' }).Count) { 'fail' }
             elseif (@($checks | Where-Object { $_.required -and $_.status -eq 'pending' }).Count) { 'pending' }
             else { 'pass' }
@@ -45,7 +49,10 @@ $result = [ordered]@{
     desiredState = $DesiredState; status = $status; checks = @($checks | Where-Object { $_ })
 }
 if ($OutputFormat -eq 'Json') { $result | ConvertTo-Json -Depth 15 }
-else { $result.checks | Format-Table id, required, status, expected, observed, message -AutoSize }
+else {
+    Write-Output "$DesiredState status: $status (required checks determine lifecycle state; non-required checks are diagnostics/exceptions)"
+    $result.checks | Format-Table id, required, status, expected, observed, message -AutoSize
+}
 if ($status -eq 'pass') { exit 0 }
 if ($status -eq 'pending') { exit 2 }
 exit 1
