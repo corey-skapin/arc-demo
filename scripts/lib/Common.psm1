@@ -474,8 +474,10 @@ function Get-DemoNetworkState {
     $pipId = "$root/publicIPAddresses/pip-natgw-$NamePrefix"
     $subnetId = "$root/virtualNetworks/vnet-$NamePrefix/subnets/snet-vms"
     $subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '--ids', $subnetId, '-o', 'json') | ConvertFrom-Json
-    $nat = Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'show', '--ids', $natId, '-o', 'json') -AllowNotFound | ConvertFrom-Json
-    $pip = Invoke-DemoAz -Arguments @('network', 'public-ip', 'show', '--ids', $pipId, '-o', 'json') -AllowNotFound | ConvertFrom-Json
+    $natJson = Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'show', '--ids', $natId, '-o', 'json') -AllowNotFound
+    $nat = if ($null -ne $natJson) { $natJson | ConvertFrom-Json }
+    $pipJson = Invoke-DemoAz -Arguments @('network', 'public-ip', 'show', '--ids', $pipId, '-o', 'json') -AllowNotFound
+    $pip = if ($null -ne $pipJson) { $pipJson | ConvertFrom-Json }
     if ($subnet.id -ne $subnetId -or ($nat -and $nat.id -ne $natId) -or ($pip -and $pip.id -ne $pipId)) {
         throw 'Network inspection returned an unexpected resource identity; refusing lifecycle changes.'
     }

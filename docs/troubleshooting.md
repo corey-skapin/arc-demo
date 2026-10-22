@@ -40,6 +40,21 @@ forced green. A missing MDE status file is not proof of working endpoint protect
 Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
 restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
 
+## Activation fails parsing an absent NAT or public IP
+
+**Observed cause** - After hibernation removes the owned NAT/PIP, activation
+can fail before any mutation with `ConvertFrom-Json: Cannot bind argument to
+parameter 'InputObject' because it is null`. The checked CLI adapter returns
+an explicit null for a recognized not-found response. Piping that null directly
+to the JSON parser fails under terminating errors; a same-process preview can
+instead print errors and return, so its exit code alone is insufficient proof.
+
+**Fix** - The shared network preflight parses optional NAT/PIP JSON only when
+the adapter returns a value. It still checks exact identities and sharing, and
+propagates authorization, CLI and malformed-JSON errors. Use the corrected source
+for both normal `-WhatIf` and activation with the retained target/skin. Do not
+manually create network resources or suppress errors to bypass this check.
+
 ## Activation fails at Windows guest completion even though Monitor becomes Ready
 
 **Observed cause** - The old script attempted

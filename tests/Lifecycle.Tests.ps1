@@ -388,6 +388,53 @@ Describe 'WhatIf lifecycle safety' {
     }
 }
 
+Describe 'Activation with the real optional-network preflight' {
+    BeforeEach {
+        Mock Import-Module {}
+        Mock Initialize-DemoContext {}
+        Mock Assert-DemoSkinInventory {}
+        Mock Get-DemoInventory {
+            [pscustomobject]@{ Machines = @(); ArcRg = 'rg-retail-demo'; InfraRg = 'rg-retail-demo-infra'; ContainerAppIds = @(); AksClusterIds = @(); Resources = @() }
+        }
+        & (Get-Module Common) { $script:DemoSubscription = '11111111-1111-1111-1111-111111111111' }
+        Mock Invoke-DemoAz { throw 'Unexpected activation command' }
+        Mock Invoke-DemoAz -ModuleName Common {
+            param($Arguments)
+            if ('subnet' -in $Arguments -and 'show' -in $Arguments) {
+                return '{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-retail-demo-infra/providers/Microsoft.Network/virtualNetworks/vnet-retail-demo/subnets/snet-vms"}'
+            }
+            if ('show' -in $Arguments -and ('gateway' -in $Arguments -or 'public-ip' -in $Arguments)) { return $null }
+            throw 'Unexpected network preflight operation'
+        }
+    }
+    It 'previews a parked network without parsing null or reaching a mutation' {
+        $path = Join-Path $TestDrive 'preview-result.json'
+        & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -WhatIf -ResultPath $path
+        Should -Invoke Invoke-DemoAz -ModuleName Common -Times 3 -Exactly
+        Should -Invoke Invoke-DemoAz -Times 0
+        Test-Path $path | Should -BeFalse
+    }
+    It 'normal activation reaches the mocked first write after accepting absent NAT and PIP' {
+        Mock Invoke-DemoAz { throw 'TEST_WRITE_BOUNDARY' } -ParameterFilter { $Arguments[0] -eq 'network' -and $Arguments[1] -eq 'public-ip' -and $Arguments[2] -eq 'create' }
+        $path = Join-Path $TestDrive 'normal-result.json'
+        { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment -ResultPath $path } | Should -Throw '*TEST_WRITE_BOUNDARY*'
+        Should -Invoke Invoke-DemoAz -ModuleName Common -Times 3 -Exactly
+        Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[2] -eq 'create' }
+        $result = Get-Content $path -Raw | ConvertFrom-Json
+        $result.status | Should -Be 'fail'
+        $result.error | Should -Be 'TEST_WRITE_BOUNDARY'
+    }
+    It 'a genuine read denial stops <Mode> before any mutation' -TestCases @(
+        @{ Mode = 'WhatIf'; Preview = $true }
+        @{ Mode = 'normal activation'; Preview = $false }
+    ) {
+        param($Preview)
+        Mock Invoke-DemoAz -ModuleName Common { throw 'AuthorizationFailed' } -ParameterFilter { 'gateway' -in $Arguments }
+        { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -WhatIf:$Preview } | Should -Throw '*AuthorizationFailed*'
+        Should -Invoke Invoke-DemoAz -Times 0
+    }
+}
+
     Describe 'Idempotent lifecycle state transitions' {
         BeforeAll {
             # These guest-only Windows cmdlets also need mockable names in Linux CI.
@@ -855,8 +902,8 @@ Describe 'Readiness CLI contract' {
                     param($Arguments)
                     switch ($Arguments[0..2] -join ' ') {
                         'network vnet subnet' { $script:networkFixture.subnet | ConvertTo-Json -Depth 10 }
-                        'network nat gateway' { if ($script:networkFixture.nat) { $script:networkFixture.nat | ConvertTo-Json -Depth 10 } }
-                        'network public-ip show' { if ($script:networkFixture.pip) { $script:networkFixture.pip | ConvertTo-Json -Depth 10 } }
+                        'network nat gateway' { if ($script:networkFixture.nat) { $script:networkFixture.nat | ConvertTo-Json -Depth 10 } else { return $null } }
+                        'network public-ip show' { if ($script:networkFixture.pip) { $script:networkFixture.pip | ConvertTo-Json -Depth 10 } else { return $null } }
                         default { throw 'Unexpected operation; network preflight must only inspect exact resources.' }
                     }
                 }
@@ -867,12 +914,33 @@ Describe 'Readiness CLI contract' {
                 Should -Invoke Invoke-DemoAz -Times 3 -Exactly -ParameterFilter { 'show' -in $Arguments -and '--ids' -in $Arguments }
             }
             It 'accepts already-absent ephemeral resources and detached subnet' {
+                $ErrorActionPreference = 'Stop'
                 $script:networkFixture.nat = $null
                 $script:networkFixture.pip = $null
                 $script:networkFixture.subnet.natGateway = $null
                 $state = Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo
                 $state.Nat | Should -BeNullOrEmpty
                 $state.PublicIp | Should -BeNullOrEmpty
+            }
+            It 'accepts a partially restored network with absent <Missing> under terminating errors' -TestCases @(
+                @{ Missing = 'nat' }
+                @{ Missing = 'pip' }
+            ) {
+                param($Missing)
+                $ErrorActionPreference = 'Stop'
+                $script:networkFixture[$Missing] = $null
+                $state = Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo
+                if ($Missing -eq 'nat') {
+                    $state.Nat | Should -BeNullOrEmpty
+                    $state.PublicIp.id | Should -Be "$script:networkRoot/publicIPAddresses/pip-natgw-retail-demo"
+                } else {
+                    $state.PublicIp | Should -BeNullOrEmpty
+                    $state.Nat.id | Should -Be "$script:networkRoot/natGateways/natgw-retail-demo"
+                }
+            }
+            It 'does not conceal malformed optional resource JSON' {
+                Mock Invoke-DemoAz { '{broken' } -ParameterFilter { 'gateway' -in $Arguments }
+                { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo -ErrorAction Stop } | Should -Throw
             }
             It 'rejects a foreign subnet association' {
                 $script:networkFixture.subnet.natGateway.id = '/foreign/nat'
@@ -893,6 +961,11 @@ Describe 'Readiness CLI contract' {
             It 'propagates a genuine read denial instead of treating the NAT as absent' {
                 Mock Invoke-DemoAz { throw 'AuthorizationFailed' } -ParameterFilter { 'gateway' -in $Arguments }
                 { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo } | Should -Throw '*AuthorizationFailed*'
+            }
+            It 'propagates a public IP read denial even when the NAT is absent' {
+                $script:networkFixture.nat = $null
+                Mock Invoke-DemoAz { throw 'AuthorizationFailed' } -ParameterFilter { 'public-ip' -in $Arguments }
+                { Get-DemoNetworkState -InfraRg rg-retail-demo-infra -NamePrefix retail-demo -ErrorAction Stop } | Should -Throw '*AuthorizationFailed*'
             }
         }
     }
