@@ -36,6 +36,10 @@ Describe 'Skin and fleet validation' {
         Set-Content (Join-Path $TestDrive 'bad.json') '{"schemaVersion":1,"workloads":{"deployAks":"false"}}'
         { Get-DemoSkin -Path 'bad.json' -RepoRoot $TestDrive } | Should -Throw '*JSON boolean*'
     }
+    It 'does not let a JSON Keys property hide invalid workload booleans' {
+        Set-Content (Join-Path $TestDrive 'collision.json') '{"schemaVersion":1,"workloads":{"Keys":"ignored","deployAks":"false"}}'
+        { Get-DemoSkin -Path 'collision.json' -RepoRoot $TestDrive } | Should -Throw '*JSON boolean*'
+    }
     It 'loads a non-default skin' {
         Set-Content (Join-Path $TestDrive 'retail.json') '{"schemaVersion":1,"azure":{"namePrefix":"retail-demo"},"workloads":{"deployAks":false}}'
         $skin = Get-DemoSkin -Path 'retail.json' -RepoRoot $TestDrive

@@ -142,8 +142,8 @@ function Get-DemoSkin {
     foreach ($section in 'azure', 'workloads', 'compute', 'operations', 'cost', 'labels', 'tags', 'notifications') {
         if ($null -ne $skin.$section -and $skin.$section -isnot [System.Collections.IDictionary]) { throw "Skin $section must be a JSON object." }
     }
-    foreach ($key in $skin.workloads.Keys) {
-        if ($key -in @('deployArcOnPrem', 'deployAzureVMs', 'deployContainerApps', 'deployAks', 'installSql', 'skipSqlInstall') -and $skin.workloads[$key] -isnot [bool]) {
+    foreach ($key in 'deployArcOnPrem', 'deployAzureVMs', 'deployContainerApps', 'deployAks', 'installSql', 'skipSqlInstall') {
+        if ($skin.workloads -and $skin.workloads.Contains($key) -and $skin.workloads[$key] -isnot [bool]) {
             throw "Skin workloads.$key must be a JSON boolean, not a string."
         }
     }
