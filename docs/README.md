@@ -40,7 +40,7 @@ inside reference documents are dated evidence, not current health guarantees.
 | [README.md](README.md) | All readers: choose the right documents and presenter order. | Canonical documentation index; start here. |
 | [runsheet.md](runsheet.md) | First-time presenter: private input card, rehearsal, exact navigation, evidence, words to say, timing and fallbacks. | Canonical presentation guide; required for presenting. |
 | [runbook.md](runbook.md) | Lab operator: prerequisite checks, preview, deployment and ongoing operations. | Canonical build/operations procedure; not a second runsheet. |
-| [lifecycle.md](lifecycle.md) | Operator/integrator: target safety, retained manifests, credentials, park/wake/remove semantics, readiness JSON and validation limits. | Canonical lifecycle/readiness contract; required before operating the lab, not for a read-only tour. |
+| [lifecycle.md](lifecycle.md) | Operator/integrator: strict wake/delete ownership, best-effort parking, concurrent cold starts, readiness JSON and validation limits. | Canonical lifecycle/readiness contract; required before operating the lab, not for a read-only tour. |
 | [troubleshooting.md](troubleshooting.md) | Operator: symptom-specific evidence, known fixes and unresolved limitations. | Reference; repair commands need scoped approval. |
 | [architecture.md](architecture.md) | Presenter needing background, architect or maintainer: topology, identity, data flow and optional components. | Reference; useful before rehearsal, not a live script. |
 | [cost.md](cost.md) | Operator/budget owner: dated retail assumptions, actual observed footprint, HDD choice/retirement and active versus parked costs. | Reference; no fixed all-in bill or implicit authorization to resize. |

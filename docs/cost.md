@@ -130,7 +130,7 @@ used for a customer commitment or a subscription budget without repricing.
 | State | Compute/network behavior | Remaining costs |
 |---|---|---|
 | Active | VMs, NAT, and enabled optional workloads run | VM runtime, disks, NAT/PIP, telemetry ingestion/retention, applicable Defender coverage, optional services |
-| Hibernated | Exact VM deallocation; optional AKS stopped; Container App revisions inactive; demo NAT/PIP removed | Disks/snapshots, retained data, enabled alert evaluations/notifications and applicable services; optional AKS storage, Container App environment/workload-profile charges where applicable |
+| Hibernated | All infra-RG compute parked despite manifest drift; safe demo NAT/PIP cleanup attempted | Disks/snapshots, logs, alerts and retained services; NAT/PIP if unsafe/incomplete cleanup warns |
 | Removed | Both demo groups and named policies/budget verified absent | Delayed usage posting, explicitly retained tenant/shared resources and services outside those groups may still bill |
 
 The nightly VM auto-shutdown schedule does not start VMs in the morning, park AKS,
@@ -152,6 +152,28 @@ retention cost ([retention guidance](https://learn.microsoft.com/azure/azure-mon
 This does not make new ingestion, longer retention or enabled log alerts free.
 Automatic alert pausing is deliberately deferred: blindly re-enabling rules on
 wake would lose prior disabled state or override concurrent routing decisions.
+
+## Proposed disposable smoke cycle (not executed)
+
+After separate approval, deploy an isolated `arctest` prefix with the default
+five Windows/three Linux hosts, SSD defaults and the small optional Container App
+(no SRE, SQL installation or AKS). Preview, deploy twice, check exact IDs and fresh
+Heartbeat, hibernate, check all compute and network cost rows, activate with
+per-host results, recheck fresh telemetry, then Remove and verify Removed.
+Retain normal target/ownership/ShouldProcess checks; never use the existing demo.
+Allow roughly two hours plus a cleanup buffer; allocation/ingestion can extend it.
+
+Using only the dated official retail evidence above, **two hours is about
+AUD 2.60 for eight-VM compute, SSD capacity and one static IPv4**:
+`2 x 1.1469 + 2/730 x 106.95 + 2 x 0.0071`.
+This is a qualified priced subtotal, **not an all-in quote or spending ceiling**.
+NAT gateway/processing, Defender, Monitor/CT/log ingestion, alerts, ACA/environment
+and egress are additional; subscription benefits/taxes/applicable meters vary.
+Each extra compute hour adds about AUD 1.15 before those other costs.
+Approve duration, target, cleanup and unpriced services before execution; no live
+read, deployment, price/extension/permission change or cycle has been authorized
+or performed by this local source review. Mocks cannot prove allocation,
+RunCommand/guest boot timing or real ingestion latency.
 
 ## Safe cost controls
 

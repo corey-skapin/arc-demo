@@ -52,7 +52,7 @@ if ($ResultPath) {
     }
     $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ResultPath -Encoding utf8
 }
-$guest = $null
+$jobs = @()
 $assessment = $null
 try {
     $infraRg = $inventory.InfraRg
@@ -123,10 +123,11 @@ try {
             }
             if ($machine.Monitor) {
                 $commands += @'
-$deadline = [DateTime]::UtcNow.AddMinutes(3)
+$deadline = (Get-Date).AddMinutes(10)
 while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonAgentCore').Count) {
-    if ([DateTime]::UtcNow -ge $deadline) { throw 'Windows AMA MonAgentCore process did not start within 180 seconds.' }
-    Start-Sleep -Seconds 2
+    if ((Get-Date) -ge $deadline) { Write-Warning 'AMA startup remains pending after 10 minutes; re-check exact-ID Heartbeat.'; 'ARC_DEMO_PENDING'; return }
+    Write-Progress -Activity 'Waiting for AMA MonAgentCore' -Status 'Cold start; no repair or restart'
+    Start-Sleep -Seconds 15
 }
 '@
             }
@@ -143,10 +144,19 @@ while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonA
             completion = $null
         }
         $result.guestChecks += $guest
-        $guest.completion = Invoke-DemoGuestCommand -Machine $machine -Script $script -PassThru
-        $guest.status = 'pass'
-        Write-Ok "Guest activation verified: $($machine.Name)"
+        try { $jobs += @{ Job = Invoke-DemoGuestCommand -Machine $machine -Script $script -AsJob; Machine = $machine; Evidence = $guest } }
+        catch { $guest.status = 'fail'; throw }
     }
+    foreach ($item in $jobs) {
+        $guest = $item.Evidence
+        try {
+            $guest.completion = Invoke-DemoGuestCommand -Machine $item.Machine -Job $item.Job -PassThru -AllowPending:($item.Machine.Monitor -and $item.Machine.OsType -eq 'Windows')
+            $guest.status = $guest.completion.status
+            if ($guest.status -eq 'pending') { Write-Warning "$($item.Machine.Name): AMA startup pending; poll readiness before presenting or offering an incident." }
+            else { Write-Ok "Guest activation verified: $($item.Machine.Name)" }
+        } catch { $guest.status = 'fail'; $guest['error'] = $_.Exception.Message; Write-Warning $_.Exception.Message }
+    }
+    if (@($result.guestChecks | Where-Object status -eq 'fail').Count) { throw (($result.guestChecks | Where-Object status -eq 'fail' | ForEach-Object error) -join '; ') }
     Wait-Until -Message 'expected Arc identities connected' -Condition {
         $arc = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
         @($inventory.Machines | Where-Object { -not $_.Native -and $_.ArcId -notin @($arc | Where-Object status -eq 'Connected' | ForEach-Object id) }).Count -eq 0
@@ -162,19 +172,27 @@ while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonA
         $result.patchAssessment = if ($result.patchAssessments.Count) { 'submitted' } else { 'not-required' }
     }
     if (-not $SkipValidate) {
-        & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 600
-        if ($LASTEXITCODE -ne 0) { throw 'Activation completed but readiness failed or remains pending. Review the readiness checks above.' }
-        $result.readiness = 'pass'
+        $ready = & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -OutputFormat Json | ConvertFrom-Json
+        $result.readiness = $ready.status
+        $result['readinessChecks'] = $ready.checks
+        if ($LASTEXITCODE -notin @(0, 2) -or $ready.schemaVersion -ne 1 -or $ready.status -notin @('pass', 'pending') -or @($ready.checks | Where-Object { $_.required -and $_.status -ne 'pass' -and $_.id -notlike 'heartbeat/*' }).Count) {
+            throw 'Activation readiness failed or non-telemetry checks remain pending. Inspect readinessChecks in ResultPath.'
+        }
+        if ($ready.status -eq 'pending') { Write-Warning 'Compute/services are active; telemetry is pending. Re-run Test-ArcDemoReadiness before presenting or offering an incident.' }
     } else { $result.readiness = 'skipped' }
-    $result.status = 'pass'
+    $result.status = if ($result.readiness -eq 'pending') { 'pending' } else { 'pass' }
 } catch {
     $result.status = 'fail'
     $result.error = $_.Exception.Message
-    if ($guest -and $guest.status -eq 'pending') { $guest.status = 'fail' }
     if ($assessment -and $assessment.status -eq 'pending') { $assessment.status = 'fail' }
     throw
 } finally {
     $result.completedAtUtc = [DateTime]::UtcNow.ToString('o')
+    foreach ($item in $jobs) {
+        if ($item.Job.Id) { Get-Job -Id $item.Job.Id -ErrorAction SilentlyContinue | Stop-Job -PassThru | Remove-Job -Force }
+        if ($item.Job.DemoScriptPath) { [System.IO.File]::Delete($item.Job.DemoScriptPath) }
+    }
     if ($ResultPath) { $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ResultPath -Encoding utf8 }
 }
 Write-Ok 'Activation finished. Existing fault flags were preserved; assessment submissions are not assessment completion.'
+exit 0

@@ -33,17 +33,22 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions/baseline provider checks |
 | `scripts/Deploy-ArcDemo.ps1` | Selected-provider and SKU/quota checks; Bicep preview/create; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness |
 | `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads/reconnect where needed, optional asynchronous patch submission, readiness |
-| `scripts/Hibernate-ArcDemo.ps1` | Exact VM deallocation, AKS stop, Container App revision deactivation, then NAT removal; retains faults/data |
+| `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; optional identity/Defender changes |
-| `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table, Active (Ready alias)/Hibernated/Removed; cost-state vs wake diagnostics, bounded retries, exit 0/1/2 |
+| `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table; Active (Ready alias), compute-only Hibernated with network cost diagnostics, Removed; bounded retries, exit 0/1/2 |
 | `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, `@file` guest-script transport/markers, capacity/quota, readiness checks |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
 
 All four lifecycle/deployment scripts require explicit subscription/tenant and
-support ShouldProcess. Missing explicitly supplied skins are errors.
+support ShouldProcess. Missing explicitly supplied skins are errors except approved parking with an
+explicit confirmed prefix.
 `-WhatIf` has no Azure mutation side effects. Successful subscription deployment
 history is retained as the per-workload manifest: additive empty-fleet deployments
-do not hide earlier Arc VMs. Unknown VMs and foreign IDs fail closed.
+do not hide earlier Arc VMs. Unknown VMs fail closed for startup/deletion, not
+spend-reducing parking. Foreign IDs always fail closed. Hibernated readiness
+queries cost state, not retained monitoring; NAT/PIP cost diagnostics do not gate
+verified compute parking. Guest checks use concurrent jobs, a ten-minute AMA wait
+and pending evidence; telemetry-only lag requires a readiness recheck, not repair.
 
 ## Monitoring support
 
@@ -82,6 +87,8 @@ consuming the same alerts, not a prerequisite or replacement.
 `tests/Lifecycle.Tests.ps1` exercises waits, errors, config, mixed/native
 classification, retained additive manifests, ShouldProcess previews, guest/job
 failures and the JSON/exit-code contract without a cloud deployment.
+Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
+conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile
 and advisory documentation lint. Inspect the Markdown log rather than treating
 the job's success alone as lint-clean. Pester is development-only.

@@ -116,11 +116,19 @@ actions. Do not claim Arc SQL validation; see [SQL stance](sql-arc-spike.md).
 .\scripts\Activate-ArcDemo.ps1 @target
 ```
 
-Hibernation verifies exact VM deallocation, stops optional AKS, deactivates
-Container App revisions, then removes NAT/PIP. Data and fault flags remain.
+Hibernation parks all VM/AKS/Container App compute in the explicitly targeted demo
+infra group, even if deployment manifests, OS metadata or skin drift; drift warns.
+It verifies deallocation/AKS stop/inactive revisions before safe NAT/PIP removal.
+Foreign/shared bindings skip only networking with a loud residual-cost warning.
+Data, identities and fault flags remain. Failed compute attempts do not block
+attempts on other hosts/workloads; unknown/denied final power is not success.
 Activation restores outbound NAT first, starts retained workloads and reconnects
 agents where needed. Every run verifies guests, including already-connected hosts,
 without unnecessary restarts; Windows Arc AMA uses a `MonAgentCore` process check.
+Host checks run concurrently with a ten-minute AMA budget and per-host evidence.
+An AMA timeout records pending; required service failures still fail.
+Telemetry-only pending does not fail activation, but must be rechecked through
+readiness before the presentation or dependent SRE/incident-offer flow continues.
 Default assessment submissions cover newly started/waking Arc hosts only;
 already-active retries do not resubmit. `-AssessPatches` explicitly requests
 all-host assessments (including assessment-phase retries). Use optional `-ResultPath`
@@ -135,12 +143,13 @@ If SRE is attached, park that dependent layer first through its own maintained
 procedure; on wake, restore Arc/Monitor and verify Ready before SRE resumes.
 Hibernation is not cleanup: it does not delete groups, disks, Arc identities,
 Key Vault secrets, onboarding credentials, DCRs or the workspace.
-Its required acceptance covers parked compute/app state and owned NAT/PIP
-absence/detachment. Failed/pending retained monitoring checks remain visible as
-non-required wake diagnostics; actual inspection/auth errors still fail.
+Its required acceptance covers parked compute/app state; NAT/PIP absence is a
+non-required cost diagnostic. Exit 0 can therefore coexist with incomplete
+network cleanup. Retained monitoring is not queried as a parking gate; actual
+inspection/auth errors still fail rather than being misreported as absence.
 Use normal lifecycle `-WhatIf`, not deployment Graph/Owner/quota preflight or
 historical whole-group index comparisons. Exact network sharing is checked
-before writes. On partial failure, retry without redeploying or waking compute.
+before network writes. On partial failure, retry without redeploying or waking compute.
 Enabled alerts can still evaluate/notify and incur charges; there is no automatic
 pause/restore of their previous enabled state.
 
