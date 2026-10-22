@@ -1,218 +1,101 @@
-# AGENTS.md — AI Agent Operating Manual for `arc-demo`
+# Agent instructions for arc-demo
 
-> **This file is read first by AI coding agents** (GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Aider, OpenAI Codex, etc.).
-> Other AIs: also read this file before doing anything in this repo.
->
-> Humans start at [`docs/README.md`](docs/README.md). Presenters use
-> [`docs/runsheet.md`](docs/runsheet.md); operators use
-> [`docs/runbook.md`](docs/runbook.md) and [`docs/lifecycle.md`](docs/lifecycle.md).
+## Read first
 
----
+- Read this file before working in the repository.
+- Start humans at [docs/README.md](docs/README.md); use [runsheet](docs/runsheet.md) for presenting.
+- Read [runbook](docs/runbook.md) and [lifecycle](docs/lifecycle.md) before operating an existing lab.
+- Use [troubleshooting](docs/troubleshooting.md) for symptoms and [module map](docs/module-map.md) for engineering evidence; do not treat old runs as current health.
 
-## What this repo is
+## Keep the demo scope
 
-A scripted deployment of an **Azure Arc + Azure Monitor** demo environment. It stands up:
+- Keep the single-region, intentionally un-hardened Arc/Monitor demo and its 20-30 minute story.
+- Explain Azure-hosted Arc simulation using `MSFT_ARC_TEST=true`; do not present it as a production pattern or blanket feature validation.
+- Keep SQL Server/Arc SQL/BPA skipped by default; read [SQL support boundaries](docs/sql-arc-spike.md) before touching `-InstallSql`.
+- Confirm before adding production hardening, CIS images, multi-region/HA, real ITSM integrations or a Bicep-only redesign.
+- Keep static infrastructure in Bicep and necessary onboarding/validation in PowerShell; add no framework or top-level dependency beyond `az`, PowerShell and built-in REST.
+- Reprice selected workloads using [cost.md](docs/cost.md); never promise a fixed all-in bill or zero-cost parking.
 
-- 8 config-driven Azure VMs (Windows Server mix + Ubuntu 22.04 by default) that are then registered as **Arc-enabled servers** (using `MSFT_ARC_TEST=true` — see "Why we Arc-enable Azure VMs" below).
-- 2 of the Windows VMs are SQL-capable hosts in the story. SQL Server 2022 Developer, Arc SQL registration, and BPA are skipped by default. Do not present Arc SQL as validated in this Azure-VM-backed lab; read `docs/sql-arc-spike.md` before touching `-InstallSql`.
-- A Log Analytics workspace, Data Collection Rules, VM Insights and Change Tracking solutions for supported OS tiers only, Defender for Servers Plan 2, and a custom workbook modelled on a persona-first demo flow.
-- Policy initiatives (MCSB + NIST SP 800-53 Rev 5) for the compliance scorecard tile.
-- A scheduled query alert + Action Group → email for the "alert routing" demo tile.
-- DevTest-Labs auto-shutdown at 19:00 local time for cost control.
+## Target and consent
 
-**Cost:** Reprice selected workloads. The old active line items totalled AUD 358,
-not 210, and their unit prices were unverified. Hibernation retains billable
-storage/services; see `docs/cost.md`.
+- Require explicit runtime `-SubscriptionId` and `-TenantId`; verify that exact context without silently switching CLI defaults.
+- Keep the same confirmed prefix/skin/fleet; store targets, credentials, hashes, manifests and dated evidence privately outside git.
+- Preview with normal lifecycle `-WhatIf`; never treat preview or read-only inspection as permission to mutate.
+- Obtain explicit approval for activation, hibernation, removal, faults/reset, assessments, alert tests/emails, repair, credential, role or pricing changes.
+- Keep the lab running unless parking/removal is requested; never exercise a live lifecycle incidentally during testing.
+- Surface denied/malformed/unknown reads and actual CLI/job failures; never substitute absence or bypass a denial with another tool.
+- Preserve credentials, workload fault flags, disks/data, identities, RBAC, logs and private vault access on routine lifecycle/reconcile.
+- Never rotate a retained VM/onboarding credential for convenience; follow the existing-secret contract in lifecycle.md.
 
-New OS disks default to Standard SSD. Retained HDD labs can explicitly use
-`-OsDiskStorageAccountType Standard_LRS` / `compute.osDiskStorageAccountType`;
-the deploy wrapper refuses existing-tier mismatches, never converting disks
-incidentally. HDD OS support retires 8 September 2028. Preserve the live tier,
-schedule any migration separately, and do not mistake avoided SSD spend for
-new savings on already-HDD resources.
+## Park, wake and remove
 
-## Lifecycle safety and readiness
+- Keep Active, Hibernated and Removed; retain Ready as the Active compatibility alias/default.
+- Use normal lifecycle context/ownership/ShouldProcess, not deployment Graph/Owner/provider/quota or historical whole-group index gates.
+- Fail open for spend-reducing Hibernate: park all compute in the explicitly targeted `rg-<prefix>-infra`, warning manifest/OS/skin drift.
+- Require an explicit confirmed prefix if parking without a readable skin; do not guess the target.
+- Attempt other demo workloads after an individual stop fails; require known VM deallocation, AKS Stopped/Succeeded and inactive app revisions afterward.
+- Report denied/unknown compute state as error/nonzero, never verified stopped compute.
+- Deactivate Container App revisions; do not substitute zero minimum replicas or reset fault flags.
+- Verify exclusive NAT/PIP bindings before network writes; skip unsafe cleanup loudly, not compute parking.
+- Preserve compute-stop -> subnet detach -> NAT delete -> PIP delete order; disclose retained-network cost diagnostics even on exit 0.
+- Keep retained monitoring out of Hibernated gates; run Active readiness again before the next demo.
+- Fail closed for Activate VM selection, Deploy and Remove; retain strict manifests, skin checks, exact IDs and actual OS metadata, not counts/name heuristics.
+- Retain earlier fleet manifests after optional empty-fleet deployments; never start an unknown/unlisted VM.
+- Restore explicit NAT/PIP before starting compute; never rely on default outbound or remove the park/wake NAT workaround.
+- Wait for in-flight VM/AKS transitions rather than resubmitting; keep bounded waits and partial progress on failure.
+- Preserve VM definitions/NICs/disks/Arc identities while parked; never delete/reconstruct VMs as a cost shortcut.
+- Keep Defender pricing unchanged on default removal; require separate `-DisableDefender` / `-RemoveOnboardingIdentity` consent.
+- Verify both groups and named subscription policies/budget absent for Removed; disclose tenant/shared/soft-delete exceptions without purging or claiming zero bill.
 
-Read `docs/lifecycle.md` before operating an existing lab. All lifecycle commands
-require explicit runtime `-SubscriptionId` and `-TenantId`; use the same
-`-SkinPath`/prefix. Never store live IDs or secrets in source. Readiness is
-`scripts\Test-ArcDemoReadiness.ps1 -DesiredState Active|Ready|Hibernated|Removed -OutputFormat Json|Table`.
-JSON schemaVersion 1 correlates exact resource IDs; exit 0 is pass, 1 failure/error,
-2 pending. It never repairs or induces faults.
-Active is the user-facing name; Ready remains the compatibility alias/default.
-Hibernated required checks verify compute cost state; NAT/PIP are cost diagnostics.
-Do not query retained monitoring as a parking gate; inspect it again before wake.
-Actual read/auth failures still terminate; never treat denial as resource absence.
+## Activation and readiness
 
-Monitor readiness does not certify endpoint protection. Approved Linux diagnostics
-found healthy/licensed sensors in passive mode with real-time protection disabled;
-extension-reported event-provider issues differed from direct sensor health.
-Preserve these caveats. No AV-mode/policy change, extension retry/reinstall or
-restart is authorized by a health inspection or a passing Monitor snapshot.
+- Verify guests on every activation/retry, including already-running/connected hosts; do not restart already-correct hosts or skip a failed phase.
+- Submit host checks concurrently through existing checked jobs and retain per-host `-ResultPath` evidence outside git.
+- Check Windows Arc `himds` and AMA `MonAgentCore`, not an assumed `AzureMonitorAgent` SCM service; never restart the extension host.
+- Allow the ten-minute AMA startup wait and explicit pending marker; preserve true service/command failures and safe completion-marker checks.
+- Check Linux services individually; remove temporary script files/jobs on success and failure without exposing arbitrary guest output.
+- Submit default patch assessments only for Arc hosts started/waking on this attempt; do not resubmit on already-active retries.
+- Use `-AssessPatches` only for explicit all-host assessment work; reject it with `-SkipPatchAssessment`, and distinguish submission from completion.
+- Record telemetry-only lag as pending even when activation exits 0; poll read-only readiness to pass before presentation or dependent SRE/incident offers.
+- Do not report `-SkipValidate`, a rolling Heartbeat boolean or a Monitor snapshot as proof of full-script completion or fresh post-wake telemetry.
+- Use `Test-ArcDemoReadiness.ps1 -DesiredState Active|Ready|Hibernated|Removed -OutputFormat Json|Table`; honor required flags and schema v1 exits 0/pass, 1/fail-error, 2/pending.
+- Keep readiness read-only with bounded `TimeoutSeconds`; never repair or induce faults to make it green.
+- Do not equate Monitor readiness with patch completion, policy compliance, CT inventory, active AV or full EDR/event delivery.
 
-Keep the demo running unless the user explicitly approves parking/removal.
-Read-only inspection and `-WhatIf` do not authorize mutation. No hibernate,
-remove, credential reset, fault induction/reset, role or pricing changes as an
-incidental test. Activation/hibernation preserve fault flags. Removal preserves
-subscription Defender by default; `-DisableDefender` and
-`-RemoveOnboardingIdentity` are explicit opt-ins.
+## Combined Arc and companion SRE
 
-For a combined demo, park the companion SRE layer through its own scripts before
-Arc hibernation; reverse the dependency order when waking. Keep the runtime
-target, skin/fleet inputs and deployment history outside git. Preview first and
-verify `-DesiredState Hibernated` afterward; do not substitute permanent removal.
+- Park the companion through its own scripts first; wake Arc/Monitor to Ready before resuming SRE/config/application readiness.
+- Preserve the companion's retained identity/RBAC and Review-only human approval boundary; let its own scripts delete the paid parent on parking.
+- For combined activation, let the SRE-owning AI make one conversational incident offer after readiness, using `../sre-agent/docs/ai-deploy-handbook.md#post-activation-incident-offer` from this repo root (skip if the companion repo is not present).
+- Treat activation alone as no incident consent; leave active if declined, and use only the established T09 observation/recovery flow if accepted.
+- Keep actual human Review approval; never invent approval or make the user choose scripts/execute a command list.
+- Never prompt for or induce an incident after Arc-only activation; add no script/orchestrator incident prompt or duplicate offer.
 
-When the user requests **combined Arc + SRE activation**, the AI manages the
-operations, verifies Arc/Monitor readiness, then continues the companion's
-[post-activation incident offer](https://github.com/corey-skapin/sre-agent-demo/blob/main/docs/ai-deploy-handbook.md#post-activation-incident-offer).
-That SRE flow owns the single conversational offer after SRE/config/application
-readiness: decline leaves the demo active; agreement authorizes its established
-incident/observation/recovery workflow with the actual human Review boundary.
-Do not make the user select scripts or run a command list. Activation alone is
-not incident consent. **Arc-only activation never prompts for or induces an incident.**
+## Preserve platform workarounds
 
-Lifecycle inventory uses retained successful per-workload deployment manifests:
-an optional-only deployment with an empty fleet does not erase earlier VMs.
-Classify OS using actual VM metadata, distinguish native/Arc/Monitor/patch
-targets, and compare IDs, never counts or `win-*` naming. Missing/ambiguous
-resources stop activation/deletion; Hibernate warns drift and parks all infra-RG compute.
+- Install Linux AMA and ChangeTracking through the Azure VM extension path in this lab; keep Windows on Arc extensions.
+- Keep DCR associations on Arc resource IDs for simulated Arc hosts, even with VM-path agents; use VM IDs for native hosts.
+- Keep Linux Dependency Agent/VM Insights map disabled; honor supported OS/capability flags and [CT guidance](docs/lifecycle.md#linux-monitoring-and-support-stance).
+- Do not delete stuck Arc extensions or change AV mode/policy/reinstall/restart from a health inspection; preserve direct-sensor versus extension caveats.
+- Keep native `Invoke-RestMethod` for OMS solution URLs containing `?`/parentheses and for policy assignments/DCR PUTs; do not switch back to the buggy CLI paths.
+- Keep fresh OS disks Standard SSD; preserve existing HDD with explicit `Standard_LRS` and the retained-tier guard, never incidental conversion.
+- Plan HDD OS migration separately before 8 September 2028; do not call an already-HDD estate's avoided SSD cost new savings.
 
-Activation must verify guests on retries, not skip a previously failed phase
-because the VMs/Arc records now look running/connected. Windows Arc AMA is checked
-through a concurrent ten-minute `MonAgentCore` wait, not an assumed `AzureMonitorAgent` service. Restart
-only real required services where needed; do not restart the extension host.
-Default patch submissions run only for Arc hosts started/waking on this attempt,
-not already-active retries. Use `-AssessPatches` to explicitly retry all-host
-assessment work; it conflicts with `-SkipPatchAssessment`. Submission is not
-completion. Preserve optional `-ResultPath` evidence outside
-git; report telemetry-only lag as pending and poll readiness before presenting/SRE/offers.
+## Deployment preflight only
 
-Parking/waking uses the normal lifecycle context/inventory/network preview, NOT
-the deployment Graph/Owner/provider/quota gate below or a frozen whole-RG index.
-Validate exclusive NAT/PIP bindings before network changes; skip unsafe cleanup loudly. Do not build an
-extra lifecycle wrapper that requires unrelated extension indexes to match.
-Removed verifies both groups plus the named subscription policies/budget absent;
-tenant identity/application, shared services and soft-deleted vault exceptions
-are reported explicitly. No global Defender changes or purge follow by default.
+1. Verify the explicitly requested tenant/subscription and effective inherited/group Owner, or Contributor plus User Access Administrator; do not bypass permissions with a supplied principal ID.
+2. Run `Test-Prerequisites` for PowerShell 7.4+, CLI 2.60+ and Bicep; stop on failure rather than workaround.
+3. Check needed providers, including DevTestLab and optional AKS dependencies; obtain approval separately for registration.
+4. Check exact SKU restrictions and regional/family vCPU quota; never claim listings, what-if or validation guarantee allocation, especially B-series in AU regions.
 
-## Mandatory pre-flight checks
+## Code, tests and documentation
 
-Before running **any** deployment command, the agent MUST:
-
-1. **Verify the explicitly targeted subscription and tenant.** Use `az account show --subscription <SUB>` and confirm the tenant matches runtime input. Every resource command must carry that target; do not trust or silently switch CLI defaults.
-2. **Verify effective subscription Owner, or Contributor plus User Access Administrator**, including inherited/group assignments. A supplied principal ID does not bypass authorization checks.
-3. **Verify PowerShell 7.4+, Az CLI 2.60+, and Bicep CLI are installed.** The scripts have a `Test-Prerequisites` function in `scripts/lib/Common.psm1` — call it first.
-4. **Verify SKU restrictions and regional/family vCPU quota for the requested fleet.** Listings, what-if and `--validate` are not physical capacity guarantees. Do not create probe resources or register providers without approval. Read-only preflight fails if required providers (including DevTestLab and optional AKS dependencies) are not already registered.
-
-If any check fails, **stop and tell the user** rather than continuing with workarounds.
-
-## The 6 gotchas (these will bite you)
-
-These are *not* hypothetical. Every one of them broke the original build. The scripts in this repo work around them — **do not rip out the workarounds**.
-
-1. **Do not rely on default outbound.** Fresh Bicep deployment creates explicit NAT/PIP before VM extension provisioning and preserves an existing demo NAT on redeploy. `Hibernate-ArcDemo.ps1` intentionally **deletes** the NAT Gateway when parking, and **`Activate-ArcDemo.ps1` recreates it** before VM startup. Do not "optimise" this away.
-
-2. **The Linux Arc GC extension stack is unreliable on Ubuntu 22.04 + `MSFT_ARC_TEST=true` in this lab.** AMA and ChangeTracking-Linux use the Azure VM extension path (`az vm extension set`); DCRAs still target Arc IDs. Read-only evidence found stuck Arc extensions; approved VM-path CT installation produced guest success and fresh CT telemetry without reboot. Do not delete stuck Arc extensions without separate approval. Linux Dependency Agent/VM Insights map is intentionally disabled, not installed via either path. Windows uses Arc extensions. See the official CT support matrix linked in `docs/lifecycle.md`; generic support is not lab validation.
-
-3. **DCR associations must target the Arc HybridCompute resource ID, not the Azure VM resource ID,** *even when* you installed the agent via the Azure VM extension path. When the Linux AMA detects the Arc agent, it pulls config from Arc IMDS, which only sees DCR associations attached to the Arc resource. If you don't see Heartbeat in Log Analytics, this is why.
-
-4. **`Standard_B2s` / `Standard_B2ms` have been capacity-restricted** in AU lab subscriptions. The default is `Standard_B2as_v2` (2 vCPU / 8 GiB AMD burstable). Check SKU restrictions/quota, retain a prep window, and never claim allocation is guaranteed.
-
-5. **Azure CLI on Windows mangles URLs containing `?` and `()`.** PowerShell shells out to `cmd.exe`, which treats `?` as a wildcard and `()` as grouping. This affects any `az rest --url` call where the URL contains `?api-version=...` AND a parenthesised resource name (the OMS Solutions API does both, e.g. `solutions/VMInsights(law-name)?api-version=...`). **The repo uses native `Invoke-RestMethod` with an `az account get-access-token` bearer token in these cases.** Do not switch them back to `az rest`.
-
-6. **The Azure CLI's `az policy assignment create` and `az monitor data-collection rule create --rule-file` are buggy** with the payloads the demo needs. The repo uses `Invoke-RestMethod` (PUT) directly for those resources. Do not switch them to `az`.
-
-## Code style & conventions
-
-- **PowerShell scripts** use approved verbs (`Verb-Noun.ps1`), parameter validation attributes, `CmdletBinding(SupportsShouldProcess)`, write to `$VerbosePreference`-aware streams, and emit structured objects, never `Write-Host` (except for top-level progress banners). PSScriptAnalyzer is enforced via `.github/workflows/lint.yml`.
-- **Bicep modules** in `bicep/modules/`, top-level template in `bicep/main.bicep`. Always `az bicep build` before commit.
-- **Don't introduce new top-level dependencies.** This repo intentionally uses only `az`, `pwsh 7+`, and `Invoke-RestMethod` (built into PS). Adding Terraform / Pulumi / `Az` PowerShell module / etc. is out of scope.
-- **Idempotency is mandatory.** Preserve existing VM/SP credentials; do not reset demo faults during lifecycle operations. Mock reruns locally. Double deployment and destructive live lifecycle tests require approval in a disposable lab; do not run them against an in-use demo. Targeted VM startup/readiness proof is not proof of the full activation script, which can restart guest agents and submit patch assessments.
-
-## Happy-path command sequence
-
-```powershell
-# 1. Clone & cd
-git clone <ARC_REPOSITORY_URL> C:\src\arc-demo
-cd C:\src\arc-demo
-
-# 2. Sign in to the target tenant
-az login --tenant <TENANT_ID>
-az account set --subscription <SUBSCRIPTION_ID>
-
-# 3. Verify prereqs
-.\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
-
-# 4. Deploy
-.\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail <OPERATOR_EMAIL>
-
-# 5. After the demo, hibernate
-.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
-
-# 6. Before the next demo, activate
-.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
-.\scripts\Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -OutputFormat Json
-
-# 7. When done permanently
-.\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
-```
-
-## Things this repo intentionally does NOT do
-
-If asked to add any of the following, push back first and confirm:
-
-- **Production-grade hardening** (managed identities everywhere, private endpoints for LAW, Just-in-Time VM access, KV firewall, NSG inbound rules). This is a *demo lab*, not a production reference.
-- **VM image hardening / CIS benchmarks.** The whole point of the demo is to show *un-hardened* machines with vulnerabilities for Defender to flag.
-- **Multi-region / HA.** Single region, single LAW.
-- **Real ServiceNow / PagerDuty integration.** The Action Group is configured for email + has a documented one-liner to add a webhook later.
-- **Bicep-only deployment.** Some steps (Arc onboarding via Run Command, agent restart, post-deploy validation) are imperative by nature. The Bicep template handles the static infra; the PowerShell wrapper drives the imperative bits. This split is deliberate.
-
-## Why we Arc-enable Azure VMs (for the AI's understanding)
-
-Arc is for non-Azure compute. This demo uses Azure VMs that *act* like on-prem
-servers, without an on-prem hypervisor. `MSFT_ARC_TEST=true` bypasses the installer's
-Azure-VM guard for test/demo simulation. See the [Microsoft Learn warning](https://aka.ms/azcmagent-testwarning).
-This is not a production pattern or blanket validation of Arc extensions, Arc SQL
-or other features on Azure VMs; use the workload-specific evidence and limitations
-in `docs/lifecycle.md`.
-
-## Validation & testing
-
-Run local checks before pushing. Live smoke tests below are a separate,
-explicitly approved disposable-lab exercise, not routine validation:
-
-```powershell
-# Lint
-Invoke-ScriptAnalyzer -Path .\scripts\ -Recurse -Severity Warning
-Invoke-Pester -Path .\tests -CI
-
-# Bicep build
-az bicep build --file .\bicep\main.bicep --stdout > $null
-
-# Dry-run deploy (validates Bicep + checks RBAC, no resources created)
-.\scripts\Deploy-ArcDemo.ps1 -WhatIf -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail <OPERATOR_EMAIL>
-
-# Full smoke test cycle (~45 min total). Run manually with prefix "arctest":
-.\scripts\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -AdminEmail <OPERATOR_EMAIL> -NamePrefix arctest
-.\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -NamePrefix arctest
-.\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -NamePrefix arctest
-.\scripts\Remove-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -NamePrefix arctest
-```
-
-## When something breaks
-
-Use [`docs/troubleshooting.md`](docs/troubleshooting.md) for known observations,
-verified fixes where established, and unresolved limits. Do not imply every
-failure has a known cause or authorize a repair merely by linking its commands.
-
-If the user reports an issue that isn't in `troubleshooting.md`, **add it** as part of the same change.
-
-## Documentation ownership
-
-Keep `docs/README.md` complete when adding, removing or repurposing documents.
-`docs/runsheet.md` is the single canonical Arc presenter path; update it rather
-than adding competing runsheets. Ground portal navigation in current Microsoft
-guidance and explicitly distinguish actual UI observation from documented paths.
-Beginner rehearsals default to read-only evidence: no activation, fault/reset,
-assessment, alert test/email or remediation is implied. The optional companion
-SRE combined guide is its `docs\delivery-runsheet.md`, resuming after Arc.
+- Use approved PowerShell verbs, validation attributes, ShouldProcess, structured objects and preference-aware streams; reserve Write-Host for progress banners.
+- Keep Bicep modules under `bicep/modules` and the entry template at `bicep/main.bicep`.
+- Preserve idempotency; use local mocked reruns, not an in-use lab's double deployment or destructive lifecycle cycle.
+- Run Pester, script parsing, PSScriptAnalyzer, `az bicep build` and Markdown lint before pushing; keep test-only dependencies out of deployment requirements.
+- Propose disposable live smoke scope/cost separately and obtain approval before execution; distinguish mocks, prior operational evidence and new live proof.
+- Scan changed tracked content for secrets/private identifiers before every push; keep real GUIDs, emails, customer names and machine-local paths out of source.
+- Update the canonical docs with behavior, index changes in docs/README.md and keep the module map current; add no competing runsheet or tracking diary.
+- Ground portal steps in current Microsoft Learn and distinguish documented navigation from observed UI; default beginner rehearsals to read-only evidence.
+- Add newly reported symptoms to troubleshooting with established causes/limits, not invented diagnoses or implicit repair permission.

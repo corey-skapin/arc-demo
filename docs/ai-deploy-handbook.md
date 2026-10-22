@@ -168,7 +168,9 @@ presentation, dependent SRE layer or incident offer. Unhealthy services still fa
 For an explicitly requested **combined Arc + SRE activation**, the AI completes
 Arc activation and verifies `Ready`, then continues in the configured companion
 checkout using its canonical
-[post-activation incident offer](https://github.com/corey-skapin/sre-agent-demo/blob/main/docs/ai-deploy-handbook.md#post-activation-incident-offer).
+post-activation incident offer: from this repository's root, use
+`../sre-agent/docs/ai-deploy-handbook.md#post-activation-incident-offer`
+(skip if the companion repo is not present).
 After SRE activation/config/application readiness succeeds, that flow asks once
 whether the user wants the existing incident. If declined, leave the demo ready.
 If agreed, the AI runs the established T09 scenario and manages observation and

@@ -314,28 +314,11 @@ service restart, VM restart or AV-mode change follows from diagnosis alone.
 ## Validation boundaries
 
 Mocked Pester tests, script parsing, PSScriptAnalyzer, Bicep compile and live
-read-only readiness are separate evidence. The approved CT repair verifies only
-that repair. An approved active-estate rehearsal on 20 October 2026 verified all
-eight exact VM/Arc/Heartbeat identities and all 79 infrastructure/monitor checks.
-Raw timestamps/IDs stay in private session evidence; that is a point-in-time
-pre-fault snapshot, not an ongoing health guarantee. Windows Heartbeats arrived
-after Arc reconnected without an agent repair; keep pending status until fresh
-expected-ID telemetry is actually visible.
-
-Targeted VM starts and a passing readiness snapshot do not prove the full
-`Activate-ArcDemo.ps1` guest-check/assessment path succeeded. An approved activation
-attempt reached Monitor Ready after its Windows guest step failed; the failure
-was an incorrect Windows AMA service assumption, not a missing completion-marker
-transport fix. Keep the script outcome and runtime snapshot separate, and retain
-the corrected attempt's per-host results rather than skipping guest validation.
-
-An approved corrected activation retry on 21 October 2026 completed normally:
-all eight guest checks passed without unnecessary service restarts, all eight
-Arc assessments were submitted, and independent readiness passed all 79 checks
-with fresh expected-ID Heartbeats and the healthy, non-faulted Container App.
-That retry reused the already-running estate/network from the earlier partial
-attempt; it does not prove a fresh cold-start run of every corrected branch.
-Private timestamped results remain outside git.
+read-only readiness are separate evidence. Keep dated operational observations in
+[the engineering reference](module-map.md#dated-operational-evidence-not-presenter-material),
+not agent instructions. They do not prove current health or validate new code.
+Keep script completion, independent readiness, fresh telemetry and assessment
+completion separate; preserve per-host attempt results outside git.
 
 A fresh deployment, double-deploy idempotency, AKS park/start and delete/recreate
 remain separate validation exercises. Operational hibernation only proves the
@@ -345,7 +328,7 @@ never incidentally against an in-use demo.
 
 The simplified predicates, retry handling and Removed inspection are covered by
 local mocked regression checks, not a newly authorized live park/wake/teardown
-exercise. Prior operational evidence above does not validate these source changes.
+exercise. Prior operational evidence does not validate these source changes.
 
 The best-effort parking and concurrent cold-start changes have local coverage for
 missing manifests, unlisted VMs, OS/skin drift, foreign NAT, partial deallocation,
