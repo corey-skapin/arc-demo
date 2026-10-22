@@ -58,6 +58,15 @@ Arc hibernation; reverse the dependency order when waking. Keep the runtime
 target, skin/fleet inputs and deployment history outside git. Preview first and
 verify `-DesiredState Hibernated` afterward; do not substitute permanent removal.
 
+When the user requests **combined Arc + SRE activation**, the AI manages the
+operations, verifies Arc/Monitor readiness, then continues the companion's
+[post-activation incident offer](https://github.com/corey-skapin/sre-agent-demo/blob/main/docs/ai-deploy-handbook.md#post-activation-incident-offer).
+That SRE flow owns the single conversational offer after SRE/config/application
+readiness: decline leaves the demo active; agreement authorizes its established
+incident/observation/recovery workflow with the actual human Review boundary.
+Do not make the user select scripts or run a command list. Activation alone is
+not incident consent. **Arc-only activation never prompts for or induces an incident.**
+
 Lifecycle inventory uses retained successful per-workload deployment manifests:
 an optional-only deployment with an empty fleet does not erase earlier VMs.
 Classify OS using actual VM metadata, distinguish native/Arc/Monitor/patch
