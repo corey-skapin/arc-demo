@@ -160,10 +160,13 @@ and Removed, with Ready retained as the compatibility alias for Active.
 
 ## Hand off to SRE Agent
 
-After this repo is deployed, use the companion repo:
-
-```powershell
-git clone <SRE_REPOSITORY_URL> C:\src\sre-agent
-```
-
-Then follow `C:\src\sre-agent\docs\ai-deploy-handbook.md`.
+For an explicitly requested **combined Arc + SRE activation**, the AI completes
+Arc activation and verifies `Ready`, then continues in the configured companion
+checkout using its canonical
+[post-activation incident offer](https://github.com/corey-skapin/sre-agent-demo/blob/main/docs/ai-deploy-handbook.md#post-activation-incident-offer).
+After SRE activation/config/application readiness succeeds, that flow asks once
+whether the user wants the existing incident. If declined, leave the demo ready.
+If agreed, the AI runs the established T09 scenario and manages observation and
+recovery while preserving the human's actual Review approval. The user need not
+know script names or execute a runbook. Do not add a script/orchestrator prompt
+or duplicate the companion's offer. **Arc-only activation has no incident offer or fault.**
