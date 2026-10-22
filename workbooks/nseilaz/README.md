@@ -34,7 +34,7 @@ validated story; see [SQL stance](../../docs/sql-arc-spike.md).
 To pull the latest from upstream:
 
 ```powershell
-$dest = "C:\src\arc-demo\workbooks\nseilaz"
+$dest = '.\workbooks\nseilaz' # Run from the repository root.
 $files = @(
   'ArcMachineIntelligenceCenter.json',
   'Arc_Compliance_Security_Governance_example.json',

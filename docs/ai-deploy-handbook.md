@@ -62,8 +62,8 @@ Do not:
 ## Deployment order
 
 ```powershell
-git clone <ARC_REPOSITORY_URL> C:\src\arc-demo
-cd C:\src\arc-demo
+git clone <ARC_REPOSITORY_URL> arc-demo
+cd arc-demo
 
 az login --tenant <TENANT_ID>
 az account set --subscription <SUBSCRIPTION_ID>
