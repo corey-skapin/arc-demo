@@ -151,12 +151,17 @@ history outside git. An attached SRE layer must be parked first through its own
 procedure. Activation can restart guest agents and submit asynchronous patch
 assessments; targeted VM-start/readiness evidence does not validate that whole path.
 Use normal lifecycle context/inventory/network preview, not the deployment
-Graph/Owner/capacity preflight as a parking gate. Hibernated required checks cover
-cost state; non-required monitoring failures are wake diagnostics, not running
-compute. Never swallow real read/authorization failures. Already-active activation
+Graph/Owner/capacity preflight as a parking gate. Hibernate parks all compute in
+the explicit infra group despite manifest/OS/skin drift. Unsafe network cleanup
+warns and skips only NAT/PIP; inspect non-required network cost rows before
+claiming cleanup. Retained monitoring is not a parking gate. Unknown/denied
+power inspection is an error, not verified stopped compute. Already-active activation
 retries verify guests without resubmitting assessments; `-AssessPatches` is the
 explicit all-host assessment request. User-facing states are Active, Hibernated
 and Removed, with Ready retained as the compatibility alias for Active.
+Concurrent guest checks allow ten minutes for AMA startup. Telemetry-only lag
+records pending without failing activation; poll readiness to pass before the
+presentation, dependent SRE layer or incident offer. Unhealthy services still fail.
 
 ## Hand off to SRE Agent
 

@@ -40,8 +40,8 @@ require explicit runtime `-SubscriptionId` and `-TenantId`; use the same
 JSON schemaVersion 1 correlates exact resource IDs; exit 0 is pass, 1 failure/error,
 2 pending. It never repairs or induces faults.
 Active is the user-facing name; Ready remains the compatibility alias/default.
-Hibernated required checks verify cost state, not healthy retained monitoring:
-non-required extension/DCRA/configuration failures are explicit wake diagnostics.
+Hibernated required checks verify compute cost state; NAT/PIP are cost diagnostics.
+Do not query retained monitoring as a parking gate; inspect it again before wake.
 Actual read/auth failures still terminate; never treat denial as resource absence.
 
 Monitor readiness does not certify endpoint protection. Approved Linux diagnostics
@@ -75,21 +75,21 @@ Lifecycle inventory uses retained successful per-workload deployment manifests:
 an optional-only deployment with an empty fleet does not erase earlier VMs.
 Classify OS using actual VM metadata, distinguish native/Arc/Monitor/patch
 targets, and compare IDs, never counts or `win-*` naming. Missing/ambiguous
-resources and mandatory wait/job/CLI failures must stop with actionable errors.
+resources stop activation/deletion; Hibernate warns drift and parks all infra-RG compute.
 
 Activation must verify guests on retries, not skip a previously failed phase
 because the VMs/Arc records now look running/connected. Windows Arc AMA is checked
-through `MonAgentCore`, not an assumed `AzureMonitorAgent` SCM service. Restart
+through a concurrent ten-minute `MonAgentCore` wait, not an assumed `AzureMonitorAgent` service. Restart
 only real required services where needed; do not restart the extension host.
 Default patch submissions run only for Arc hosts started/waking on this attempt,
 not already-active retries. Use `-AssessPatches` to explicitly retry all-host
 assessment work; it conflicts with `-SkipPatchAssessment`. Submission is not
 completion. Preserve optional `-ResultPath` evidence outside
-git, and do not equate Monitor Ready with successful full-script completion.
+git; report telemetry-only lag as pending and poll readiness before presenting/SRE/offers.
 
 Parking/waking uses the normal lifecycle context/inventory/network preview, NOT
 the deployment Graph/Owner/provider/quota gate below or a frozen whole-RG index.
-Validate exclusive expected NAT/PIP bindings before mutations. Do not build an
+Validate exclusive NAT/PIP bindings before network changes; skip unsafe cleanup loudly. Do not build an
 extra lifecycle wrapper that requires unrelated extension indexes to match.
 Removed verifies both groups plus the named subscription policies/budget absent;
 tenant identity/application, shared services and soft-deleted vault exceptions

@@ -50,8 +50,10 @@ is only needed for the experimental SQL path.
 Parking/waking/removal does **not** invoke that deployment Graph/Owner/provider/
 capacity gate. Use the normal explicit context, retained workload inventory and
 `-WhatIf` path; a genuine ARM authorization failure still stops the operation.
-Before any park/wake write, exact subnet/NAT/PIP GETs refuse a foreign NAT,
+Before wake writes, exact subnet/NAT/PIP GETs refuse a foreign NAT,
 another attached subnet/public IP/prefix, or a PIP bound to another resource.
+Hibernate parks compute first; these same conflicts skip only network cleanup,
+with a loud warning and retained-network cost diagnostics.
 These narrow sharing guards replace neither normal authorization nor ownership
 review. Do not compare whole resource-group counts or historical generic
 extension indexes as a lifecycle gate. Optional identity removal checks directory
@@ -75,7 +77,12 @@ fleet. Lifecycle discovery uses the latest nonempty Arc fleet and retained
 native-VM/Container-App IDs. Older AKS manifests are supplemented only by tagged
 clusters in the demo infra group. Preserve deployment history. Missing manifests,
 unknown VMs, OS mismatch and IDs outside the demo infra group are errors, not
-reasons to guess from names.
+reasons to guess which VMs to start or delete. Hibernate instead discovers all
+VMs, AKS and Container Apps in the explicitly targeted `rg-<prefix>-infra`;
+manifest/OS/skin drift is a warning, not a reason to leave that compute running.
+No workload ID outside that exact subscription/group is accepted. If the skin
+cannot be read, supply the confirmed `-NamePrefix` explicitly; do not guess a
+target from a broken skin. Preserve manifests for the stricter later activation.
 
 Actual `storageProfile.osDisk.osType` is checked against the manifest. Azure-native
 Windows VMs are never treated as Linux or expected to have an Arc identity.
@@ -87,7 +94,11 @@ the latest Container App revision only if none is active. It restarts guest
 agents only for newly started/disconnected machines. Already-running/connected
 machines are not restarted, but **every activation verifies guest health**, including
 on a retry after partial failure. Windows Arc checks the `himds` service and,
-for monitored hosts, the `MonAgentCore` process with a bounded startup wait.
+for monitored hosts, the `MonAgentCore` process with a ten-minute startup wait.
+Host commands are submitted concurrently through the existing checked jobs.
+Progress identifies the jobs still awaited. A healthy Arc service with AMA not
+yet visible at the deadline records guest `pending` and warns; missing/stopped
+required services, command/transport failures and denied reads still fail.
 It does not assume the Windows client/MSI `AzureMonitorAgent` service exists or
 restart the extension host. Linux checks each required service individually.
 See [Windows Arc AMA troubleshooting](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc).
@@ -107,6 +118,13 @@ Use `-ResultPath <PRIVATE_EXISTING_DIRECTORY>\activation-attempt.json` to retain
 schema-versioned per-host guest checks, restarted service names, assessment
 submission states, final readiness and failure information outside git. Use a new
 file per attempt. This report does not include arbitrary guest output or scripts.
+After compute and Arc checks, a single full readiness snapshot is taken.
+If only required `heartbeat/*` checks are pending, activation exits 0 but records
+`status:pending`, `readiness:pending` and exact readiness rows, with a re-check
+message. Any other required pending/failed check remains a failed activation.
+The AI must poll the read-only readiness command to pass before continuing the
+presentation, dependent SRE readiness or the conversational incident offer;
+activation exit 0 alone does not prove telemetry has arrived.
 Completion must come from stdout with no failed/Error-level result; a marker in
 stderr alone is not success. `-WhatIf` neither invokes guests nor writes this report.
 
@@ -115,27 +133,32 @@ it does not rely on implicit default outbound. Redeployment preserves an existin
 gateway. Hibernation still removes the same named resources; activation recreates
 them. See the [documented NAT/subnet resource model](https://learn.microsoft.com/azure/nat-gateway/manage-nat-gateway#create-a-nat-gateway-and-associate-it-with-an-existing-subnet).
 
-Hibernation requires every expected VM to be **deallocated**, not merely stopped
+Hibernation requires every discovered demo infra-RG VM to be **deallocated**, not merely stopped
 or missing from a running-count query. AKS must report `Stopped` and provisioning
 `Succeeded` before NAT removal. All active Container App revisions are deactivated;
 setting minimum replicas to zero alone does not prevent HTTP scale-out.
 Fault flags, storage, DCRAs and guest configuration are preserved.
 Retries inspect current state and do not repeat completed state transitions.
 In-flight VM deallocation/start and AKS stop/start are waited for, not resubmitted.
-Activation waits for AKS Running even with `-SkipValidate`. Failures leave completed
+Activation waits for AKS Running even with `-SkipValidate`. Individual compute failures warn and do not prevent attempts on other VMs,
+clusters, apps or revisions. Final compute verification remains mandatory.
+Failures leave completed
 parking steps intact: do not wake/redeploy to undo a partial stop. Retry the same
 target to finish remaining known transitions (for example a failed PIP deletion).
 Network sharing is inspected again before removal after compute has stopped.
 
-Hibernated **required** acceptance is VM deallocation, optional deployed AKS
-Stopped/Succeeded, no active Container App revision, and absent/detached owned
-NAT/PIP. Retained groups, Arc records, workspace/DCR/workbook/alert presence and
-extension/DCRA health are **non-required wake diagnostics**. Their fail/pending
-rows remain visible with explanatory messages, but do not change a verified
-parked cost-state result to failure or claim compute remains active. They can
-still prevent the later Active readiness from passing. Actual inspection errors,
-including permission/auth failures, still return failure rather than being
-silently relabeled as harmless drift.
+Hibernated **required** acceptance is VM deallocation, deployed AKS
+Stopped/Succeeded and no active Container App revision. Named NAT/PIP absence
+is reported as **non-required cost diagnostics**: unsafe binding conflicts or
+cleanup failures warn without undoing or failing verified compute parking.
+Inspect these rows before claiming network savings; a foreign NAT is never
+detached. Retained groups/Arc records/Monitor configuration and telemetry are
+not queried by Hibernated readiness. Use Active readiness before the next demo.
+Readiness does not repeat strict manifest or skin validation while parked.
+Unknown power or denied/malformed required reads still return nonzero, not
+verified Hibernated. This is a deliberate exception to the literal "nonzero only
+if still running" request: an unreadable state cannot prove stopped compute.
+Actual network inspection/auth errors also remain visible errors, never absence.
 
 No automatic alert/polling pause is introduced: owned alert definitions remain
 enabled as before and may incur evaluation/notification costs. Safe restoration
@@ -185,10 +208,12 @@ approved operation. Fresh deployments save the generated password to Key Vault.
 If new Arc onboarding is required and the SP already exists, supply its existing
 secret as `-OnboardingSecret` (SecureString). Never commit or log either secret.
 
-Mandatory waits throw on timeout; inspection errors terminate immediately. Native CLI
+Mandatory compute/Arc waits throw on timeout; inspection errors terminate. Native CLI
 failures terminate; authentication/authorization errors are never interpreted as
 resource absence. Extension jobs must complete successfully; guest commands need
-an exact completion marker as well as a nonfailed provisioning result. Temporary
+an exact completion marker as well as a nonfailed provisioning result. Only the
+activation AMA wait permits the explicit `ARC_DEMO_PENDING` stdout marker;
+other guest operations cannot use it to bypass completion. Temporary
 credential-bearing files and jobs are removed even after failure.
 
 Routine deployment preserves an existing Container App's `SIMULATE_CRASH` value
@@ -245,8 +270,8 @@ Checks cover retained groups, core resources/workbook presence, exact VM power,
 Arc connection, supported extension provisioning, DCRA identities, recent
 Heartbeat by expected ARM ID, NAT attachment/presence, AKS power/provisioning and
 active Container App revision health. `RunningAtMinScale`/`RunningAtMaxScale` are
-valid healthy revision states. Hibernated hosts intentionally skip Heartbeat;
-monitor/retained-configuration rows have `required:false` with diagnostic messages.
+valid healthy revision states. Hibernated checks only compute state and named
+NAT/PIP cost diagnostics, without inspecting retained monitoring.
 Removed checks group/policy/budget absence and emits non-required skipped rows
 for retained tenant/shared/soft-delete exceptions. SchemaVersion 1 and existing
 0/1/2 exit meanings are unchanged: consumers must honor each row's `required`
@@ -321,3 +346,12 @@ never incidentally against an in-use demo.
 The simplified predicates, retry handling and Removed inspection are covered by
 local mocked regression checks, not a newly authorized live park/wake/teardown
 exercise. Prior operational evidence above does not validate these source changes.
+
+The best-effort parking and concurrent cold-start changes have local coverage for
+missing manifests, unlisted VMs, OS/skin drift, foreign NAT, partial deallocation,
+denied/unknown power, a five-minute AMA start, ten-minute pending evidence and
+telemetry-only pending versus real service/readiness failures. Native-process
+stderr and explicit-null JSON regressions remain. Mocks cannot prove Azure
+allocation, guest boot timing, RunCommand delivery/truncation, eventual ARM
+consistency or ingestion latency. Approve a disposable smoke cycle separately;
+see [cost.md](cost.md#proposed-disposable-smoke-cycle-not-executed).

@@ -20,7 +20,9 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 try {
-    $skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
+    $skin = if ($DesiredState -ne 'Hibernated' -or -not $PSBoundParameters.ContainsKey('NamePrefix')) {
+        Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
+    }
     if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
     Assert-DemoName $NamePrefix
     Initialize-DemoContext $SubscriptionId $TenantId
@@ -28,8 +30,8 @@ try {
         $checks = if ($DesiredState -eq 'Removed') {
             @(Get-DemoRemovalChecks -NamePrefix $NamePrefix)
         } else {
-            $inventory = Get-DemoInventory $NamePrefix
-            Assert-DemoSkinInventory $skin $inventory
+            $inventory = Get-DemoInventory $NamePrefix -ForHibernation:($DesiredState -eq 'Hibernated')
+            if ($DesiredState -ne 'Hibernated') { Assert-DemoSkinInventory $skin $inventory }
             @(Get-DemoReadinessChecks -Inventory $inventory -NamePrefix $NamePrefix -DesiredState $DesiredState)
         }
         $status = if (@($checks | Where-Object { $_.required -and $_.status -eq 'fail' }).Count) { 'fail' }

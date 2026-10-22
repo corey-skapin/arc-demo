@@ -39,7 +39,7 @@ Default Act-1 deployment costs are shown below. Optional Azure VM, Container App
 | State | Cost stance | What stays | What goes |
 |---|---|---|---|
 | **Active** | Reprice selected workloads | Everything | Nothing (VM auto-shutdown is not whole-lab hibernation) |
-| **Hibernated** | Retained-service costs remain | LAW, DCRs, workbooks, alerts, disks, Arc records | Demo NAT/PIP, VM compute; optional AKS stopped and Container App revisions inactive |
+| **Hibernated** | Retained-service costs remain; inspect network warnings | LAW, DCRs, workbooks, alerts, disks, Arc records | All demo infra-RG compute parked; NAT/PIP removed only when safe |
 | **Removed** | Verify final charges | Shared/subscription services unless explicitly removed | Two demo RGs, named policies and budget |
 
 The previous AUD 210 total was incorrect: its unverified line items sum to 358.
@@ -65,8 +65,8 @@ Copy a bundled synthetic skin to a private file outside git and use that
 runtime skin with the handoff example.
 
 ```powershell
-git clone <ARC_REPOSITORY_URL> C:\src\arc-demo
-cd C:\src\arc-demo
+git clone <ARC_REPOSITORY_URL> arc-demo
+cd arc-demo
 
 # Sign in to the target tenant
 az login --tenant <TENANT_ID>
@@ -122,7 +122,7 @@ has not been rewritten; never put credentials or private evidence in source.
 ### Hibernated / Active
 
 ```powershell
-# After explicit operator approval: deallocates VMs, stops AKS, deactivates Container Apps, removes NAT
+# After approval: park demo infra-RG compute; remove NAT/PIP only when safely exclusive
 .\scripts\Hibernate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH>
 
 # Before the next demo; no automatic fault reset or credential rotation
@@ -136,6 +136,9 @@ Use `Remove-ArcDemo.ps1` only when you want to delete the estate permanently.
 Every activation checks guest health, including already-running hosts on a
 retry, without restarting already-correct services. Windows Arc AMA is checked
 through its `MonAgentCore` process, not an assumed Windows service.
+Host checks run concurrently. Windows AMA has a ten-minute startup budget;
+timeout is recorded as pending, not repaired. Telemetry-only lag does not fail
+activation, but the AI must poll readiness before presentation/SRE/incident offers.
 Activation submits on-demand Azure Update Manager patch assessments only for
 Arc hosts started/waking on that attempt unless skipped. Already-active retries
 still verify guests but do not resubmit assessments. Use `-AssessPatches` for an
@@ -153,10 +156,13 @@ using its own maintained procedure, then park Arc to avoid investigations of
 intentionally disconnected hosts. See [lifecycle.md](docs/lifecycle.md).
 
 `-DesiredState Active` is the user-facing state name (`Ready` remains compatible).
-Hibernated required checks cover deallocated/stopped compute, inactive app
-revisions and absent/detached owned NAT/PIP. Retained monitoring problems appear
-as non-required wake diagnostics, not a claim that compute is still running.
-Inspection/auth errors still fail. Removed readiness works after deployment
+Hibernate parks all compute in the explicit demo infra group even if manifests,
+OS metadata or the skin drift. Strict ownership still gates VM startup/deletion.
+Hibernated required checks cover deallocated/stopped compute and inactive app
+revisions; NAT/PIP absence is a cost diagnostic. Foreign/shared networking is
+left untouched with a warning, so exit 0 does not promise network cleanup.
+Retained monitoring is not queried while parked. Unknown/denied compute
+inspection still fails; it is never evidence of stopped compute. Removed readiness works after deployment
 history disappears and verifies both groups plus named policies/budget absent;
 retained tenant identities, shared/subscription services and soft-deleted vaults
 are explicit exclusions, not a promise of a zero bill.

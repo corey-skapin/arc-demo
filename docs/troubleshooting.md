@@ -84,7 +84,7 @@ failed command as evidence that the guest script never ran.
 in [Microsoft's Windows Arc troubleshooting guidance](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc),
 and restarts only real required services on newly started/disconnected hosts.
 Already-running hosts receive read-only guest health checks on a retry. Missing
-services/processes, failed status entries and absent stdout markers still fail.
+services, failed status entries and absent stdout markers still fail.
 The helper reports safe status metadata without logging potentially sensitive
 guest output. Optional `-ResultPath` retains per-host outcomes and failures.
 
@@ -93,6 +93,43 @@ explicit target and retained skin. Do not add skip switches, reinstall AMA,
 restart the VM/extension host or equate an independent Ready snapshot with a
 successful activation. Assessment submissions still run unless explicitly skipped;
 they are asynchronous, not proof of completed update inventory.
+
+## Windows AMA is healthy but starts after the old three-minute guard
+
+An approved cold-start diagnosis found `MonAgentCore` naturally starting about
+five minutes after boot, roughly half a minute after the old guard failed.
+Fresh exact-ID Heartbeat followed; no repair was needed. That observation is not
+a guarantee of future boot/ingestion time.
+
+Activation now submits host checks concurrently and waits up to ten minutes for
+Windows AMA, with job progress. Required Arc/Linux services must still be healthy.
+An AMA deadline emits the explicit pending marker and records that host as
+pending in `-ResultPath`; it does not restart/reinstall the agent. Final readiness
+reports telemetry lag separately. If only Heartbeat is pending, activation exits
+0 with pending evidence and a re-check message. Poll read-only readiness before
+presenting or the combined incident offer; report pending if it does not converge.
+Do not turn an auth failure, unhealthy service or failed extension into telemetry
+lag. Microsoft documents both the
+[MonAgentCore process and a further Heartbeat wait](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc#basic-troubleshooting-steps-installation-agent-not-running-configuration-issues);
+the ten-minute budget is this repo's policy, not a service SLA.
+
+## Hibernate finds missing manifests, an extra VM or a foreign NAT
+
+Parking no longer requires perfect deployment/skin/OS metadata. It warns about
+strict inventory drift, then parks every discovered VM, AKS cluster and active
+Container App revision in the explicitly selected demo infra group. If a skin
+cannot be read, supply the confirmed prefix explicitly; never guess another lab.
+One failed compute stop does not prevent attempts on the other workloads.
+Final Hibernated checks require actual known deallocation/stopped/inactive state.
+Denied/unknown power stays an explicit error, not success.
+
+A foreign/shared NAT/PIP binding skips **only** network cleanup with a loud
+warning. Safe cleanup remains detach subnet, delete NAT, delete PIP, after compute
+parking. Incomplete network deletion is visible and may bill even when the
+compute checks pass. Inspect those non-required cost rows; do not claim a zero
+bill or change foreign bindings. Retained monitoring is not queried in parked
+readiness. Repair manifest/skin drift before a separately approved activation;
+startup, deployment and destructive removal remain fail-closed.
 
 ## An Arc Linux extension child is absent but the VM-path extension is present
 
@@ -150,7 +187,8 @@ manifests, use actual VM OS metadata and compare exact IDs. Run read-only
 `Test-ArcDemoReadiness.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -OutputFormat Json`.
 Resolve its failed checks; do not add unrelated hosts to satisfy a count.
 Do not delete subscription deployment history: missing/ambiguous inventory is an
-error requiring operator reconciliation, not a silent "no VMs" success.
+activation error requiring reconciliation, not a silent "no VMs" success.
+Parking instead uses actual compute in the explicit infra group.
 
 ## Linux Change Tracking missing despite healthy AMA
 
@@ -405,16 +443,16 @@ Generic extension indexes also differed from exact child GET results; enumeratio
 is not proof of existence, repair or health. Do not retry/recreate extensions to
 make an old index match.
 
-Use the normal lifecycle context/inventory/network `-WhatIf` path, not
-`Test-Prerequisites.ps1` (deployment only). This does not bypass a real ARM denial,
-wrong target, missing expected VM, OS mismatch or shared network resource guard.
-Inspect those errors before changing anything.
+Use the normal lifecycle `-WhatIf` path, not `Test-Prerequisites.ps1` (deployment
+only). Wrong context or denied/unknown compute reads still fail. Parking warns
+manifest/skin/OS drift rather than requiring reconciliation first; foreign/shared
+networking skips only network cleanup. Activation remains strict.
 
 The old parked readiness also required healthy extensions/DCRAs after compute
-was already stopped. Hibernated now distinguishes required cost-state checks
-from explicit non-required wake diagnostics. A red diagnostic does not mean
-compute is active; an actual inspection error still fails. Keep diagnostics for
-the next rehearsal rather than repairing them during parking. On partial network
+was already stopped. Hibernated now inspects compute and non-required network
+cost facts only, not retained monitoring health. A red network diagnostic does
+not mean compute is active; an actual inspection error still fails. Recheck
+retained monitoring before the next rehearsal, not during parking. On partial network
 removal, retry the same script without waking or redeploying the stopped lab.
 For full ACA history use revision `list --all`; default listing is active-only.
 New source behavior is locally mocked, not a new live-lifecycle proof.

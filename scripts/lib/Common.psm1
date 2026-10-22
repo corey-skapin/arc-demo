@@ -1,14 +1,4 @@
-<#
-.SYNOPSIS
-  Shared utility functions for arc-demo scripts.
-
-.DESCRIPTION
-  Import with:
-    Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
-#>
-
-#region Logging
-
+# Shared functions for deployment, lifecycle and read-only readiness.
 function Write-Header {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Message)
@@ -41,10 +31,6 @@ function Write-Fail {
     param([Parameter(Mandatory)][string]$Message)
     Write-Host "  ❌ $Message" -ForegroundColor Red
 }
-
-#endregion
-
-#region Prereqs
 
 function Test-Prerequisites {
     <#
@@ -126,41 +112,6 @@ function Test-Prerequisites {
     return $principalId
 }
 
-#endregion
-
-#region Demo skin helpers
-
-function ConvertTo-DemoHashtable {
-    [CmdletBinding()]
-    param([AllowNull()][object]$InputObject)
-
-    if ($null -eq $InputObject) {
-        return @{}
-    }
-
-    if ($InputObject -is [System.Collections.IDictionary]) {
-        $result = [ordered]@{}
-        foreach ($key in $InputObject.Keys) {
-            $result[$key] = ConvertTo-DemoHashtable -InputObject $InputObject[$key]
-        }
-        return $result
-    }
-
-    if ($InputObject -is [pscustomobject]) {
-        $result = [ordered]@{}
-        foreach ($property in $InputObject.PSObject.Properties) {
-            $result[$property.Name] = ConvertTo-DemoHashtable -InputObject $property.Value
-        }
-        return $result
-    }
-
-    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
-        return @($InputObject | ForEach-Object { ConvertTo-DemoHashtable -InputObject $_ })
-    }
-
-    return $InputObject
-}
-
 function Get-DemoSkin {
     <#
     .SYNOPSIS
@@ -184,49 +135,35 @@ function Get-DemoSkin {
         throw "Demo skin not found: $skinPath"
     }
 
-    $skin = Get-Content -LiteralPath $skinPath -Raw | ConvertFrom-Json -Depth 30
-    if ($skin -isnot [pscustomobject] -or $skin.schemaVersion -ne 1) {
+    $skin = Get-Content -LiteralPath $skinPath -Raw | ConvertFrom-Json -AsHashtable -Depth 30
+    if ($skin -isnot [System.Collections.IDictionary] -or $skin.schemaVersion -ne 1) {
         throw "Invalid demo skin '$skinPath': expected an object with schemaVersion 1."
     }
     foreach ($section in 'azure', 'workloads', 'compute', 'operations', 'cost', 'labels', 'tags', 'notifications') {
-        if ($null -ne $skin.$section -and $skin.$section -isnot [pscustomobject]) { throw "Skin $section must be a JSON object." }
+        if ($null -ne $skin.$section -and $skin.$section -isnot [System.Collections.IDictionary]) { throw "Skin $section must be a JSON object." }
     }
-    foreach ($property in $skin.workloads.PSObject.Properties) {
-        if ($property.Name -in @('deployArcOnPrem', 'deployAzureVMs', 'deployContainerApps', 'deployAks', 'installSql', 'skipSqlInstall') -and $property.Value -isnot [bool]) {
-            throw "Skin workloads.$($property.Name) must be a JSON boolean, not a string."
+    foreach ($key in 'deployArcOnPrem', 'deployAzureVMs', 'deployContainerApps', 'deployAks', 'installSql', 'skipSqlInstall') {
+        if ($skin.workloads -and $skin.workloads.Contains($key) -and $skin.workloads[$key] -isnot [bool]) {
+            throw "Skin workloads.$key must be a JSON boolean, not a string."
         }
     }
     if ($skin.azure.namePrefix) { Assert-DemoName -NamePrefix $skin.azure.namePrefix }
     if ($skin.azure.location -and $skin.azure.location -notmatch '^[a-z0-9]+$') { throw 'Skin azure.location must be an Azure region name.' }
-    return ConvertTo-DemoHashtable -InputObject $skin
+    return $skin
 }
 
 function Get-DemoSkinValue {
     [CmdletBinding()]
     param(
-        [AllowNull()][object]$Skin,
+        [AllowNull()][System.Collections.IDictionary]$Skin,
         [Parameter(Mandatory)][string]$Path,
         [AllowNull()][object]$Default
     )
 
     $current = $Skin
     foreach ($part in ($Path -split '\.')) {
-        if ($null -eq $current) {
-            return $Default
-        }
-
-        if ($current -is [System.Collections.IDictionary] -and $current.Contains($part)) {
-            $current = $current[$part]
-            continue
-        }
-
-        $property = $current.PSObject.Properties[$part]
-        if ($property) {
-            $current = $property.Value
-            continue
-        }
-
-        return $Default
+        if ($current -isnot [System.Collections.IDictionary] -or -not $current.Contains($part)) { return $Default }
+        $current = $current[$part]
     }
 
     if ($null -eq $current -or ([string]$current -eq '')) {
@@ -240,7 +177,7 @@ function Merge-DemoHashtable {
     [CmdletBinding()]
     param(
         [System.Collections.IDictionary]$Defaults = @{},
-        [AllowNull()][object]$Overrides
+        [AllowNull()][System.Collections.IDictionary]$Overrides
     )
 
     $result = [ordered]@{}
@@ -248,11 +185,10 @@ function Merge-DemoHashtable {
         $result[$key] = $Defaults[$key]
     }
 
-    $overrideTable = ConvertTo-DemoHashtable -InputObject $Overrides
-    if ($overrideTable -is [System.Collections.IDictionary]) {
-        foreach ($key in $overrideTable.Keys) {
-            if ($null -ne $overrideTable[$key] -and ([string]$overrideTable[$key] -ne '')) {
-                $result[$key] = $overrideTable[$key]
+    if ($Overrides) {
+        foreach ($key in $Overrides.Keys) {
+            if ($null -ne $Overrides[$key] -and ([string]$Overrides[$key] -ne '')) {
+                $result[$key] = $Overrides[$key]
             }
         }
     }
@@ -266,10 +202,6 @@ function ConvertTo-DemoTagString {
 
     return (($Tags.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value }) -join ',')
 }
-
-#endregion
-
-#region Az REST helpers
 
 function Get-MgmtToken {
     [CmdletBinding()]
@@ -304,10 +236,6 @@ function Invoke-AzRest {
     Invoke-RestMethod @params
 }
 
-#endregion
-
-#region Wait helpers
-
 function Wait-Until {
     <#
     .SYNOPSIS
@@ -337,10 +265,6 @@ function Wait-Until {
     throw "Timed out after $TimeoutSeconds seconds waiting for $Message. Inspect the expected resource identities and observed state before retrying."
 }
 
-#endregion
-
-#region Misc
-
 function New-StrongPassword {
     [CmdletBinding()]
     param([int]$Length = 24)
@@ -354,8 +278,6 @@ function New-KeyVaultName {
     $rand = -join ((97..122 + 48..57) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
     return "$Prefix-$rand"
 }
-
-#endregion
 
 function Assert-DemoName {
     [CmdletBinding()]
@@ -420,10 +342,24 @@ function Initialize-DemoContext {
 
 function Get-DemoInventory {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$NamePrefix)
+    param([Parameter(Mandatory)][string]$NamePrefix, [switch]$ForHibernation)
     Assert-DemoName $NamePrefix
     $arcRg = "rg-$NamePrefix"
     $infraRg = "rg-$NamePrefix-infra"
+    $resources = @(Invoke-DemoAz -Arguments @('resource', 'list', '-g', $infraRg, '-o', 'json') | ConvertFrom-Json)
+    $vmRecords = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '--show-details', '-o', 'json') | ConvertFrom-Json)
+    if ($ForHibernation) {
+        $root = "/subscriptions/$script:DemoSubscription/resourceGroups/$infraRg/providers/"
+        if (@(@($resources) + @($vmRecords) | Where-Object { -not $_.id.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) }).Count) {
+            throw 'Inventory returned an ID outside the explicitly targeted demo infra group.'
+        }
+        $machines = @($vmRecords | ForEach-Object { [pscustomobject]@{ Name = $_.name; Id = $_.id; Actual = $_ } })
+        $machines += @($resources | Where-Object { $_.type -eq 'Microsoft.Compute/virtualMachines' -and $_.id -notin $vmRecords.id } |
+            ForEach-Object { [pscustomobject]@{ Name = $_.name; Id = $_.id; Actual = $null } })
+        return [pscustomobject]@{ ArcRg = $arcRg; InfraRg = $infraRg; Resources = $resources; Machines = $machines
+            AksClusterIds = @($resources | Where-Object type -eq 'Microsoft.ContainerService/managedClusters' | ForEach-Object id)
+            ContainerAppIds = @($resources | Where-Object type -eq 'Microsoft.App/containerApps' | ForEach-Object id) }
+    }
     $deployments = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '--query',
         "[?properties.provisioningState=='Succeeded' && properties.outputs.arcResourceGroup.value=='$arcRg']", '-o', 'json') | ConvertFrom-Json |
         Sort-Object { $_.properties.timestamp } -Descending)
@@ -435,7 +371,6 @@ function Get-DemoInventory {
     $nativeIds = @($deployments | ForEach-Object { $_.properties.outputs.azureVmResourceIds.value } | Where-Object { $_ } | Sort-Object -Unique)
     $appIds = @($deployments | ForEach-Object { $_.properties.outputs.containerAppIds.value } | Where-Object { $_ } | Sort-Object -Unique)
     $clusterIds = @($deployments | ForEach-Object { $_.properties.outputs.aksClusterIds.value } | Where-Object { $_ } | Sort-Object -Unique)
-    $resources = @(Invoke-DemoAz -Arguments @('resource', 'list', '-g', $infraRg, '-o', 'json') | ConvertFrom-Json)
     # Older manifests did not emit AKS IDs.
     $clusterIds = @(@($clusterIds) + @($resources | Where-Object { $_.type -eq 'Microsoft.ContainerService/managedClusters' -and $_.tags.workload -eq 'aks' } | ForEach-Object { $_.id }) | Sort-Object -Unique)
     foreach ($id in @($nativeIds) + @($appIds) + @($clusterIds)) {
@@ -443,7 +378,6 @@ function Get-DemoInventory {
             throw 'Deployment manifest includes a workload ID outside the explicitly targeted demo resource group.'
         }
     }
-    $vmRecords = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '--show-details', '-o', 'json') | ConvertFrom-Json)
     $machines = foreach ($entry in $fleet) {
         $id = "/subscriptions/$script:DemoSubscription/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$($entry.name)"
         $actual = $vmRecords | Where-Object { $_.id -eq $id } | Select-Object -First 1
@@ -471,29 +405,30 @@ function Get-DemoNetworkState {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$InfraRg,
-        [Parameter(Mandatory)][string]$NamePrefix
+        [Parameter(Mandatory)][string]$NamePrefix,
+        [switch]$ForHibernation
     )
     $root = "/subscriptions/$script:DemoSubscription/resourceGroups/$InfraRg/providers/Microsoft.Network"
     $natId = "$root/natGateways/natgw-$NamePrefix"
     $pipId = "$root/publicIPAddresses/pip-natgw-$NamePrefix"
     $subnetId = "$root/virtualNetworks/vnet-$NamePrefix/subnets/snet-vms"
-    $subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '--ids', $subnetId, '-o', 'json') | ConvertFrom-Json
+    $subnetJson = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '--ids', $subnetId, '-o', 'json') -AllowNotFound:$ForHibernation
+    $subnet = if ($null -ne $subnetJson) { $subnetJson | ConvertFrom-Json }
     $natJson = Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'show', '--ids', $natId, '-o', 'json') -AllowNotFound
     $nat = if ($null -ne $natJson) { $natJson | ConvertFrom-Json }
     $pipJson = Invoke-DemoAz -Arguments @('network', 'public-ip', 'show', '--ids', $pipId, '-o', 'json') -AllowNotFound
     $pip = if ($null -ne $pipJson) { $pipJson | ConvertFrom-Json }
-    if ($subnet.id -ne $subnetId -or ($nat -and $nat.id -ne $natId) -or ($pip -and $pip.id -ne $pipId)) {
+    if ((-not $ForHibernation -and -not $subnet) -or ($subnet -and $subnet.id -ne $subnetId) -or ($nat -and $nat.id -ne $natId) -or ($pip -and $pip.id -ne $pipId)) {
         throw 'Network inspection returned an unexpected resource identity; refusing lifecycle changes.'
     }
-    if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { throw 'Demo subnet has an unexpected NAT Gateway; refusing to replace or detach it.' }
-    if (@($nat.subnets | Where-Object { $_ -and $_.id -ne $subnetId }).Count) { throw 'Demo NAT Gateway is shared with another subnet; refusing lifecycle changes.' }
-    if (@($nat.publicIpAddresses | Where-Object { $_ -and $_.id -ne $pipId }).Count -or @($nat.publicIpPrefixes | Where-Object { $_ }).Count) {
-        throw 'Demo NAT Gateway uses unexpected public IP resources; refusing lifecycle changes.'
-    }
-    if (($pip.natGateway.id -and $pip.natGateway.id -ne $natId) -or $pip.ipConfiguration.id) {
-        throw 'Demo public IP is used by another resource; refusing lifecycle changes.'
-    }
-    [pscustomobject]@{ Subnet = $subnet; Nat = $nat; PublicIp = $pip; NatId = $natId; PublicIpId = $pipId }
+    $conflicts = @(
+        if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { 'Demo subnet has an unexpected NAT Gateway.' }
+        if (@($nat.subnets | Where-Object { $_ -and $_.id -ne $subnetId }).Count) { 'Demo NAT Gateway is shared with another subnet.' }
+        if (@($nat.publicIpAddresses | Where-Object { $_ -and $_.id -ne $pipId }).Count -or @($nat.publicIpPrefixes | Where-Object { $_ }).Count) { 'Demo NAT Gateway uses unexpected public IP resources.' }
+        if (($pip.natGateway.id -and $pip.natGateway.id -ne $natId) -or $pip.ipConfiguration.id) { 'Demo public IP is used by another resource.' }
+    )
+    if ($conflicts -and -not $ForHibernation) { throw ($conflicts -join ' ') }
+    [pscustomobject]@{ Subnet = $subnet; Nat = $nat; PublicIp = $pip; NatId = $natId; PublicIpId = $pipId; SafeToRemove = -not $conflicts; ConflictMessage = $conflicts -join ' ' }
 }
 
 function Get-DemoRemovalChecks {
@@ -535,44 +470,52 @@ function Invoke-DemoGuestCommand {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Machine,
-        [Parameter(Mandatory)][string]$Script,
-        [switch]$PassThru
+        [Parameter(Mandatory, ParameterSetName = 'Submit')][string]$Script,
+        [Parameter(Mandatory, ParameterSetName = 'Receive')]$Job,
+        [Parameter(ParameterSetName = 'Submit')][switch]$AsJob,
+        [switch]$PassThru,
+        [switch]$AllowPending
     )
     $cmd = if ($Machine.OsType -eq 'Windows') { 'RunPowerShellScript' } else { 'RunShellScript' }
-    $scriptPath = $null
+    $scriptPath = if ($Job) { $Job.DemoScriptPath } else { $null }
     try {
-        if ($Script.StartsWith('@')) {
+        if (-not $Job -and $Script.StartsWith('@')) {
             $sourcePath = (Resolve-Path -LiteralPath $Script.Substring(1) -ErrorAction Stop).ProviderPath
             if (-not [System.IO.File]::Exists($sourcePath)) { throw 'Guest script input must be a file.' }
             $scriptArgument = "@$sourcePath"
-        } else {
+        } elseif (-not $Job) {
             # az.cmd can truncate multiline arguments. Keep the file until the job finishes.
             $scriptPath = [System.IO.Path]::GetTempFileName()
             [System.IO.File]::WriteAllText($scriptPath, $Script, [System.Text.UTF8Encoding]::new($false))
             $scriptArgument = "@$scriptPath"
         }
-        $job = Start-DemoAzJob -Arguments @('vm', 'run-command', 'invoke', '--ids', $Machine.Id,
-            '--command-id', $cmd, '--scripts', $scriptArgument, '-o', 'json', '--only-show-errors')
-        $result = Receive-DemoJobs -Jobs @($job) -TimeoutSeconds 900 -PassThru | ConvertFrom-Json
+        if (-not $Job) {
+            $Job = Start-DemoAzJob -Arguments @('vm', 'run-command', 'invoke', '--ids', $Machine.Id,
+                '--command-id', $cmd, '--scripts', $scriptArgument, '-o', 'json', '--only-show-errors')
+            $Job | Add-Member -NotePropertyName DemoScriptPath -NotePropertyValue $scriptPath
+        }
+        if ($AsJob) { return $Job }
+        $result = Receive-DemoJobs -Jobs @($Job) -TimeoutSeconds 900 -PassThru | ConvertFrom-Json
     } finally {
-        if ($scriptPath) { [System.IO.File]::Delete($scriptPath) }
+        if ($scriptPath -and (-not $AsJob -or -not $Job)) { [System.IO.File]::Delete($scriptPath) }
     }
     $entries = @($result.value | Where-Object { $_ })
     $stdout = @($entries | Where-Object {
         $_.code -match '^ComponentStatus/StdOut/succeeded$|^ProvisioningState/succeeded$'
     } | ForEach-Object { $_.message }) -join "`n"
     $marker = $stdout -match '(?m)^ARC_DEMO_OK\r?$'
+    $pending = $AllowPending -and $stdout -match '(?m)^ARC_DEMO_PENDING\r?$'
     $failed = @($entries | Where-Object { $_.code -match 'failed|error' -or $_.level -eq 'Error' })
     $stderrPresent = @($entries | Where-Object { $_.code -match '^ComponentStatus/StdErr/' -and $_.message }).Count -gt 0
     $codes = @($entries | ForEach-Object { [string]$_.code })
-    if (-not $entries -or $failed -or -not $marker) {
+    if (-not $entries -or $failed -or (-not $marker -and -not $pending)) {
         # Do not expose arbitrary guest output: onboarding scripts can contain secrets.
         throw "Guest command failed on $($Machine.Name); stdout completion marker=$marker; stderr present=$stderrPresent; status codes=$($codes -join ', '). Required completion marker absent or failure reported."
     }
     if ($PassThru) {
         [pscustomobject]@{
-            machineName = $Machine.Name; resourceId = $Machine.Id; status = 'pass'
-            completionMarker = 'ARC_DEMO_OK'; statusCodes = $codes; stderrPresent = $stderrPresent
+            machineName = $Machine.Name; resourceId = $Machine.Id; status = $(if ($pending) { 'pending' } else { 'pass' })
+            completionMarker = $(if ($pending) { 'ARC_DEMO_PENDING' } else { 'ARC_DEMO_OK' }); statusCodes = $codes; stderrPresent = $stderrPresent
         }
     }
 }
@@ -585,7 +528,12 @@ function Receive-DemoJobs {
         [switch]$PassThru
     )
     try {
-        $Jobs | Wait-Job -Timeout $TimeoutSeconds | Out-Null
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        do {
+            $remaining = [Math]::Max(0, [int]($deadline - (Get-Date)).TotalSeconds)
+            Write-Step "Waiting for guest/extension jobs: $($Jobs.Name -join ', ') ($remaining s remaining)"
+            $Jobs | Wait-Job -Timeout ([Math]::Min(15, $remaining)) | Out-Null
+        } while (@($Jobs | Where-Object State -in @('NotStarted', 'Running')).Count -and (Get-Date) -lt $deadline)
         foreach ($job in $Jobs) {
             if ($job.State -ne 'Completed') { throw "Job $($job.Name) did not complete: $($job.State). Inspect the target resource before retrying." }
             $output = Receive-Job $job -ErrorAction Stop
@@ -716,13 +664,37 @@ function Get-DemoReadinessChecks {
         [ValidateSet('Active', 'Ready', 'Hibernated')][string]$DesiredState = 'Ready'
     )
     $parked = $DesiredState -eq 'Hibernated'
-    $monitorRequired = -not $parked
-    $diagnosticMessage = if ($parked) { 'Wake-readiness diagnostic only; does not determine the parked cost state. Inspect before activation; no repair performed.' } else { '' }
+    foreach ($machine in $Inventory.Machines) {
+        $power = if ($parked) { 'VM deallocated' } else { 'VM running' }
+        $observed = $machine.Actual.powerState
+        New-DemoCheck "vm/$($machine.Name)/power" $machine.Id $power $observed $(if (-not $observed) { 'fail' } elseif ($observed -eq $power) { 'pass' } else { 'pending' }) -Message $(if (-not $observed) { 'Power state unknown; not verified stopped.' } else { '' })
+    }
+    foreach ($id in $Inventory.AksClusterIds) {
+        $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $Inventory.InfraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
+        $state = if ($parked) { 'Stopped' } else { 'Running' }
+        New-DemoCheck "aks/$($cluster.name)" $id $state $cluster.powerState.code $(if (-not $cluster.powerState.code -or $cluster.provisioningState -eq 'Failed') { 'fail' } elseif ($cluster.powerState.code -eq $state -and $cluster.provisioningState -eq 'Succeeded') { 'pass' } else { 'pending' })
+    }
+    foreach ($id in $Inventory.ContainerAppIds) {
+        $name = ($id -split '/')[-1]
+        $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $Inventory.InfraRg, '-n', $name, '-o', 'json') | ConvertFrom-Json)
+        $active = @($revisions | Where-Object { $_.properties.active })
+        $healthy = @($active | Where-Object { $_.properties.healthState -eq 'Healthy' -and $_.properties.runningState -in @('Running', 'RunningAtMaxScale', 'RunningAtMinScale') })
+        New-DemoCheck "containerapp/$name" $id $(if ($parked) { 'no active revisions' } else { 'healthy active revision' }) @($active.name) $(if (($parked -and $active.Count -eq 0) -or (-not $parked -and $healthy.Count -gt 0)) { 'pass' } else { 'pending' })
+    }
+    $network = Get-DemoNetworkState -InfraRg $Inventory.InfraRg -NamePrefix $NamePrefix -ForHibernation:$parked
+    foreach ($id in $network.NatId, $network.PublicIpId) {
+        $exists = if ($id -eq $network.NatId) { [bool]$network.Nat } else { [bool]$network.PublicIp }
+        New-DemoCheck "network/$(($id -split '/')[-1])" $id (-not $parked) $exists $(if ($exists -ne $parked) { 'pass' } else { 'fail' }) -Required (-not $parked) -Message $(if ($parked -and $exists) { "Compute parked independently; networking may still bill. $($network.ConflictMessage)" } else { '' })
+    }
+    $subnet = $network.Subnet
+    $expectedNat = if ($parked) { '' } else { $network.NatId }
+    New-DemoCheck 'network/nat-association' $subnet.id $expectedNat ([string]$subnet.natGateway.id) $(if ([string]$subnet.natGateway.id -eq $expectedNat) { 'pass' } else { 'fail' }) -Required (-not $parked) -Message $network.ConflictMessage
+    if ($parked) { return }
     $root = "/subscriptions/$script:DemoSubscription/resourceGroups"
     $arcResources = @(Invoke-DemoAz -Arguments @('resource', 'list', '-g', $Inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
     foreach ($rg in $Inventory.ArcRg, $Inventory.InfraRg) {
         $group = Invoke-DemoAz -Arguments @('group', 'show', '-n', $rg, '-o', 'json') | ConvertFrom-Json
-        New-DemoCheck "group/$rg" "$root/$rg" 'Succeeded' $group.properties.provisioningState $(if ($group.properties.provisioningState -eq 'Succeeded') { 'pass' } else { 'pending' }) -Required $monitorRequired -Message $diagnosticMessage
+        New-DemoCheck "group/$rg" "$root/$rg" 'Succeeded' $group.properties.provisioningState $(if ($group.properties.provisioningState -eq 'Succeeded') { 'pass' } else { 'pending' })
     }
     $workspaceId = "$root/$($Inventory.ArcRg)/providers/Microsoft.OperationalInsights/workspaces/law-$NamePrefix"
     $requiredIds = @($workspaceId,
@@ -732,37 +704,27 @@ function Get-DemoReadinessChecks {
         "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/actionGroups/ag-$NamePrefix",
         "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/scheduledQueryRules/alert-$NamePrefix-host-missing-heartbeat")
     foreach ($id in $requiredIds) {
-        New-DemoCheck "resource/$(($id -split '/')[-1])" $id 'exists' $(if ($id -in $arcResources.id) { 'exists' } else { 'missing' }) $(if ($id -in $arcResources.id) { 'pass' } else { 'fail' }) -Required $monitorRequired -Message $diagnosticMessage
+        New-DemoCheck "resource/$(($id -split '/')[-1])" $id 'exists' $(if ($id -in $arcResources.id) { 'exists' } else { 'missing' }) $(if ($id -in $arcResources.id) { 'pass' } else { 'fail' })
     }
     $workbooks = @($arcResources | Where-Object { $_.type -eq 'Microsoft.Insights/workbooks' })
-    New-DemoCheck 'workbook' "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/workbooks" 'at least one workbook' $workbooks.Count $(if ($workbooks) { 'pass' } else { 'fail' }) -Required $monitorRequired -Message $diagnosticMessage
-    $network = Get-DemoNetworkState -InfraRg $Inventory.InfraRg -NamePrefix $NamePrefix
-    foreach ($id in $network.NatId, $network.PublicIpId) {
-        $exists = if ($id -eq $network.NatId) { [bool]$network.Nat } else { [bool]$network.PublicIp }
-        New-DemoCheck "network/$(($id -split '/')[-1])" $id (-not $parked) $exists $(if ($exists -ne $parked) { 'pass' } else { 'fail' })
-    }
-    $subnet = $network.Subnet
-    $expectedNat = if ($parked) { '' } else { $network.NatId }
-    New-DemoCheck 'network/nat-association' $subnet.id $expectedNat ([string]$subnet.natGateway.id) $(if ([string]$subnet.natGateway.id -eq $expectedNat) { 'pass' } else { 'fail' })
+    New-DemoCheck 'workbook' "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/workbooks" 'at least one workbook' $workbooks.Count $(if ($workbooks) { 'pass' } else { 'fail' })
     $arcMachines = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $Inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
     $heartbeatIds = @()
-    if (-not $parked -and @($Inventory.Machines | Where-Object Monitor).Count -gt 0) {
+    if (@($Inventory.Machines | Where-Object Monitor).Count -gt 0) {
         $workspace = Invoke-DemoAz -Arguments @('monitor', 'log-analytics', 'workspace', 'show', '--ids', $workspaceId, '-o', 'json') | ConvertFrom-Json
         $heartbeatIds = @(Get-DemoHeartbeatIds -WorkspaceCustomerId $workspace.customerId)
     }
     foreach ($machine in $Inventory.Machines) {
-        $power = if ($parked) { 'VM deallocated' } else { 'VM running' }
         $actual = $machine.Actual
-        New-DemoCheck "vm/$($machine.Name)/power" $machine.Id $power $actual.powerState $(if (-not $actual) { 'fail' } elseif ($actual.powerState -eq $power) { 'pass' } else { 'pending' })
         if (-not $machine.Native) {
             $arc = $arcMachines | Where-Object { $_.id -eq $machine.ArcId } | Select-Object -First 1
-            New-DemoCheck "arc/$($machine.Name)" $machine.ArcId $(if ($parked) { 'retained' } else { 'Connected' }) $arc.status $(if (-not $arc) { 'fail' } elseif ($parked -or $arc.status -eq 'Connected') { 'pass' } else { 'pending' }) -Required $monitorRequired -Message $diagnosticMessage
+            New-DemoCheck "arc/$($machine.Name)" $machine.ArcId 'Connected' $arc.status $(if (-not $arc) { 'fail' } elseif ($arc.status -eq 'Connected') { 'pass' } else { 'pending' })
         }
         $scope = if ($machine.Native) { $machine.Id } else { $machine.ArcId }
-        if ($machine.Monitor -and -not $parked) {
+        if ($machine.Monitor) {
             New-DemoCheck "heartbeat/$($machine.Name)" $scope 'Heartbeat within 10 minutes by _ResourceId' ($scope.ToLowerInvariant() -in $heartbeatIds) $(if ($scope.ToLowerInvariant() -in $heartbeatIds) { 'pass' } else { 'pending' })
         } else {
-            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'not required for parked/unsupported host' $null 'skipped' $false
+            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'unsupported host' $null 'skipped' $false
         }
         if (-not $machine.Monitor -or -not $actual) { continue }
         $associationList = @(Invoke-DemoAz -Arguments @('monitor', 'data-collection', 'rule', 'association', 'list', '--resource', $scope, '-o', 'json') | ConvertFrom-Json)
@@ -771,7 +733,7 @@ function Get-DemoReadinessChecks {
         if ($machine.ChangeTracking) { $rules += 'dcr-changetracking' }
         foreach ($rule in $rules) {
             $ruleId = "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/dataCollectionRules/$rule"
-            New-DemoCheck "dcra/$($machine.Name)/$rule" $scope $ruleId @($associationList.dataCollectionRuleId) $(if ($ruleId -in $associationList.dataCollectionRuleId) { 'pass' } else { 'fail' }) -Required $monitorRequired -Message $diagnosticMessage
+            New-DemoCheck "dcra/$($machine.Name)/$rule" $scope $ruleId @($associationList.dataCollectionRuleId) $(if ($ruleId -in $associationList.dataCollectionRuleId) { 'pass' } else { 'fail' })
         }
         $extensionScope = if ($machine.Native -or $machine.OsType -eq 'Linux') { $machine.Id } else { $machine.ArcId }
         $extensions = if ($machine.Native -or $machine.OsType -eq 'Linux') {
@@ -785,20 +747,8 @@ function Get-DemoReadinessChecks {
         foreach ($name in $extensionNames) {
             $extension = $extensions | Where-Object name -eq $name | Select-Object -First 1
             $state = if ($extension.provisioningState) { $extension.provisioningState } else { $extension.properties.provisioningState }
-            New-DemoCheck "extension/$($machine.Name)/$name" "$extensionScope/extensions/$name" 'Succeeded' $state $(if (-not $extension -or $state -eq 'Failed') { 'fail' } elseif ($state -eq 'Succeeded') { 'pass' } else { 'pending' }) -Required $monitorRequired -Message $diagnosticMessage
+            New-DemoCheck "extension/$($machine.Name)/$name" "$extensionScope/extensions/$name" 'Succeeded' $state $(if (-not $extension -or $state -eq 'Failed') { 'fail' } elseif ($state -eq 'Succeeded') { 'pass' } else { 'pending' })
         }
-    }
-    foreach ($id in $Inventory.AksClusterIds) {
-        $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $Inventory.InfraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
-        $state = if ($parked) { 'Stopped' } else { 'Running' }
-        New-DemoCheck "aks/$($cluster.name)" $id $state $cluster.powerState.code $(if ($cluster.provisioningState -eq 'Failed') { 'fail' } elseif ($cluster.powerState.code -eq $state -and $cluster.provisioningState -eq 'Succeeded') { 'pass' } else { 'pending' })
-    }
-    foreach ($id in $Inventory.ContainerAppIds) {
-        $name = ($id -split '/')[-1]
-        $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $Inventory.InfraRg, '-n', $name, '-o', 'json') | ConvertFrom-Json)
-        $active = @($revisions | Where-Object { $_.properties.active })
-        $healthy = @($active | Where-Object { $_.properties.healthState -eq 'Healthy' -and $_.properties.runningState -in @('Running', 'RunningAtMaxScale', 'RunningAtMinScale') })
-        New-DemoCheck "containerapp/$name" $id $(if ($parked) { 'no active revisions' } else { 'healthy active revision' }) @($active.name) $(if (($parked -and $active.Count -eq 0) -or (-not $parked -and $healthy.Count -gt 0)) { 'pass' } else { 'pending' })
     }
 }
 
