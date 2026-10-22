@@ -35,7 +35,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads/reconnect where needed, optional asynchronous patch submission, readiness |
 | `scripts/Hibernate-ArcDemo.ps1` | Exact VM deallocation, AKS stop, Container App revision deactivation, then NAT removal; retains faults/data |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; optional identity/Defender changes |
-| `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table, Ready/Hibernated, bounded pending retries, exit 0/1/2 |
+| `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table, Active (Ready alias)/Hibernated/Removed; cost-state vs wake diagnostics, bounded retries, exit 0/1/2 |
 | `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, `@file` guest-script transport/markers, capacity/quota, readiness checks |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
 

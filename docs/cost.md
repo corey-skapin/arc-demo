@@ -130,14 +130,28 @@ used for a customer commitment or a subscription budget without repricing.
 | State | Compute/network behavior | Remaining costs |
 |---|---|---|
 | Active | VMs, NAT, and enabled optional workloads run | VM runtime, disks, NAT/PIP, telemetry ingestion/retention, applicable Defender coverage, optional services |
-| Hibernated | Exact VM deallocation; optional AKS stopped; Container App revisions inactive; demo NAT/PIP removed | Disks/snapshots, retained data and applicable Defender/subscription services; optional AKS storage, Container App environment/workload-profile charges where applicable |
-| Removed | Both demo groups observed deleted | Delayed usage posting, retained tenant/shared resources and services outside those groups may still bill |
+| Hibernated | Exact VM deallocation; optional AKS stopped; Container App revisions inactive; demo NAT/PIP removed | Disks/snapshots, retained data, enabled alert evaluations/notifications and applicable services; optional AKS storage, Container App environment/workload-profile charges where applicable |
+| Removed | Both demo groups and named policies/budget verified absent | Delayed usage posting, explicitly retained tenant/shared resources and services outside those groups may still bill |
 
 The nightly VM auto-shutdown schedule does not start VMs in the morning, park AKS,
 deactivate Container Apps, or delete NAT. It is not a complete hibernation policy.
 Do not assume the desired runtime schedule happened: inspect power state and cost.
 Arc records and subscription-wide Defender pricing are distinct from Azure VM
 power; do not promise that VM deallocation makes all Defender charges disappear.
+Current [Defender billing guidance](https://learn.microsoft.com/azure/defender-for-cloud/faq-defender-for-servers#pricing)
+distinguishes Azure deallocated and Arc offline/disconnected servers from online
+coverage; retaining the subscription plan does not itself prove every parked
+record is billed. Actual entitlement, onboarding model and usage matter.
+
+VM definitions, basic NIC/VNet metadata, Arc inventory and managed identities
+need not be deleted to stop pay-as-you-go compute charges. Retaining disks still
+costs money; deleting VM definitions adds identity/restoration risk with no extra
+VM compute saving over deallocation. Preserve useful logs: 31 days of Analytics
+retention is included in ingestion pricing, so reducing below 31 does not save
+retention cost ([retention guidance](https://learn.microsoft.com/azure/azure-monitor/logs/data-retention-configure)).
+This does not make new ingestion, longer retention or enabled log alerts free.
+Automatic alert pausing is deliberately deferred: blindly re-enabling rules on
+wake would lose prior disabled state or override concurrent routing decisions.
 
 ## Safe cost controls
 

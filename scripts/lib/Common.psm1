@@ -463,6 +463,51 @@ function Get-DemoInventory {
         AksClusterIds = $clusterIds; Outputs = $deployments[0].properties.outputs; Resources = $resources }
 }
 
+function Get-DemoNetworkState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InfraRg,
+        [Parameter(Mandatory)][string]$NamePrefix
+    )
+    $root = "/subscriptions/$script:DemoSubscription/resourceGroups/$InfraRg/providers/Microsoft.Network"
+    $natId = "$root/natGateways/natgw-$NamePrefix"
+    $pipId = "$root/publicIPAddresses/pip-natgw-$NamePrefix"
+    $subnetId = "$root/virtualNetworks/vnet-$NamePrefix/subnets/snet-vms"
+    $subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '--ids', $subnetId, '-o', 'json') | ConvertFrom-Json
+    $nat = Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'show', '--ids', $natId, '-o', 'json') -AllowNotFound | ConvertFrom-Json
+    $pip = Invoke-DemoAz -Arguments @('network', 'public-ip', 'show', '--ids', $pipId, '-o', 'json') -AllowNotFound | ConvertFrom-Json
+    if ($subnet.id -ne $subnetId -or ($nat -and $nat.id -ne $natId) -or ($pip -and $pip.id -ne $pipId)) {
+        throw 'Network inspection returned an unexpected resource identity; refusing lifecycle changes.'
+    }
+    if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { throw 'Demo subnet has an unexpected NAT Gateway; refusing to replace or detach it.' }
+    if (@($nat.subnets | Where-Object { $_ -and $_.id -ne $subnetId }).Count) { throw 'Demo NAT Gateway is shared with another subnet; refusing lifecycle changes.' }
+    if (@($nat.publicIpAddresses | Where-Object { $_ -and $_.id -ne $pipId }).Count -or @($nat.publicIpPrefixes | Where-Object { $_ }).Count) {
+        throw 'Demo NAT Gateway uses unexpected public IP resources; refusing lifecycle changes.'
+    }
+    if (($pip.natGateway.id -and $pip.natGateway.id -ne $natId) -or $pip.ipConfiguration.id) {
+        throw 'Demo public IP is used by another resource; refusing lifecycle changes.'
+    }
+    [pscustomobject]@{ Subnet = $subnet; Nat = $nat; PublicIp = $pip; NatId = $natId; PublicIpId = $pipId }
+}
+
+function Get-DemoRemovalChecks {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$NamePrefix)
+    $scope = "/subscriptions/$script:DemoSubscription"
+    foreach ($rg in "rg-$NamePrefix", "rg-$NamePrefix-infra") {
+        $exists = Invoke-DemoAz -Arguments @('group', 'exists', '-n', $rg, '-o', 'json') | ConvertFrom-Json
+        New-DemoCheck "group/$rg" "$scope/resourceGroups/$rg" 'absent' $(if ($exists) { 'exists' } else { 'absent' }) $(if ($exists) { 'pending' } else { 'pass' })
+    }
+    foreach ($name in "mcsb-$NamePrefix", "nist-$NamePrefix") {
+        $assignment = Invoke-DemoAz -Arguments @('policy', 'assignment', 'show', '-n', $name, '--scope', $scope, '-o', 'json') -AllowNotFound
+        New-DemoCheck "policy/$name" "$scope/providers/Microsoft.Authorization/policyAssignments/$name" 'absent' $(if ($assignment) { 'exists' } else { 'absent' }) $(if ($assignment) { 'pending' } else { 'pass' })
+    }
+    $budget = Invoke-DemoAz -Arguments @('consumption', 'budget', 'show', '--budget-name', "budget-$NamePrefix", '-o', 'json') -AllowNotFound
+    New-DemoCheck 'budget' "$scope/providers/Microsoft.Consumption/budgets/budget-$NamePrefix" 'absent' $(if ($budget) { 'exists' } else { 'absent' }) $(if ($budget) { 'pending' } else { 'pass' })
+    New-DemoCheck 'exception/tenant-identity' '' 'separate opt-in cleanup' $null 'skipped' $false 'Tenant onboarding identity/application is not inspected here. Use RemoveOnboardingIdentity for scoped SP deletion; directory access is not needed for default removal.'
+    New-DemoCheck 'exception/shared-services' $scope 'preserved unless explicitly approved' $null 'skipped' $false 'Subscription Defender and shared resources are excluded. Soft-deleted vaults and retained applications can persist; no purge or zero-bill claim.'
+}
+
 function Assert-DemoOsDiskStorageAccountType {
     [CmdletBinding()]
     param(
@@ -662,14 +707,16 @@ function Get-DemoReadinessChecks {
     param(
         [Parameter(Mandatory)]$Inventory,
         [Parameter(Mandatory)][string]$NamePrefix,
-        [ValidateSet('Ready', 'Hibernated')][string]$DesiredState = 'Ready'
+        [ValidateSet('Active', 'Ready', 'Hibernated')][string]$DesiredState = 'Ready'
     )
     $parked = $DesiredState -eq 'Hibernated'
+    $monitorRequired = -not $parked
+    $diagnosticMessage = if ($parked) { 'Wake-readiness diagnostic only; does not determine the parked cost state. Inspect before activation; no repair performed.' } else { '' }
     $root = "/subscriptions/$script:DemoSubscription/resourceGroups"
     $arcResources = @(Invoke-DemoAz -Arguments @('resource', 'list', '-g', $Inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
     foreach ($rg in $Inventory.ArcRg, $Inventory.InfraRg) {
         $group = Invoke-DemoAz -Arguments @('group', 'show', '-n', $rg, '-o', 'json') | ConvertFrom-Json
-        New-DemoCheck "group/$rg" "$root/$rg" 'Succeeded' $group.properties.provisioningState $(if ($group.properties.provisioningState -eq 'Succeeded') { 'pass' } else { 'pending' })
+        New-DemoCheck "group/$rg" "$root/$rg" 'Succeeded' $group.properties.provisioningState $(if ($group.properties.provisioningState -eq 'Succeeded') { 'pass' } else { 'pending' }) -Required $monitorRequired -Message $diagnosticMessage
     }
     $workspaceId = "$root/$($Inventory.ArcRg)/providers/Microsoft.OperationalInsights/workspaces/law-$NamePrefix"
     $requiredIds = @($workspaceId,
@@ -679,18 +726,17 @@ function Get-DemoReadinessChecks {
         "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/actionGroups/ag-$NamePrefix",
         "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/scheduledQueryRules/alert-$NamePrefix-host-missing-heartbeat")
     foreach ($id in $requiredIds) {
-        New-DemoCheck "resource/$(($id -split '/')[-1])" $id 'exists' $(if ($id -in $arcResources.id) { 'exists' } else { 'missing' }) $(if ($id -in $arcResources.id) { 'pass' } else { 'fail' })
+        New-DemoCheck "resource/$(($id -split '/')[-1])" $id 'exists' $(if ($id -in $arcResources.id) { 'exists' } else { 'missing' }) $(if ($id -in $arcResources.id) { 'pass' } else { 'fail' }) -Required $monitorRequired -Message $diagnosticMessage
     }
     $workbooks = @($arcResources | Where-Object { $_.type -eq 'Microsoft.Insights/workbooks' })
-    New-DemoCheck 'workbook' "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/workbooks" 'at least one workbook' $workbooks.Count $(if ($workbooks) { 'pass' } else { 'fail' })
-    $natId = "$root/$($Inventory.InfraRg)/providers/Microsoft.Network/natGateways/natgw-$NamePrefix"
-    $pipId = "$root/$($Inventory.InfraRg)/providers/Microsoft.Network/publicIPAddresses/pip-natgw-$NamePrefix"
-    foreach ($id in $natId, $pipId) {
-        $exists = $id -in $Inventory.Resources.id
+    New-DemoCheck 'workbook' "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/workbooks" 'at least one workbook' $workbooks.Count $(if ($workbooks) { 'pass' } else { 'fail' }) -Required $monitorRequired -Message $diagnosticMessage
+    $network = Get-DemoNetworkState -InfraRg $Inventory.InfraRg -NamePrefix $NamePrefix
+    foreach ($id in $network.NatId, $network.PublicIpId) {
+        $exists = if ($id -eq $network.NatId) { [bool]$network.Nat } else { [bool]$network.PublicIp }
         New-DemoCheck "network/$(($id -split '/')[-1])" $id (-not $parked) $exists $(if ($exists -ne $parked) { 'pass' } else { 'fail' })
     }
-    $subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '-g', $Inventory.InfraRg, '--vnet-name', "vnet-$NamePrefix", '-n', 'snet-vms', '-o', 'json') | ConvertFrom-Json
-    $expectedNat = if ($parked) { '' } else { $natId }
+    $subnet = $network.Subnet
+    $expectedNat = if ($parked) { '' } else { $network.NatId }
     New-DemoCheck 'network/nat-association' $subnet.id $expectedNat ([string]$subnet.natGateway.id) $(if ([string]$subnet.natGateway.id -eq $expectedNat) { 'pass' } else { 'fail' })
     $arcMachines = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $Inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
     $heartbeatIds = @()
@@ -704,7 +750,7 @@ function Get-DemoReadinessChecks {
         New-DemoCheck "vm/$($machine.Name)/power" $machine.Id $power $actual.powerState $(if (-not $actual) { 'fail' } elseif ($actual.powerState -eq $power) { 'pass' } else { 'pending' })
         if (-not $machine.Native) {
             $arc = $arcMachines | Where-Object { $_.id -eq $machine.ArcId } | Select-Object -First 1
-            New-DemoCheck "arc/$($machine.Name)" $machine.ArcId $(if ($parked) { 'retained' } else { 'Connected' }) $arc.status $(if (-not $arc) { 'fail' } elseif ($parked -or $arc.status -eq 'Connected') { 'pass' } else { 'pending' })
+            New-DemoCheck "arc/$($machine.Name)" $machine.ArcId $(if ($parked) { 'retained' } else { 'Connected' }) $arc.status $(if (-not $arc) { 'fail' } elseif ($parked -or $arc.status -eq 'Connected') { 'pass' } else { 'pending' }) -Required $monitorRequired -Message $diagnosticMessage
         }
         $scope = if ($machine.Native) { $machine.Id } else { $machine.ArcId }
         if ($machine.Monitor -and -not $parked) {
@@ -719,7 +765,7 @@ function Get-DemoReadinessChecks {
         if ($machine.ChangeTracking) { $rules += 'dcr-changetracking' }
         foreach ($rule in $rules) {
             $ruleId = "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/dataCollectionRules/$rule"
-            New-DemoCheck "dcra/$($machine.Name)/$rule" $scope $ruleId @($associationList.dataCollectionRuleId) $(if ($ruleId -in $associationList.dataCollectionRuleId) { 'pass' } else { 'fail' })
+            New-DemoCheck "dcra/$($machine.Name)/$rule" $scope $ruleId @($associationList.dataCollectionRuleId) $(if ($ruleId -in $associationList.dataCollectionRuleId) { 'pass' } else { 'fail' }) -Required $monitorRequired -Message $diagnosticMessage
         }
         $extensionScope = if ($machine.Native -or $machine.OsType -eq 'Linux') { $machine.Id } else { $machine.ArcId }
         $extensions = if ($machine.Native -or $machine.OsType -eq 'Linux') {
@@ -733,7 +779,7 @@ function Get-DemoReadinessChecks {
         foreach ($name in $extensionNames) {
             $extension = $extensions | Where-Object name -eq $name | Select-Object -First 1
             $state = if ($extension.provisioningState) { $extension.provisioningState } else { $extension.properties.provisioningState }
-            New-DemoCheck "extension/$($machine.Name)/$name" "$extensionScope/extensions/$name" 'Succeeded' $state $(if (-not $extension -or $state -eq 'Failed') { 'fail' } elseif ($state -eq 'Succeeded') { 'pass' } else { 'pending' })
+            New-DemoCheck "extension/$($machine.Name)/$name" "$extensionScope/extensions/$name" 'Succeeded' $state $(if (-not $extension -or $state -eq 'Failed') { 'fail' } elseif ($state -eq 'Succeeded') { 'pass' } else { 'pending' }) -Required $monitorRequired -Message $diagnosticMessage
         }
     }
     foreach ($id in $Inventory.AksClusterIds) {

@@ -22,10 +22,11 @@ Initialize-DemoContext $SubscriptionId $TenantId
 $inventory = Get-DemoInventory $NamePrefix
 Assert-DemoSkinInventory $skin $inventory
 if (@($inventory.Machines | Where-Object { -not $_.Actual }).Count) { throw 'Expected VMs are missing; resolve inventory drift before hibernating.' }
+$network = Get-DemoNetworkState -InfraRg $inventory.InfraRg -NamePrefix $NamePrefix
 if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Deallocate VMs, stop AKS, deactivate Container App revisions and remove demo NAT/public IP')) { return }
 $infraRg = $inventory.InfraRg
 foreach ($machine in $inventory.Machines) {
-    if ($machine.Actual.powerState -ne 'VM deallocated') {
+    if ($machine.Actual.powerState -notin @('VM deallocated', 'VM deallocating')) {
         Invoke-DemoAz -Arguments @('vm', 'deallocate', '--ids', $machine.Id, '--no-wait', '-o', 'none') | Out-Null
     }
 }
@@ -51,15 +52,12 @@ Wait-Until -Message 'all expected VMs deallocated and AKS stopped' -TimeoutSecon
     }
     return $true
 } | Out-Null
-$natId = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Network/natGateways/natgw-$NamePrefix"
-$subnet = Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'show', '-g', $infraRg, '--vnet-name', "vnet-$NamePrefix", '-n', 'snet-vms', '-o', 'json') | ConvertFrom-Json
-if ($subnet.natGateway.id -and $subnet.natGateway.id -ne $natId) { throw 'Unexpected subnet NAT Gateway; refusing to detach it.' }
-if ($subnet.natGateway.id -eq $natId) {
-    Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'update', '--ids', $subnet.id, '--remove', 'natGateway', '-o', 'none') | Out-Null
+$network = Get-DemoNetworkState -InfraRg $infraRg -NamePrefix $NamePrefix
+if ($network.Subnet.natGateway.id -eq $network.NatId) {
+    Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'update', '--ids', $network.Subnet.id, '--remove', 'natGateway', '-o', 'none') | Out-Null
 }
-$resources = @(Invoke-DemoAz -Arguments @('resource', 'list', '-g', $infraRg, '-o', 'json') | ConvertFrom-Json)
-if ($natId -in $resources.id) { Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'delete', '-g', $infraRg, '-n', "natgw-$NamePrefix") | Out-Null }
-if ("pip-natgw-$NamePrefix" -in $resources.name) { Invoke-DemoAz -Arguments @('network', 'public-ip', 'delete', '-g', $infraRg, '-n', "pip-natgw-$NamePrefix") | Out-Null }
+if ($network.Nat) { Invoke-DemoAz -Arguments @('network', 'nat', 'gateway', 'delete', '--ids', $network.NatId) | Out-Null }
+if ($network.PublicIp) { Invoke-DemoAz -Arguments @('network', 'public-ip', 'delete', '--ids', $network.PublicIpId) | Out-Null }
 & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -DesiredState Hibernated -TimeoutSeconds 300
-if ($LASTEXITCODE -ne 0) { throw 'Hibernation is incomplete; inspect readiness output before retrying.' }
-Write-Ok 'Demo hibernated. Disks, retained data, optional workload storage and subscription-level services can still incur charges.'
+if ($LASTEXITCODE -ne 0) { throw 'Hibernated cost-state verification failed or inspection was denied; inspect required checks/errors above. Completed parking steps are preserved; retry remaining work without redeploying.' }
+Write-Ok 'Demo hibernated: required cost-state checks passed. Non-required failures/pending checks are wake-readiness diagnostics, not running compute. Disks, logs, enabled alert evaluations and other retained services can still incur charges.'

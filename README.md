@@ -119,7 +119,7 @@ by editing tracked files. For a source-only handoff, export the sanitized tracke
 tree without `.git` and review the destination's metadata separately. History
 has not been rewritten; never put credentials or private evidence in source.
 
-### Off state / activate
+### Hibernated / Active
 
 ```powershell
 # After explicit operator approval: deallocates VMs, stops AKS, deactivates Container Apps, removes NAT
@@ -136,8 +136,10 @@ Use `Remove-ArcDemo.ps1` only when you want to delete the estate permanently.
 Every activation checks guest health, including already-running hosts on a
 retry, without restarting already-correct services. Windows Arc AMA is checked
 through its `MonAgentCore` process, not an assumed Windows service.
-Activation also submits on-demand Azure Update Manager patch assessments for
-all retained Arc hosts unless explicitly skipped. The job runs asynchronously, so open the
+Activation submits on-demand Azure Update Manager patch assessments only for
+Arc hosts started/waking on that attempt unless skipped. Already-active retries
+still verify guests but do not resubmit assessments. Use `-AssessPatches` for an
+explicit all-host assessment retry. The job runs asynchronously, so open the
 Update Manager blade later in the walkthrough or allow several minutes for the
 portal data to refresh. Optional `-ResultPath` saves per-host outcomes in an
 existing private directory outside git. Monitor Ready alone does not prove the
@@ -149,6 +151,15 @@ fault settings; it deactivates Container App revisions rather than changing thei
 environment variables. If a companion SRE layer is attached, park that layer first
 using its own maintained procedure, then park Arc to avoid investigations of
 intentionally disconnected hosts. See [lifecycle.md](docs/lifecycle.md).
+
+`-DesiredState Active` is the user-facing state name (`Ready` remains compatible).
+Hibernated required checks cover deallocated/stopped compute, inactive app
+revisions and absent/detached owned NAT/PIP. Retained monitoring problems appear
+as non-required wake diagnostics, not a claim that compute is still running.
+Inspection/auth errors still fail. Removed readiness works after deployment
+history disappears and verifies both groups plus named policies/budget absent;
+retained tenant identities, shared/subscription services and soft-deleted vaults
+are explicit exclusions, not a promise of a zero bill.
 
 ### Remove permanently
 

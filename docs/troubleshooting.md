@@ -364,11 +364,37 @@ az policy state trigger-scan --subscription <SUB> --resource-group rg-arc-demo
 
 The scan remains asynchronous with no fixed demo-time completion guarantee.
 
+## Hibernation blocked by unrelated preflight or monitoring health
+
+**Observed** - An added operator wrapper required deployment Graph/Owner checks,
+a historical whole-group index match, and assumed attached disks must report
+`Attached`. Those were wrapper defects, not requirements of the normal parking
+script. A deallocated VM can have an attached disk reported as `Reserved`.
+Generic extension indexes also differed from exact child GET results; enumeration
+is not proof of existence, repair or health. Do not retry/recreate extensions to
+make an old index match.
+
+Use the normal lifecycle context/inventory/network `-WhatIf` path, not
+`Test-Prerequisites.ps1` (deployment only). This does not bypass a real ARM denial,
+wrong target, missing expected VM, OS mismatch or shared network resource guard.
+Inspect those errors before changing anything.
+
+The old parked readiness also required healthy extensions/DCRAs after compute
+was already stopped. Hibernated now distinguishes required cost-state checks
+from explicit non-required wake diagnostics. A red diagnostic does not mean
+compute is active; an actual inspection error still fails. Keep diagnostics for
+the next rehearsal rather than repairing them during parking. On partial network
+removal, retry the same script without waking or redeploying the stopped lab.
+For full ACA history use revision `list --all`; default listing is active-only.
+New source behavior is locally mocked, not a new live-lifecycle proof.
+
 ## Hibernate seems to skip the NAT GW delete
 
 **Symptom** — Hibernate completes, but retained-service charges exceed an old estimate.
 
-**Cause** — You may have other NAT GWs or public IPs in the same RG with different names that didn't get deleted.
+**Possible cause** - Other NAT GWs/public IPs, disks, enabled alert evaluations
+or other retained services may still bill. A higher charge alone does not prove
+that the expected gateway survived.
 
 **Fix** — Check:
 
