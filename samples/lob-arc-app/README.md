@@ -19,6 +19,36 @@ The runtime reads `C:\ProgramData\ArcSreLobApp\appsettings.json`:
 | `Degraded` | Writes warning events but keeps running. | Event ID `4200` Warning |
 | `CrashOnProcessing` | Writes an error event and exits with code 42. | Event ID `4100` Error plus stopped scheduled task |
 
+## Showing healthy activity in Log Analytics
+
+The Arc core DCR collects Application/System warnings and errors, plus a narrow
+exception for Application event `4000`, Information, provider `ArcLobBridgeApp`.
+It does not collect all informational Application events. With the default
+15-second loop and heartbeat every four cycles, a running healthy worker writes
+about one heartbeat per minute; ingestion charges and propagation delays apply.
+The optional sample is not installed or started by Arc deployment or readiness.
+
+For an existing lab with the older DCR, obtain approval for the single-selector
+collection change; do not redeploy the lab or induce a fault just to show logs.
+Source presence or old error events do not prove the worker is running today.
+Verify fresh records after the approved preparation, with the Logs time picker
+covering the query window:
+
+```kusto
+Event
+| where TimeGenerated > ago(30m)
+| where Source =~ "ArcLobBridgeApp" and EventLog == "Application"
+| where EventID == 4000
+| project TimeGenerated, Computer, EventID, EventLevelName, RenderedDescription
+| order by TimeGenerated desc
+```
+
+Filter `Computer` to the confirmed deployment host when more than one sample is
+present. Missing healthy events can mean collection is not updated, ingestion is
+pending, or the worker is not emitting; inspect approved evidence rather than
+assuming the app stopped. Warning `4200` and error `4100` are separate,
+explicitly approved fault scenarios, not healthy-heartbeat substitutes.
+
 ## How it is deployed
 
 Do not run this directly from the repo during the demo. After separately
