@@ -1,11 +1,58 @@
 # Azure Arc demo build and operations runbook
 
 **Operator procedure, not the presentation script.** Presenters start at
-[the docs index](README.md) and [runsheet.md](runsheet.md).
+[the docs index](README.md), then their generated `.local/presenter-runsheet.md`.
 The maintained deployment path is `scripts\Deploy-ArcDemo.ps1` plus Bicep. Do not
 replay old ad-hoc portal/CLI builds against a running demo. Start with
 [AGENTS.md](../AGENTS.md), [lifecycle safety/contract](lifecycle.md), and the
-[presenter runsheet](runsheet.md).
+[presenter template](runsheet.md) only when preparing the local guide.
+
+## Prepare the local presenter guide
+
+Do this after successful approved deployment/activation and independent Active
+readiness. The presenter receives `.local/presenter-runsheet.md` and follows it
+top to bottom; no input card, customer customization or ID lookup is required.
+Deployment/lifecycle behavior is unchanged.
+
+Plain Markdown cannot interpolate an external JSON file. The offline
+`scripts\New-PresenterRunsheet.ps1` fills the single tracked `docs\runsheet.md`
+template from `.local\demo-context.json`. The entire `.local/` folder is ignored.
+Capture the following **nonsecret** fields from the explicit setup inputs and
+actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
+
+| Field | Source |
+|---|---|
+| `schemaVersion` | Numeric `1` |
+| `subscriptionId`, `tenantId` | The operator-confirmed runtime target |
+| `recordedAtUtc` | UTC timestamp of the context/evidence being saved, not the generation time |
+| `resourceGroups` | Object with actual `arc` and `infra` group names |
+| `workspaceResourceId`, `workbookResourceId` | Exact workspace and saved Estate Overview workbook IDs |
+| `windowsMachineResourceId`, `linuxMachineResourceId` | Exact monitored Arc machine IDs selected for the tour, not backing VM IDs |
+| `heartbeatAlertResourceId`, `actionGroupResourceId` | Exact heartbeat rule and action group IDs |
+| `lobMachineName` (optional) | The separately prepared LOB host; omit if not part of this demo |
+| `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
+
+The assistant/operator writes the approved values once, then runs:
+
+```powershell
+# $context contains only the fields above, from approved inputs and saved outputs.
+New-Item -ItemType Directory -Path .\.local -Force | Out-Null
+$context | ConvertTo-Json -Depth 4 | Set-Content .\.local\demo-context.json
+.\scripts\New-PresenterRunsheet.ps1
+```
+
+No sign-in, Azure read/write, guest command or health check occurs in generation.
+Missing/foreign/malformed IDs fail explicitly before replacing the output.
+The context timestamp is printed prominently: old evidence is not current health.
+The generator does not read a credential store, copy a whole deployment manifest
+or retain passwords, recipient emails, tokens or private configuration files.
+
+Refresh the context and regenerate after successful preparation changes the
+resources or selected hosts. An activation that leaves telemetry pending is not
+a successful presenter handoff; poll readiness under the normal contract first.
+The operator owns that check, not the presenter. Use the same convention in the
+companion repo; a missing companion guide produces a plain handoff note, not a
+broken or guessed relative path.
 
 ## 1. Choose the target and skin
 

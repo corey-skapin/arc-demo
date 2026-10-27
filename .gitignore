@@ -3,6 +3,7 @@ logs/
 *.log
 
 # Local config / credentials
+.local/
 *.local.json
 *.local.psd1
 .env
