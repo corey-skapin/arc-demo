@@ -33,6 +33,7 @@ the customer-facing Arc records and observability plane are in the other group.
 |---|---|
 | `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions/baseline provider checks |
 | `scripts/Deploy-ArcDemo.ps1` | Selected-provider and SKU/quota checks; Bicep preview/create; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness |
+| `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL from the single tracked `docs/runsheet.md` template; no Azure calls or lifecycle changes |
 | `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads/reconnect where needed, optional asynchronous patch submission, readiness |
 | `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; optional identity/Defender changes |

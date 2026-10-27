@@ -3,7 +3,7 @@
 ## Read first
 
 - Read this file before working in the repository.
-- Start humans at [docs/README.md](docs/README.md); use [runsheet](docs/runsheet.md) for presenting.
+- Start humans at [docs/README.md](docs/README.md); present the generated `.local/presenter-runsheet.md` from the single [runsheet template](docs/runsheet.md).
 - Read [runbook](docs/runbook.md) and [lifecycle](docs/lifecycle.md) before operating an existing lab.
 - Use [troubleshooting](docs/troubleshooting.md) for symptoms and [module map](docs/module-map.md) for engineering evidence; do not treat old runs as current health.
 
@@ -57,6 +57,7 @@
 - Submit default patch assessments only for Arc hosts started/waking on this attempt; do not resubmit on already-active retries.
 - Use `-AssessPatches` only for explicit all-host assessment work; reject it with `-SkipPatchAssessment`, and distinguish submission from completion.
 - Record telemetry-only lag as pending even when activation exits 0; poll read-only readiness to pass before presentation or dependent SRE/incident offers.
+- After successful preparation, save only approved nonsecret presenter context in `.local/demo-context.json` and run `New-PresenterRunsheet.ps1`; hand over `.local/presenter-runsheet.md`, not an input card, and keep deployment configuration out of the tour.
 - Do not report `-SkipValidate`, a rolling Heartbeat boolean or a Monitor snapshot as proof of full-script completion or fresh post-wake telemetry.
 - Use `Test-ArcDemoReadiness.ps1 -DesiredState Active|Ready|Hibernated|Removed -OutputFormat Json|Table`; honor required flags and schema v1 exits 0/pass, 1/fail-error, 2/pending.
 - Keep readiness read-only with bounded `TimeoutSeconds`; never repair or induce faults to make it green.
