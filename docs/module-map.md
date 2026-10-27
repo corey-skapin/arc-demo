@@ -17,7 +17,7 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 | `bicep/modules/network.bicep` | VNet/subnet/NSG; creates fresh NAT/PIP before compute or preserves the existing NAT attachment |
 | `bicep/modules/keyvault.bicep` | Shared admin-credential vault and deployer RBAC |
 | `bicep/modules/workspace.bicep` | Log Analytics and VMInsights/ChangeTracking solutions |
-| `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; imperative post-table-readiness creation is in the deploy wrapper |
+| `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; `New-CoreDcrBody` in the deploy wrapper owns selectors, including the source/event-specific LOB informational heartbeat |
 | `bicep/modules/alerts.bicep` | Action Group and missing-Heartbeat alert |
 | `bicep/modules/defender.bicep` | Subscription Defender for Servers P2 |
 | `bicep/modules/policy.bicep` | Named MCSB/NIST assignments |

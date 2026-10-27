@@ -111,6 +111,32 @@ Describe 'Explicit retained OS disk tiers' {
     }
 }
 
+Describe 'Narrow LOB heartbeat collection' {
+    BeforeAll {
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'scripts\Deploy-ArcDemo.ps1'), [ref]$null, [ref]$errors)
+        $function = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'New-CoreDcrBody'
+        }, $true)
+        if (-not $function -or $errors) { throw 'Core DCR definition could not be loaded for isolated tests.' }
+        . ([scriptblock]::Create($function.Extent.Text))
+        $body = New-CoreDcrBody -Location 'australiaeast' -Tags @{ purpose = 'fixture' } -WorkspaceId '/fixture/workspace' -WorkspaceName 'law-fixture'
+    }
+    It 'collects only the LOB informational heartbeat alongside existing event selectors' {
+        $sources = @($body.properties.dataSources.windowsEventLogs)
+        $sources.Count | Should -Be 1
+        $sources[0].streams | Should -Be @('Microsoft-Event')
+        $sources[0].xPathQueries.Count | Should -Be 4
+        $sources[0].xPathQueries | Should -Contain "Application!*[System[Provider[@Name='ArcLobBridgeApp'] and (EventID=4000) and (Level=4)]]"
+        $sources[0].xPathQueries | Should -Contain 'Application!*[System[(Level=1 or Level=2 or Level=3)]]'
+        $sources[0].xPathQueries | Should -Contain 'System!*[System[(Level=1 or Level=2 or Level=3)]]'
+        $sources[0].xPathQueries | Should -Contain 'Security!*[System[(band(Keywords,4503599627370496))]]'
+        $body.properties.destinations.logAnalytics[0].workspaceResourceId | Should -Be '/fixture/workspace'
+        @($body.properties.dataFlows | Where-Object { 'Microsoft-Event' -in $_.streams })[0].destinations | Should -Be @('law-fixture')
+    }
+}
+
 Describe 'Portable workbook workspace defaults' {
     BeforeAll {
         $tokens = $null

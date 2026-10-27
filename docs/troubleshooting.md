@@ -6,6 +6,22 @@ scoped approval before any repair, restart, policy scan or fault operation.
 This is a symptom reference, not required presenter reading; use
 [the docs index](README.md) and [runsheet.md](runsheet.md) for the default tour.
 
+## LOB app has only old error events in Log Analytics
+
+The healthy LOB worker emits Application event `4000` at Information level,
+not the fault-only `4100` Error. The older core DCR collected only Application/
+System warning/error/critical events, so a healthy running worker could have
+fresh local logs but only historical fault events in Log Analytics. Check the
+live selector and Arc-resource DCRA before assuming the task stopped.
+
+The current definition adds only provider `ArcLobBridgeApp`, event `4000`,
+level `4`; it does not broaden all informational collection or start the sample.
+For an existing lab, obtain approval for that narrow collection change and allow
+agent propagation/ingestion time. Verify new post-change records rather than
+historical rows. Use the [LOB sample's healthy activity query](../samples/lob-arc-app/README.md#showing-healthy-activity-in-log-analytics).
+Guest task/config/log inspection and any start/fault/repair need their own scope;
+do not induce a fault just to make this query nonempty.
+
 ## Directory CLI rejects --subscription
 
 `az ad` operations are tenant-scoped; commands such as `az ad sp show` do not

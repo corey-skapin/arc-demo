@@ -62,7 +62,7 @@ inside reference documents are dated evidence, not current health guarantees.
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Local development, validation and safe contribution rules. |
 | [Workbook source](../workbooks/arc-demo-overview.workbook.json) | Defines the custom workbook's actual tile titles and queries. |
 | [Vendored workbook library](../workbooks/nseilaz/README.md) | Optional additional workbooks and upstream attribution; not required screens. |
-| [LOB sample](../samples/lob-arc-app/README.md) | Optional companion-SRE application/code-context sample; not installed by the Arc-only tour. |
+| [LOB sample](../samples/lob-arc-app/README.md) | Optional companion-SRE application/code-context sample and fresh healthy-heartbeat query/collection scope; not installed by the Arc-only tour. |
 | [SQL sample source](../samples/sql-workload/SqlWorkloadSimulator.ps1) | Simulator implementation; use the optional SQL procedure above for operations. |
 
 ## Keeping the story current

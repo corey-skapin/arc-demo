@@ -413,6 +413,7 @@ function New-CoreDcrBody {
                             'Application!*[System[(Level=1 or Level=2 or Level=3)]]'
                             'System!*[System[(Level=1 or Level=2 or Level=3)]]'
                             'Security!*[System[(band(Keywords,4503599627370496))]]'
+                            "Application!*[System[Provider[@Name='ArcLobBridgeApp'] and (EventID=4000) and (Level=4)]]"
                         )
                     }
                 )
