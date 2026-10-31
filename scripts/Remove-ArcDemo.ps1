@@ -23,6 +23,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
 $skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
 if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
+$nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
 Assert-DemoName $NamePrefix
 if ($KeepDefender -and $DisableDefender) { throw 'KeepDefender and DisableDefender cannot both be supplied.' }
 Initialize-DemoContext $SubscriptionId $TenantId
@@ -38,6 +39,20 @@ if ($RemoveOnboardingIdentity) {
     }
 }
 if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", "Delete $($groups -join ', '), named policies and budget; identity deletion=$RemoveOnboardingIdentity; disable subscription Defender=$DisableDefender")) { return }
+if ($nestedSqlGuest) {
+    $raw = Invoke-DemoAz -Arguments @('vm', 'show', '-d', '-g', "rg-$NamePrefix-infra", '-n', $nestedSqlGuest.ParentVmName, '-o', 'json') -AllowNotFound
+    if ($raw) {
+        $parent = $raw | ConvertFrom-Json
+        $expectedId = "/subscriptions/$SubscriptionId/resourceGroups/rg-$NamePrefix-infra/providers/Microsoft.Compute/virtualMachines/$($nestedSqlGuest.ParentVmName)"
+        if ($parent.id -ne $expectedId -or $parent.storageProfile.osDisk.osType -ne 'Windows') { throw 'Configured nested SQL parent identity/OS is unexpected; refusing removal.' }
+        if ($parent.powerState -eq 'VM running') {
+            Invoke-DemoNestedSqlGuest -ParentMachine ([pscustomobject]@{ Name = $parent.name; Id = $parent.id; OsType = 'Windows' }) `
+                -GuestVmName $nestedSqlGuest.GuestVmName -Action Stop
+        } elseif ($parent.powerState -notin @('VM deallocated', 'VM deallocating')) {
+            throw "Nested SQL parent is in $($parent.powerState); retry removal after the transition settles."
+        }
+    }
+}
 foreach ($name in "mcsb-$NamePrefix", "nist-$NamePrefix") {
     $assignment = Invoke-DemoAz -Arguments @('policy', 'assignment', 'show', '-n', $name, '--scope', $scope, '-o', 'json') -AllowNotFound
     if ($assignment) { Invoke-DemoAz -Arguments @('policy', 'assignment', 'delete', '-n', $name, '--scope', $scope) | Out-Null }

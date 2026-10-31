@@ -11,6 +11,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 | `azure.location` | Azure region. | `australiaeast` |
 | `notifications.email` | Budget and Action Group email receiver. | `operator@example.com` placeholder, rejected until replaced |
 | `workloads.*` | Act-1 and optional workload toggles. | Arc on-prem simulation on; optional Azure VM/Container App/AKS/SQL off |
+| `nestedSqlGuest.*` | One optional nested Windows/SQL guest: enabled, parent VM name, Hyper-V guest name and Arc name; used by Activate/Hibernate/Remove. | Disabled; use the [nested SQL runbook](nested-sql-demo.md) to configure a private skin |
 | `compute.vmSize` | VM SKU for Arc-simulated and optional native VMs. | `Standard_B2as_v2` |
 | `compute.osDiskStorageAccountType` | OS disk tier for simulated/native VMs; wrapper rejects existing-tier mismatches rather than converting disks. | `StandardSSD_LRS` for new OS disks; explicit `Standard_LRS` for retained HDD labs only |
 | `operations.*` | Auto-shutdown schedule. | 19:00 Cen. Australia Standard Time |
@@ -23,7 +24,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 Change per customer:
 
 - `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
-- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. Leave `workloads.installSql` as `false` unless you intentionally want the experimental SQL branch.
+- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. Keep `workloads.installSql=false`; enabling the retired mixed SQL path fails. [Real SQL preparation](sql-engine-workload.md) is a separate approved operation.
 - `workloads.onPremFleetPath` for a custom OS mix.
 - Match `compute.osDiskStorageAccountType` to the existing OS disks for a
   retained lab. New labs should keep SSD: HDD OS disks retire on 8 September

@@ -26,13 +26,23 @@ try {
     if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
     Assert-DemoName $NamePrefix
     Initialize-DemoContext $SubscriptionId $TenantId
+    $nestedSqlGuest = if ($DesiredState -notin @('Hibernated', 'Removed')) { Get-DemoNestedSqlGuestConfig -Skin $skin }
     do {
         $checks = if ($DesiredState -eq 'Removed') {
             @(Get-DemoRemovalChecks -NamePrefix $NamePrefix)
         } else {
-            $inventory = Get-DemoInventory $NamePrefix -ForHibernation:($DesiredState -eq 'Hibernated')
+            $inventory = Get-DemoInventory $NamePrefix -ForHibernation:($DesiredState -eq 'Hibernated') `
+                -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' })
             if ($DesiredState -ne 'Hibernated') { Assert-DemoSkinInventory $skin $inventory }
             @(Get-DemoReadinessChecks -Inventory $inventory -NamePrefix $NamePrefix -DesiredState $DesiredState)
+            if ($nestedSqlGuest) {
+                $id = "/subscriptions/$SubscriptionId/resourceGroups/rg-$NamePrefix/providers/Microsoft.HybridCompute/machines/$($nestedSqlGuest.ArcMachineName)"
+                $raw = Invoke-DemoAz -Arguments @('connectedmachine', 'show', '--ids', $id, '-o', 'json') -AllowNotFound
+                $machine = if ($raw) { $raw | ConvertFrom-Json }
+                $state = if (-not $machine) { 'fail' } elseif ($machine.id -ne $id) { 'fail' } elseif ($machine.status -eq 'Connected') { 'pass' } else { 'pending' }
+                New-DemoCheck 'nested/arc' $id 'Connected' $machine.status $state `
+                    -Message 'Arc connection only; use Test-NestedSqlDemoGuest for actual SQL readiness. No guest login occurs here.'
+            }
         }
         $status = if (@($checks | Where-Object { $_.required -and $_.status -eq 'fail' }).Count) { 'fail' }
             elseif (@($checks | Where-Object { $_.required -and $_.status -eq 'pending' }).Count) { 'pending' }

@@ -30,7 +30,10 @@ $required = @(
     'workspaceResourceId', 'workbookResourceId', 'windowsMachineResourceId',
     'linuxMachineResourceId', 'heartbeatAlertResourceId', 'actionGroupResourceId'
 )
-$allowed = @('schemaVersion') + $required + @('lobMachineName', 'companionSreRunsheetPath')
+$allowed = @('schemaVersion') + $required + @(
+    'lobMachineName', 'companionSreRunsheetPath', 'sqlMachineResourceId', 'sqlIncidentAlertResourceId',
+    'capacityWorkbookResourceId', 'optimisationWorkbookResourceId'
+)
 foreach ($entry in $context.GetEnumerator()) {
     if ($entry.Key -notin $allowed) { throw "Unsupported context field '$($entry.Key)'. Store only the documented nonsecret presenter fields." }
 }
@@ -70,6 +73,14 @@ $types = [ordered]@{
     heartbeatAlertResourceId = 'Microsoft.Insights/scheduledQueryRules'
     actionGroupResourceId = 'Microsoft.Insights/actionGroups'
 }
+if ($context.Contains('sqlMachineResourceId')) { $types['sqlMachineResourceId'] = 'Microsoft.HybridCompute/machines' }
+if ($context.Contains('sqlIncidentAlertResourceId')) {
+    if (-not $context.Contains('sqlMachineResourceId')) { throw 'SQL incident context requires the prepared real SQL host and query proof first.' }
+    $types['sqlIncidentAlertResourceId'] = 'Microsoft.Insights/scheduledQueryRules'
+}
+foreach ($field in @('capacityWorkbookResourceId', 'optimisationWorkbookResourceId')) {
+    if ($context.Contains($field)) { $types[$field] = 'Microsoft.Insights/workbooks' }
+}
 $values = @{
     RecordedAtUtc = $recorded.UtcDateTime.ToString('o')
     GeneratedAtUtc = [DateTime]::UtcNow.ToString('o')
@@ -78,6 +89,10 @@ $values = @{
     CompanionSection = 'Arc ends here. Continue in the companion SRE repository only if that part of the demo is prepared.'
     LobAvailability = 'No LOB host is recorded in this context; skip this optional step.'
     LobHostFilter = '| where false // No prepared LOB host in the saved context.'
+    SqlAvailability = 'No verified real SQL workload is recorded; skip this optional step. A SQL-shaped simulator is not SQL engine proof.'
+    SqlHostFilter = '| where false // No verified real SQL workload in this context.'
+    SqlIncidentAvailability = 'No SQL incident alert is recorded; skip the incident beat.'
+    OperationalWorkbookSection = 'Optional capacity/optimisation workbooks are not recorded as published; skip this beat. Source templates and preview IDs are not live links.'
 }
 $portal = "https://portal.azure.com/#@$($context.tenantId)/resource"
 foreach ($entry in $types.GetEnumerator()) {
@@ -89,6 +104,39 @@ foreach ($entry in $types.GetEnumerator()) {
     $encodedResource = (($resource -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
     $values["${token}Url"] = $portal + $encodedResource
     $values["${token}Name"] = $name
+}
+$operationalLinks = @()
+if ($context.Contains('capacityWorkbookResourceId')) {
+    $operationalLinks += "[Capacity and headroom]($($values.capacityWorkbookUrl)): compare CPU mean/P95/maximum, memory pressure and per-volume free-space trend only where there are actual samples."
+}
+if ($context.Contains('optimisationWorkbookResourceId')) {
+    $operationalLinks += "[Optimisation opportunities]($($values.optimisationWorkbookUrl)): start with ownership/evidence gaps; explain a review candidate rather than promising a resize or savings."
+}
+if ($operationalLinks.Count) {
+    $values.OperationalWorkbookSection = ($operationalLinks -join "`n`n") + "`n`nCheck freshness, coverage and history warnings first. Missing data is not zero; parked gaps are not idle headroom. Parent/guest rows are separate observations, never additive hardware capacity. Hypothetical operator inputs are not billed or realised savings. These links record publication only, not current telemetry health."
+}
+if ($context.Contains('sqlMachineResourceId')) {
+    $proofPath = Join-Path $directory 'sql-engine-status.json'
+    if (-not (Test-Path -LiteralPath $proofPath -PathType Leaf)) { throw 'SQL presenter context requires adjacent sql-engine-status.json from a successful real SQL Status query.' }
+    $proof = Get-Content -LiteralPath $proofPath -Raw | ConvertFrom-Json @jsonOptions
+    $data = $proof.evidence
+    $checked = [DateTimeOffset]::MinValue
+    $committed = [DateTimeOffset]::MinValue
+    if ($proof.schemaVersion -ne 1 -or $proof.workload -ne 'arc-sql-engine' -or $proof.action -ne 'Status' -or
+        $proof.resourceId -ne $context.sqlMachineResourceId -or $data.status -ne 'pass' -or
+        $data.instance -ne 'ARCDEMO' -or $data.database -ne 'ArcDemoOrders' -or
+        $data.edition -notmatch '^Developer Edition(?: \(64-bit\))?$' -or $data.version -notmatch '^16\.\d+\.\d+\.\d+$' -or
+        $data.orderCount -isnot [long] -or $data.orderCount -lt 1 -or $data.orderCount -gt 1000 -or
+        -not [DateTimeOffset]::TryParse([string]$data.checkedAtUtc, [ref]$checked) -or
+        -not [DateTimeOffset]::TryParse([string]$data.lastCommitUtc, [ref]$committed) -or
+        $committed -gt $checked -or ($checked - $committed).TotalSeconds -gt 120) {
+        throw 'Saved SQL evidence is incomplete, unverified or belongs to a different host; no SQL presentation claim.'
+    }
+    $values.SqlAvailability = "Prepared real SQL host: **$($values.sqlMachineName)**. [Saved engine/query proof](sql-engine-status.json): SQL Server $($data.version) Developer, instance ARCDEMO, database ArcDemoOrders, $($data.orderCount) rows; last commit $($committed.UtcDateTime.ToString('o')), checked $($checked.UtcDateTime.ToString('o')). This is dated evidence, not a new guest query."
+    $values.SqlHostFilter = '| where tolower(_ResourceId) == "' + $context.sqlMachineResourceId.ToLowerInvariant() + '"'
+}
+if ($context.Contains('sqlIncidentAlertResourceId')) {
+    $values.SqlIncidentAvailability = "Recorded [SQL incident alert]($($values.sqlIncidentAlertUrl)), **$($values.sqlIncidentAlertName)**. This link is not proof of an alert firing or an SRE investigation; verify the live run below."
 }
 if ($context.Contains('lobMachineName')) {
     if ($context.lobMachineName -isnot [string] -or $context.lobMachineName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {

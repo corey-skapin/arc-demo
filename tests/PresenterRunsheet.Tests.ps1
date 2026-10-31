@@ -53,6 +53,84 @@ Describe 'Offline private presenter guide' {
         $text | Should -Match 'No LOB host is recorded'
         $text | Should -Not -Match '\[SRE presenter guide\]'
         $text | Should -Match 'where false'
+        $text | Should -Match 'No verified real SQL workload'
+        $text | Should -Match 'not recorded as published'
+    }
+
+    It 'adds optional published operational links in the same guide without claiming health' {
+        $context.capacityWorkbookResourceId = "$scope/providers/Microsoft.Insights/workbooks/44444444-4444-4444-4444-444444444444"
+        $context.optimisationWorkbookResourceId = "$scope/providers/Microsoft.Insights/workbooks/55555555-5555-5555-5555-555555555555"
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match '\[Capacity and headroom\]\(https://portal.azure.com/'
+        $text | Should -Match '\[Optimisation opportunities\]\(https://portal.azure.com/'
+        $text | Should -Match 'not current telemetry health'
+        $text | Should -Not -Match '\{\{|\}\}'
+    }
+
+    It 'rejects a foreign or wrong-type operational workbook link' -ForEach @(
+        @{ Resource = 'Microsoft.Compute/virtualMachines/not-a-workbook' }
+        @{ Resource = 'Microsoft.Insights/workbooks/nested/name' }
+    ) {
+        $context.capacityWorkbookResourceId = "$scope/providers/$Resource"
+        $context | ConvertTo-Json | Set-Content $path
+        { & $generator -ContextPath $path } | Should -Throw '*expected resource type*'
+        Test-Path $output | Should -BeFalse
+    }
+
+    It 'requires real saved engine/query proof before enabling the SQL step' {
+        $context.sqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/sql-fixture"
+        $context | ConvertTo-Json | Set-Content $path
+        { & $generator -ContextPath $path } | Should -Throw '*requires adjacent sql-engine-status.json*'
+        Test-Path $output | Should -BeFalse
+    }
+
+    It 'renders dated real SQL evidence and the exact host scope when explicitly prepared' {
+        $context.sqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/sql-fixture"
+        $context.sqlIncidentAlertResourceId = "$scope/providers/Microsoft.Insights/scheduledQueryRules/al-fixture-sql-lock-timeout"
+        $context | ConvertTo-Json | Set-Content $path
+        @{
+            schemaVersion = 1; workload = 'arc-sql-engine'; action = 'Status'; resourceId = $context.sqlMachineResourceId
+            evidence = @{
+                status = 'pass'; instance = 'ARCDEMO'; database = 'ArcDemoOrders'; edition = 'Developer Edition (64-bit)'
+                version = '16.0.1000.6'; orderCount = 7; checkedAtUtc = '2026-10-20T01:02:03Z'; lastCommitUtc = '2026-10-20T01:01:53Z'
+            }
+        } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $local 'sql-engine-status.json')
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match '16.0.1000.6 Developer'
+        $text | Should -Match '7 rows'
+        $text | Should -Match '\(sql-engine-status.json\)'
+        $text | Should -Match ([regex]::Escape($context.sqlMachineResourceId.ToLowerInvariant()))
+        $text | Should -Match 'dated evidence, not a new guest query'
+        $text | Should -Match '\[SQL incident alert\]\(https://portal.azure.com/'
+        $text | Should -Match 'not proof of an alert firing'
+    }
+
+    It 'does not enable an incident link without prepared engine evidence' {
+        $context.sqlIncidentAlertResourceId = "$scope/providers/Microsoft.Insights/scheduledQueryRules/al-fixture-sql-lock-timeout"
+        $context | ConvertTo-Json | Set-Content $path
+        { & $generator -ContextPath $path } | Should -Throw '*requires the prepared real SQL host*'
+        Test-Path $output | Should -BeFalse
+    }
+
+    It 'rejects inconsistent/foreign/pending SQL proof' -ForEach @(
+        @{ Status = 'pending'; Resource = 'sql-fixture'; Count = 7 }
+        @{ Status = 'pass'; Resource = 'other-fixture'; Count = 7 }
+        @{ Status = 'pass'; Resource = 'sql-fixture'; Count = '7' }
+    ) {
+        $context.sqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/sql-fixture"
+        $context | ConvertTo-Json | Set-Content $path
+        @{
+            schemaVersion = 1; workload = 'arc-sql-engine'; action = 'Status'; resourceId = "$scope/providers/Microsoft.HybridCompute/machines/$Resource"
+            evidence = @{
+                status = $Status; instance = 'ARCDEMO'; database = 'ArcDemoOrders'; edition = 'Developer Edition (64-bit)'
+                version = '16.0.1000.6'; orderCount = $Count; checkedAtUtc = '2026-10-20T01:02:03Z'; lastCommitUtc = '2026-10-20T01:01:53Z'
+            }
+        } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $local 'sql-engine-status.json')
+        { & $generator -ContextPath $path } | Should -Throw '*Saved SQL evidence is incomplete*'
+        Test-Path $output | Should -BeFalse
     }
 
     It 'resolves a relative context against the PowerShell working directory' {

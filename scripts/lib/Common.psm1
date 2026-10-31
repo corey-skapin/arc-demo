@@ -139,7 +139,7 @@ function Get-DemoSkin {
     if ($skin -isnot [System.Collections.IDictionary] -or $skin.schemaVersion -ne 1) {
         throw "Invalid demo skin '$skinPath': expected an object with schemaVersion 1."
     }
-    foreach ($section in 'azure', 'workloads', 'compute', 'operations', 'cost', 'labels', 'tags', 'notifications') {
+    foreach ($section in 'azure', 'workloads', 'compute', 'operations', 'cost', 'labels', 'tags', 'notifications', 'nestedSqlGuest') {
         if ($null -ne $skin.$section -and $skin.$section -isnot [System.Collections.IDictionary]) { throw "Skin $section must be a JSON object." }
     }
     foreach ($key in 'deployArcOnPrem', 'deployAzureVMs', 'deployContainerApps', 'deployAks', 'installSql', 'skipSqlInstall') {
@@ -342,7 +342,7 @@ function Initialize-DemoContext {
 
 function Get-DemoInventory {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$NamePrefix, [switch]$ForHibernation)
+    param([Parameter(Mandatory)][string]$NamePrefix, [switch]$ForHibernation, [string]$NestedSqlParentVmName = '')
     Assert-DemoName $NamePrefix
     $arcRg = "rg-$NamePrefix"
     $infraRg = "rg-$NamePrefix-infra"
@@ -392,6 +392,23 @@ function Get-DemoInventory {
             OsType = if ($actual) { $actual.storageProfile.osDisk.osType } else { 'Windows' }
             Monitor = $true; VmInsights = $true; ChangeTracking = $false; Native = $true; Actual = $actual }
     }
+    if ($NestedSqlParentVmName) {
+        if ($NestedSqlParentVmName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') { throw 'Nested SQL parent VM name is invalid.' }
+        $parentId = "/subscriptions/$script:DemoSubscription/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$NestedSqlParentVmName"
+        if ($parentId -in $machines.Id) {
+            $parent = @($machines | Where-Object Id -eq $parentId)
+            if ($parent.Count -ne 1 -or -not $parent[0].Actual -or $parent[0].OsType -ne 'Windows') {
+                throw 'Configured nested SQL parent must be one retained Windows VM.'
+            }
+        } else {
+            $parent = @($vmRecords | Where-Object id -eq $parentId)
+            if ($parent.Count -ne 1 -or $parent[0].storageProfile.osDisk.osType -ne 'Windows') {
+                throw "Configured nested SQL parent $NestedSqlParentVmName is missing or is not a Windows VM in $infraRg."
+            }
+            $machines += [pscustomobject]@{ Name = $NestedSqlParentVmName; Id = $parentId; ArcId = $null
+                OsType = 'Windows'; Monitor = $false; VmInsights = $false; ChangeTracking = $false; Native = $true; Actual = $parent[0] }
+        }
+    }
     $unknown = @($vmRecords | Where-Object { $_.id -notin $machines.Id })
     if ($unknown) { throw "VMs outside the retained deployment manifests found in $infraRg`: $($unknown.name -join ', '). Refusing to manage an ambiguous fleet." }
     foreach ($machine in $machines | Where-Object { $_.Actual }) {
@@ -399,6 +416,84 @@ function Get-DemoInventory {
     }
     return [pscustomobject]@{ ArcRg = $arcRg; InfraRg = $infraRg; Machines = $machines; ContainerAppIds = $appIds
         AksClusterIds = $clusterIds; Outputs = $deployments[0].properties.outputs; Resources = $resources }
+}
+
+function Get-DemoNestedSqlGuestConfig {
+    [CmdletBinding()]
+    param([AllowNull()][System.Collections.IDictionary]$Skin)
+    if (-not $Skin -or -not $Skin.Contains('nestedSqlGuest')) { return $null }
+    $config = $Skin.nestedSqlGuest
+    if ($config -isnot [System.Collections.IDictionary] -or $config.enabled -isnot [bool]) {
+        throw 'Skin nestedSqlGuest must be an object with a boolean enabled field.'
+    }
+    if (-not $config.enabled) { return $null }
+    foreach ($key in 'parentVmName', 'guestVmName', 'arcMachineName') {
+        if ([string]$config[$key] -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') {
+            throw "Enabled nestedSqlGuest requires a valid $key."
+        }
+    }
+    [pscustomobject]@{
+        ParentVmName = [string]$config.parentVmName
+        GuestVmName = [string]$config.guestVmName
+        ArcMachineName = [string]$config.arcMachineName
+    }
+}
+
+function Invoke-DemoNestedSqlGuest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ParentMachine,
+        [Parameter(Mandatory)][string]$GuestVmName,
+        [Parameter(Mandatory)][ValidateSet('Start', 'Stop')][string]$Action
+    )
+    if ($ParentMachine.OsType -ne 'Windows') { throw 'Nested SQL lifecycle requires the configured Windows parent VM.' }
+    if ($GuestVmName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') { throw 'Nested SQL guest VM name is invalid.' }
+    $guestScript = @'
+$ErrorActionPreference = 'Stop'
+$guestName = '__GUEST_NAME__'
+$action = '__ACTION__'
+$guest = @(Get-VM -Name $guestName -ErrorAction Stop)
+if ($guest.Count -ne 1) { throw "Expected exactly one Hyper-V guest named $guestName." }
+$guest = $guest[0]
+if ($action -eq 'Start') {
+    if ($guest.State -in @('Off', 'Saved')) { Start-VM -VM $guest | Out-Null }
+    elseif ($guest.State -notin @('Running', 'Starting')) { throw "Guest is in unexpected state $($guest.State)." }
+    $expectedState = 'Running'
+} else {
+    if ($guest.State -eq 'Running') {
+        $stopJob = Stop-VM -VM $guest -AsJob -Confirm:$false
+        if (-not (Wait-Job -Job $stopJob -Timeout 300)) { throw 'Nested SQL graceful shutdown is still pending; no forced stop.' }
+        try { Receive-Job -Job $stopJob -ErrorAction Stop | Out-Null }
+        finally { Remove-Job -Job $stopJob -ErrorAction Stop }
+    }
+    elseif ($guest.State -notin @('Off', 'Stopping')) { throw "Guest is in unexpected state $($guest.State)." }
+    $expectedState = 'Off'
+}
+$deadline = (Get-Date).AddMinutes(5)
+do {
+    $guest = Get-VM -Name $guestName -ErrorAction Stop
+    if ($guest.State -eq $expectedState) { break }
+    if ((Get-Date) -ge $deadline) { throw "Nested SQL guest did not reach $expectedState within five minutes." }
+    Start-Sleep -Seconds 5
+} while ($true)
+'ARC_DEMO_OK'
+'@
+    $guestScript = $guestScript.Replace('__GUEST_NAME__', $GuestVmName).Replace('__ACTION__', $Action)
+    Invoke-DemoGuestCommand -Machine $ParentMachine -Script $guestScript
+}
+
+function Wait-DemoNestedSqlArcConnected {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ArcResourceGroup,
+        [Parameter(Mandatory)][string]$ArcMachineName,
+        [ValidateRange(1, 7200)][int]$TimeoutSeconds = 900
+    )
+    $resourceGroup = $ArcResourceGroup
+    Wait-Until -Message "nested SQL Arc machine $ArcMachineName connected" -TimeoutSeconds $TimeoutSeconds -Condition {
+        $machine = Invoke-DemoAz -Arguments @('connectedmachine', 'show', '-g', $resourceGroup, '-n', $ArcMachineName, '-o', 'json') | ConvertFrom-Json
+        $machine.status -eq 'Connected'
+    } | Out-Null
 }
 
 function Get-DemoNetworkState {

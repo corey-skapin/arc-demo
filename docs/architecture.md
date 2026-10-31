@@ -20,7 +20,6 @@ flowchart TB
             ARC1[/Arc machine<br/>win-app-01..03<br/>WS2016/2019/2022/]
             ARC2[/Arc machine<br/>win-sql-01..02<br/>WS2019/2022/]
             ARC3[/Arc machine<br/>lnx-app-01..03/]
-            SQL1[/Experimental SQL extension<br/>not validated in this lab/]
         end
 
         subgraph rg_infra["rg-arc-demo-infra (backing infra)"]
@@ -30,6 +29,7 @@ flowchart TB
             KV[(Key Vault<br/>admin password)]
             VM1[Azure VM<br/>win-app-01..03<br/>config-driven image]
             VM2[Azure VM<br/>win-sql-01..02<br/>config-driven image]
+            SQL1[Optional real SQL Developer<br/>ARCDEMO instance + orders worker<br/>no Arc SQL extension]
             VM3[Azure VM<br/>lnx-app-01..03]
             NATIVEVM[Optional Azure-native VM<br/>az-arcdemo-01]
             CA[Optional Container App<br/>ca-arc-demo-fault]
@@ -52,7 +52,7 @@ flowchart TB
     VM1 -. installs Arc agent .-> ARC1
     VM2 -. installs Arc agent .-> ARC2
     VM3 -. installs Arc agent .-> ARC3
-    VM2 -. optional Arc SQL ext<br/>-InstallSql only .-> SQL1
+    VM2 -. separately approved preparation .-> SQL1
 
     ARC1 -.->|DCR assoc| DCR1
     ARC2 -.->|DCR assoc| DCR1
@@ -106,7 +106,7 @@ Keeping them separate makes the demo flow read correctly in the portal (the cust
 4. For fleet entries with `supportsAzureMonitor=true`, the deploy script installs **AzureMonitorLinuxAgent** through Azure VM extensions or **AzureMonitorWindowsAgent** through Arc extensions and associates the core DCR with the Arc machine ID.
 5. For entries with `supportsVmInsights=true`, it associates the VM Insights DCR and installs **DependencyAgentWindows**. Pre-2016 Windows and unvalidated Linux tiers are excluded.
 6. For entries with `supportsChangeTracking=true`, it associates the Change Tracking DCR and installs the Change Tracking extension.
-7. **Defender for Servers Plan 2** is configured at subscription scope, separately from endpoint sensor health. Inspected Linux sensors were healthy/licensed but in passive mode with real-time protection disabled; do not infer active AV/full EDR proof. The SQL Server install, Arc SQL extension and BPA branch is experimental and skipped by default; see [SQL stance](sql-arc-spike.md).
+7. **Defender for Servers Plan 2** is configured at subscription scope, separately from endpoint sensor health. Inspected Linux sensors were healthy/licensed but in passive mode with real-time protection disabled; do not infer active AV/full EDR proof. Optional [real SQL workload](sql-engine-workload.md) setup is separate, never Arc SQL/BPA; the mixed `-InstallSql` branch is retired.
 8. **MCSB + NIST 800-53 r5** policy initiatives are assigned at subscription scope; evaluation/compliance data can take hours to populate.
 9. The **Estate Overview workbook** pulls all of the above into one persona-ordered dashboard.
 10. If `-DeployAzureVMs $true` is set, an extra Azure-native Windows VM is deployed in the infra resource group and monitored directly with AMA + post-Bicep DCR associations to the same workspace. It is not Arc-enabled, so it appears as a native Azure VM in Monitor.

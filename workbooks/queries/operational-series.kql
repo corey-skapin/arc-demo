@@ -1,0 +1,37 @@
+let WindowEnd = now();
+let WindowStart = WindowEnd - Lookback;
+let PerfRows = Perf
+| where TimeGenerated between (WindowStart .. WindowEnd)
+| extend ResourceId = tolower(_ResourceId)
+| where ResourceId in (Machines | project ResourceId)
+| extend Metric = case(
+    ObjectName in ("Processor Information", "Processor") and CounterName == "% Processor Time" and InstanceName in ("_Total", "total"), "CPU percent",
+    ObjectName == "Memory" and CounterName == "Available MBytes", "Available MB",
+    ObjectName == "Memory" and CounterName == "% Committed Bytes In Use", "Committed percent",
+    ObjectName == "LogicalDisk" and CounterName == "% Free Space" and InstanceName == "_Total", "Disk free percent", "")
+| where Metric != ""
+| extend Instance = iff(Metric == "Disk free percent", "_Total (aggregate)", ""),
+    Priority = case(ObjectName == "Processor Information", 0, Metric == "Disk free percent", 2, 1),
+    Value = todouble(CounterValue), Source = strcat("Perf/", ObjectName, "/", CounterName)
+| project TimeGenerated, ResourceId, Metric, Instance, Priority, Value, Source;
+let InsightsRows = InsightsMetrics
+| where TimeGenerated between (WindowStart .. WindowEnd) and Origin == "vm.azm.ms"
+| extend ResourceId = tolower(_ResourceId)
+| where ResourceId in (Machines | project ResourceId)
+| extend Metric = case(Namespace == "Processor" and Name == "UtilizationPercentage", "CPU percent",
+    Namespace == "Memory" and Name == "AvailableMB", "Available MB",
+    Namespace == "LogicalDisk" and Name == "FreeSpacePercentage", "Disk free percent", "")
+| where Metric != ""
+| extend Instance = iff(Metric == "Disk free percent", tostring(todynamic(Tags)["vm.azm.ms/mountId"]), ""),
+    Priority = iff(Metric == "Disk free percent", 0, 3),
+    Value = todouble(Val), Source = strcat("InsightsMetrics/", Namespace, "/", Name)
+| where Metric != "Disk free percent" or isnotempty(Instance)
+| project TimeGenerated, ResourceId, Metric, Instance, Priority, Value, Source;
+let AllSamples = union PerfRows, InsightsRows;
+// Choose one canonical source per host/metric across the window, not per core or parent/guest sum.
+let Preferred = AllSamples | summarize Priority = min(Priority) by ResourceId, Metric;
+let Samples = AllSamples
+| join kind=inner Preferred on ResourceId, Metric, Priority
+| extend Invalid = isnull(Value) or isnan(Value) or isinf(Value) or Value < 0 or (Metric != "Available MB" and Value > 100)
+| extend Value = iff(Invalid, real(null), Value)
+| project TimeGenerated, ResourceId, Metric, Instance, Value, Source, Invalid;
