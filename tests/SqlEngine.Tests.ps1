@@ -40,10 +40,10 @@ BeforeAll {
         return $connection
     }
     foreach ($name in @('Get-CimInstance', 'Get-Service', 'Get-DiskImage', 'Mount-DiskImage', 'Dismount-DiskImage', 'Get-Volume', 'Get-ScheduledTask', 'Get-AuthenticodeSignature', 'Write-EventLog')) {
-        if ($name -eq 'Get-Volume' -or -not (Get-Command $name -ErrorAction Ignore)) {
+        if ($name -in @('Get-Volume', 'Get-CimInstance') -or -not (Get-Command $name -ErrorAction Ignore)) {
             Set-Item "function:$name" -Value {
                 [CmdletBinding()]
-                param([Parameter(ValueFromPipeline)]$InputObject, $ClassName, $Filter, $OperationTimeoutSec, $ImagePath, $FilePath, $Access, $TaskPath, $TaskName, $Name, $LogName, $Source, $EventId, $EntryType, $Message, [switch]$PassThru)
+                param([Parameter(Position = 0)]$ClassName, [Parameter(ValueFromPipeline)]$InputObject, $Filter, $OperationTimeoutSec, $ImagePath, $FilePath, $Access, $TaskPath, $TaskName, $Name, $LogName, $Source, $EventId, $EntryType, $Message, [switch]$PassThru)
                 throw 'Unmocked Windows API in offline SQL tests.'
             }
         }

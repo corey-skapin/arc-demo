@@ -4,8 +4,8 @@ BeforeAll {
         function Get-VM { param($Name, $Id) throw 'Unexpected Hyper-V call' }
         function Get-VMSwitch { param($Name) throw 'Unexpected switch call' }
         function New-VHD { param($Path) throw 'Unexpected disk creation' }
-        function Get-VMHardDiskDrive { param($VM) throw 'Unexpected disk read' }
     }
+    function Get-VMHardDiskDrive { param($VM) throw 'Unexpected disk read' }
     if (-not (Get-Command Get-Volume -ErrorAction SilentlyContinue)) {
         function Get-Volume { param($DriveLetter) throw 'Unexpected volume read' }
     }
@@ -47,7 +47,7 @@ Describe 'Simple scratch Windows guest preflight' {
         Should -Invoke New-VHD -Times 0
     }
 
-    It 'reuses only the explicitly supplied existing identity and disk paths' {
+    It 'reuses only the explicitly supplied existing identity and disk paths' -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         $id = [guid]'11111111-2222-3333-4444-555555555555'
         $script:arguments.VmRoot = 'C:\Fixture\DEMOSQL'
         Mock Get-VM {

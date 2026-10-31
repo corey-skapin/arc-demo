@@ -2,9 +2,9 @@ BeforeAll {
     $script:remove=Join-Path $PSScriptRoot '..\scripts\Remove-NestedSqlDemoGuest.ps1'
     if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
         function Get-VM { param($Name) }
-        function Get-VMHardDiskDrive { param($VM) }
         function Remove-VM { param($VM,[switch]$Force) }
     }
+    function Get-VMHardDiskDrive { param($VM) }
 }
 Describe 'Exact Arc removal boundary' {
         BeforeAll {
@@ -59,12 +59,12 @@ Describe 'Exact nested guest deletion boundary' {
         { & $script:remove -VmName DemoNew -VmId '11111111-2222-3333-4444-555555555555' -VmRoot D:\NestedSQL } | Should -Throw '*explicitly identified*'
         Should -Invoke Remove-Item -Times 0
     }
-    It 'rejects a stale guest GUID before deletion' {
+    It 'rejects a stale guest GUID before deletion' -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         { & $script:remove -VmName DemoNew -VmId 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' -VmRoot D:\NestedSQL\VMs\DemoNew } | Should -Throw '*GUID*'
         Should -Invoke Remove-VM -Times 0
         Should -Invoke Remove-Item -Times 0
     }
-    It 'rejects a different disk path before deletion' {
+    It 'rejects a different disk path before deletion' -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         Mock Get-VMHardDiskDrive { [pscustomobject]@{Path='D:\NestedSQL\VMs\Other\Other-OS.vhdx'} }
         { & $script:remove -VmName DemoNew -VmId '11111111-2222-3333-4444-555555555555' -VmRoot D:\NestedSQL\VMs\DemoNew } | Should -Throw '*disk paths*'
         Should -Invoke Remove-VM -Times 0
