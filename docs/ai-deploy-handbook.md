@@ -53,10 +53,24 @@ review copy, but must not be relabelled as fresh readiness.
 ## Keep optional features optional
 
 The [runbook](runbook.md) owns commands and preflight; [cost.md](cost.md) owns
-selected-workload estimates. SQL Server/Arc SQL/BPA stays off by default; read
+selected-workload estimates. The [nested SQL runbook](nested-sql-demo.md) owns
+the proven scratch build and config-driven park/wake/remove path. Keep its
+credentials private; Jumpstart requires manual OOBE/password/network setup.
+No prototype tuples, receipts or inventory rounds are presenter prerequisites.
+SQL Server/Arc SQL/BPA stays off in the default base simulation; read
 [the support decision](sql-arc-spike.md) before considering it.
 The [LOB sample](../samples/lob-arc-app/README.md) needs separate preparation and
 fresh source-specific events; its presence in source does not prove installation.
+If explicitly requested, use [the real SQL workload](sql-engine-workload.md) with
+approved Developer media/terms, not the retired mixed installer or SQL-shaped
+simulator as engine proof. Only add the optional presenter SQL field after actual
+query evidence; installation and narrow event collection need their own consent.
+For the SQL incident, use the owned bounded real lock-timeout probe and optional
+exact-host Sev2 alert, not a SQL service stop or invented events.
+Verify the companion's distinct Review-only SQL filter/routing before the
+approved trigger; actual alert delivery and investigation require live evidence.
+Do not silently re-trigger through a fired alert/cooldown or claim SRE remediated
+the already self-recovered lock.
 Notification configuration is not delivered-email proof; do not send a test
 without approval.
 

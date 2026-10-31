@@ -1,5 +1,8 @@
 # SQL workload simulation
 
+For an actual engine/database/query demonstration use
+[the real SQL workload](sql-engine-workload.md), not this historical simulator.
+
 This optional beat gives the Arc demo a DBA-relevant signal without claiming
 **SQL Server enabled by Azure Arc**.
 It is an optional operator procedure, not required presenter reading; start at

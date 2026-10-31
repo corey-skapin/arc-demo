@@ -21,7 +21,8 @@ jobs:
       - name: Lint scripts
         shell: pwsh
         run: |
-          $results = Invoke-ScriptAnalyzer -Path ./scripts/ -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          $results = @(Invoke-ScriptAnalyzer -Path ./scripts/ -Recurse -Settings ./PSScriptAnalyzerSettings.psd1) +
+            @(Invoke-ScriptAnalyzer -Path ./samples/sql-engine/ -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
           if ($results) {
             $results | Format-Table -AutoSize
             throw "$($results.Count) PSScriptAnalyzer issue(s) found."
@@ -33,13 +34,38 @@ jobs:
       - name: Mocked lifecycle behavior and parse checks
         shell: pwsh
         run: |
-          Get-ChildItem ./scripts -Recurse -Include *.ps1,*.psm1 | ForEach-Object {
+          Get-ChildItem ./scripts,./samples/sql-engine -Recurse -Include *.ps1,*.psm1 | ForEach-Object {
             $tokens = $null
             $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
             if ($errors) { throw ($errors | Out-String) }
           }
           Invoke-Pester -Path ./tests -CI
+
+  private-ps5:
+    name: Private onboarding and nested SQL (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install development-only Pester
+        shell: pwsh
+        run: Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+      - name: Execute native PS5 transport and failure regressions
+        shell: pwsh
+        run: |
+          Invoke-Pester -Path @(
+            '.\tests\PrivatePathPs5.Tests.ps1'
+            '.\tests\PrivateWriterProof.Tests.ps1'
+            '.\tests\NestedSqlLifecycle.Tests.ps1'
+            '.\tests\NestedSqlDemoGuest.Tests.ps1'
+            '.\tests\NestedSqlAnswer.Tests.ps1'
+            '.\tests\NestedSqlDemoSteps.Tests.ps1'
+            '.\tests\ArcSqlDemoSteps.Tests.ps1'
+            '.\tests\NestedSqlDemoRemoval.Tests.ps1'
+            '.\tests\NestedSqlDemoTransport.Tests.ps1'
+            '.\tests\NestedSqlDemoState.Tests.ps1'
+            '.\tests\NestedSqlDemoBuild.Tests.ps1'
+          ) -CI
 
   bicep-build:
     name: Bicep compile
@@ -50,9 +76,12 @@ jobs:
         run: |
           curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
           az bicep install
-      - name: Build main.bicep
+      - name: Build main and optional modules
         run: |
           az bicep build --file ./bicep/main.bicep --stdout > /dev/null
+          az bicep build --file ./bicep/modules/sql-incident-alert.bicep --stdout > /dev/null
+          az bicep build --file ./bicep/modules/operational-workbook.bicep --stdout > /dev/null
+          az bicep build --file ./bicep/modules/private-onboarding-vault.bicep --stdout > /dev/null
           echo "✅ Bicep main + modules compile clean."
 
   markdown-lint:

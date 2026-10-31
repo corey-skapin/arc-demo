@@ -15,6 +15,10 @@ param tenantId string
 @description('Principal ID of the deploying user (for RBAC role assignment)')
 param deployerPrincipalId string
 
+@description('The wrapper preserves the existing vault mode. Disabled requires a separately approved private bootstrap for fresh credentials.')
+@allowed(['Enabled', 'Disabled'])
+param publicNetworkAccess string = 'Enabled'
+
 resource kv 'Microsoft.KeyVault/vaults@2024-11-01' = {
   name: vaultName
   location: location
@@ -25,7 +29,7 @@ resource kv 'Microsoft.KeyVault/vaults@2024-11-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: publicNetworkAccess
   }
 }
 

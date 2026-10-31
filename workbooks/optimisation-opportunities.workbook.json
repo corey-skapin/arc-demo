@@ -1,0 +1,15 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    { "type": 1, "name": "optimisation-introduction", "content": { "json": "# Optimisation opportunities - review, not automation\nStart with ownership and evidence gaps. Heuristics: CPU max >=90% highlights spikes; committed-memory max >=85%, available-memory min <512 MB, or disk-free min <15% asks for pressure review. Low CPU P95 <20% AND max <50% is a conversation candidate only when fresh, >=24h history and >=80% coverage; it is not a resize/shutdown recommendation. Missing memory/disk cannot establish safe headroom. There is no shutdown, delete, pricing, schedule or remediation action here.\n\nOwnership is read live from exact Arc IDs via Resource Graph; blank tags are missing ownership evidence, not proof nobody owns a host. Telemetry and ARG timestamps can differ. Keep parent/guest observations separate; never add their hardware capacities or scenario values. No migration assessment, DR or SQL engine sizing is performed. No billed or realised savings claims." } },
+    { "type": 9, "name": "window", "content": { "version": "KqlParameterItem/1.0", "parameters": [
+      { "id": "window-hours", "name": "LookbackHours", "label": "Elapsed history window", "type": 2, "isRequired": true, "value": "168", "jsonData": "[{\"value\":\"24\",\"label\":\"24 hours\"},{\"value\":\"168\",\"label\":\"7 days\"},{\"value\":\"720\",\"label\":\"30 days\"}]" }
+    ] } },
+    { "type": 3, "name": "review-candidates", "content": { "version": "KqlItem/1.0", "title": "Explainable candidates, including missing evidence", "query": "__CANDIDATES__", "size": 0, "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "visualization": "table" } },
+    { "type": 3, "name": "ownership", "content": { "version": "KqlItem/1.0", "title": "Current ownership tags - exact Arc identities", "query": "__OWNERSHIP__", "size": 0, "queryType": 1, "resourceType": "microsoft.resourcegraph/resources", "visualization": "table" } },
+    { "type": 1, "name": "hypothetical-scenario", "content": { "json": "__SCENARIO__" } },
+    { "type": 1, "name": "scope-note", "content": { "json": "__SCOPE_NOTE__" } }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": []
+}

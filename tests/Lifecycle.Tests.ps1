@@ -123,12 +123,14 @@ Describe 'Narrow LOB heartbeat collection' {
         . ([scriptblock]::Create($function.Extent.Text))
         $body = New-CoreDcrBody -Location 'australiaeast' -Tags @{ purpose = 'fixture' } -WorkspaceId '/fixture/workspace' -WorkspaceName 'law-fixture'
     }
-    It 'collects only the LOB informational heartbeat alongside existing event selectors' {
+    It 'collects only source-specific LOB and real SQL informational heartbeats alongside existing selectors' {
         $sources = @($body.properties.dataSources.windowsEventLogs)
         $sources.Count | Should -Be 1
         $sources[0].streams | Should -Be @('Microsoft-Event')
-        $sources[0].xPathQueries.Count | Should -Be 4
+        $sources[0].xPathQueries.Count | Should -Be 6
         $sources[0].xPathQueries | Should -Contain "Application!*[System[Provider[@Name='ArcLobBridgeApp'] and (EventID=4000) and (Level=4)]]"
+        $sources[0].xPathQueries | Should -Contain "Application!*[System[Provider[@Name='ArcSqlEngineDemo'] and (EventID=6000) and (Level=4)]]"
+        $sources[0].xPathQueries | Should -Contain "Application!*[System[Provider[@Name='ArcSqlEngineDemo'] and (EventID=6001) and (Level=4)]]"
         $sources[0].xPathQueries | Should -Contain 'Application!*[System[(Level=1 or Level=2 or Level=3)]]'
         $sources[0].xPathQueries | Should -Contain 'System!*[System[(Level=1 or Level=2 or Level=3)]]'
         $sources[0].xPathQueries | Should -Contain 'Security!*[System[(band(Keywords,4503599627370496))]]'
@@ -393,6 +395,7 @@ Describe 'WhatIf lifecycle safety' {
             param($Arguments)
             if ($Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return 'preview' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -in @('keyvault', 'network', 'consumption')) { return $null }
             throw "Unexpected preview operation: $($Arguments[0..1] -join ' ')"
@@ -408,10 +411,11 @@ Describe 'WhatIf lifecycle safety' {
             param($Arguments)
             if ($Arguments[0] -eq 'vm') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
-            if ($Arguments[0] -eq 'deployment') {
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') {
                 $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
                 $global:ArcDiskPreview = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
         }
         try {
             & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -OsDiskStorageAccountType Standard_LRS -WhatIf
@@ -437,10 +441,11 @@ Describe 'WhatIf lifecycle safety' {
             }
             if ($Arguments[0] -eq 'disk') { return 'Standard_LRS' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
-            if ($Arguments[0] -eq 'deployment') { throw 'must not reach template preview' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { throw 'must not reach template preview' }
         }
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -DeployAzureVMs $true -WhatIf } | Should -Throw '*tier mismatch*'
-        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'deployment' }
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if' }
     }
     It 'preserves Container App fault and skips AKS sample bootstrap in a redeploy preview' {
         Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
@@ -451,10 +456,11 @@ Describe 'WhatIf lifecycle safety' {
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -eq 'aks') { return '{"powerState":{"code":"Running"},"provisioningState":"Succeeded"}' }
             if ($Arguments[0] -eq 'containerapp') { return '{"properties":{"template":{"containers":[{"env":[{"name":"SIMULATE_CRASH","value":"true"}]}]}}}' }
-            if ($Arguments[0] -eq 'deployment') {
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') {
                 $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
                 $global:ArcPreviewParameters = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
         }
         try {
             & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -DeployContainerApps $true -DeployAks $true -WhatIf
@@ -463,6 +469,45 @@ Describe 'WhatIf lifecycle safety' {
         } finally {
             Remove-Variable ArcPreviewParameters -Scope Global -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Describe 'Retained vault deployment selection' {
+    BeforeEach {
+        Mock Import-Module {}
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
+        Mock Test-DemoComputeCapacity {}
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'list') { return '[{"name":"kv-fixture-old"},{"name":"kv-fixture-current"}]' }
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'show') {
+                return '{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.KeyVault/vaults/kv-fixture-current","properties":{"publicNetworkAccess":"Disabled"}}'
+            }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') {
+                return '[{"properties":{"provisioningState":"Succeeded","timestamp":"2026-01-02","outputs":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-current"}}}},{"properties":{"provisioningState":"Succeeded","timestamp":"2026-01-01","outputs":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-old"}}}}]'
+            }
+            if ($Arguments[0] -eq 'vm') { return '[]' }
+            if ($Arguments[0] -eq 'network' -or $Arguments[0] -eq 'consumption') { return $null }
+            if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') {
+                $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
+                $global:ArcVaultPreview = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+                return
+            }
+            throw 'Unexpected operation in vault selection preview.'
+        }
+    }
+    AfterEach { Remove-Variable ArcVaultPreview -Scope Global -ErrorAction SilentlyContinue }
+    It 'preserves the latest exact-estate vault and its disabled public access, not first prefix match' {
+        & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix fixture -AdminEmail 'test@example.com' -WhatIf
+        $global:ArcVaultPreview.parameters.keyVaultName.value | Should -Be 'kv-fixture-current'
+        $global:ArcVaultPreview.parameters.keyVaultPublicNetworkAccess.value | Should -Be 'Disabled'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'secret' }
+    }
+    It 'blocks ambiguous retained vaults instead of choosing one' {
+        Mock Invoke-DemoAz { '[]' } -ParameterFilter { $Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list' }
+        { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix fixture -AdminEmail 'test@example.com' -WhatIf } | Should -Throw '*no canonical*'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if' }
     }
 }
 

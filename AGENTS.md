@@ -11,10 +11,13 @@
 
 - Keep the single-region, intentionally un-hardened Arc/Monitor demo and its 20-30 minute story.
 - Explain Azure-hosted Arc simulation using `MSFT_ARC_TEST=true`; do not present it as a production pattern or blanket feature validation.
-- Keep SQL Server/Arc SQL/BPA skipped by default; read [SQL support boundaries](docs/sql-arc-spike.md) before touching `-InstallSql`.
+- Keep SQL optional. The base Azure-VM simulation keeps Arc SQL/BPA off; the mixed `-InstallSql` path is retired. For genuine nested Windows/SQL/Arc, use the [scratch demo runbook](docs/nested-sql-demo.md) and its proven scripts. The Jumpstart image is a manual alternative. Never present simulated events as engine proof.
+- SQL incident rehearsal uses only the owned bounded probe/session rollback and exact-host Sev2 alert; preserve the orders worker. Verify the SQL-extension-only local block before install, leave existing policy/monitoring intact, and keep the companion's automatic investigation Review-only. Never kill historical session IDs or run a probe as readiness/lifecycle preparation.
+- Distinguish blocked Arc SQL ARM attempts from independently policy-deployed Defender for SQL. Retain required security; no sensor removal/block, discovery falsification or plan/policy change to clear demo drift. Any host-only policy exception needs the responsible owner's review and separate approval.
 - Confirm before adding production hardening, CIS images, multi-region/HA, real ITSM integrations or a Bicep-only redesign.
 - Keep static infrastructure in Bicep and necessary onboarding/validation in PowerShell; add no framework or top-level dependency beyond `az`, PowerShell and built-in REST.
 - Reprice selected workloads using [cost.md](docs/cost.md); never promise a fixed all-in bill or zero-cost parking.
+- Keep optional capacity/optimisation workbooks evidence-first: exact Arc IDs, missing/stale/history warnings, declared parent/guest separation with no hardware totals, no CPU-only sizing or billed/realised savings. Preview is not publication permission; do not expand collection, activate hosts or induce faults to populate a tile. Use [the scoped workbook procedure](docs/runbook.md#optional-capacity-and-optimisation-workbooks); DR and Azure Migrate assessment are excluded.
 
 ## Target and consent
 
@@ -26,6 +29,8 @@
 - Surface denied/malformed/unknown reads and actual CLI/job failures; never substitute absence or bypass a denial with another tool.
 - Preserve credentials, workload fault flags, disks/data, identities, RBAC, logs and private vault access on routine lifecycle/reconcile.
 - Never rotate a retained VM/onboarding credential for convenience; follow the existing-secret contract in lifecycle.md.
+- Keep guest passwords and onboarding credentials private and reuse them on wake. Private onboarding initialization is separate setup, not lifecycle preparation; never open a private vault or rotate an existing key to clear a failure.
+- Define the nested guest once in `nestedSqlGuest` in the private skin. Activate starts the parent then guest; Hibernate gracefully stops the guest then parks compute; Remove uses the same configuration. Do not add parallel manifest/tuple/review workflows for the demo.
 
 ## Park, wake and remove
 
@@ -44,6 +49,7 @@
 - Restore explicit NAT/PIP before starting compute; never rely on default outbound or remove the park/wake NAT workaround.
 - Wait for in-flight VM/AKS transitions rather than resubmitting; keep bounded waits and partial progress on failure.
 - Preserve VM definitions/NICs/disks/Arc identities while parked; never delete/reconstruct VMs as a cost shortcut.
+- Managed Run Command is limited to 25 saved commands per VM. Preserve useful failures; remove only completed demo-owned commands through the working helper, not unrelated commands or an in-flight operation.
 - Keep Defender pricing unchanged on default removal; require separate `-DisableDefender` / `-RemoveOnboardingIdentity` consent.
 - Verify both groups and named subscription policies/budget absent for Removed; disclose tenant/shared/soft-delete exceptions without purging or claiming zero bill.
 

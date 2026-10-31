@@ -17,8 +17,7 @@
          only (DCRA against the Arc resource ID — see AGENTS.md Gotcha 3)
       7. Dependency Agent for VM Insights-supported Windows entries only
       8. Change Tracking extension for Change Tracking-supported entries only
-      9. (Optional/advanced) SQL Server 2022 Developer install on SQL-capable hosts
-     10. (Optional/advanced) WindowsAgent.SqlServer extension to Arc-enable SQL
+      9. SQL engine preparation is a separate, explicitly approved operation
      11. Workbook upload
      12. Post-deploy validation (heartbeat, alert rule, workbook URL)
 
@@ -100,12 +99,9 @@
     Monthly budget threshold in subscription currency. Default 200.
 
 .PARAMETER InstallSql
-    Optional/advanced experimental path retained for historical compatibility.
-    It attempts both SQL Server 2022 Developer install and Arc SQL extension setup
-    on fleet entries with supportsSql=true. Skipped by default because future SQL
-    work should split SQL workload simulation from SQL Server enabled by Azure Arc
-    validation. Do not use this switch to claim Arc SQL support in the Azure-VM-
-    backed demo.
+    Retired mixed SQL/Arc SQL path. Enabling it fails before deployment.
+    Use Invoke-SqlEngineOnArc.ps1 for separately approved real SQL preparation,
+    without Arc SQL extension/licensing/BPA features.
 
 .PARAMETER SkipSqlInstall
     Deprecated compatibility switch. The default path already skips SQL; keep
@@ -171,7 +167,7 @@ if ($Location -notmatch '^[a-z0-9]+$') { throw 'Location must be an Azure region
 if ($AutoShutdownTime -notmatch '^([01][0-9]|2[0-3])[0-5][0-9]$') { throw 'AutoShutdownTime must be HHmm.' }
 if ($BudgetAmount -lt 1) { throw 'BudgetAmount must be positive.' }
 if ($PSBoundParameters.ContainsKey('InstallSql') -and $PSBoundParameters.ContainsKey('SkipSqlInstall')) {
-    throw 'Use only one of -InstallSql or -SkipSqlInstall. SQL is skipped by default; pass -InstallSql only for the optional advanced SQL path.'
+    throw 'Use only one of -InstallSql or -SkipSqlInstall. The legacy mixed SQL installation path is retired.'
 }
 $defaultInstallSql = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.installSql' -Default (-not [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.skipSqlInstall' -Default $true)))
 if ($PSBoundParameters.ContainsKey('SkipSqlInstall')) {
@@ -179,6 +175,7 @@ if ($PSBoundParameters.ContainsKey('SkipSqlInstall')) {
 } elseif (-not $PSBoundParameters.ContainsKey('InstallSql')) {
     $InstallSql = [switch]$defaultInstallSql
 }
+if ($InstallSql) { throw 'The mixed InstallSql/Arc SQL path is retired. Use Invoke-SqlEngineOnArc.ps1 with approved SQL 2022 Developer media/licence consent; no Arc SQL extension or BPA is permitted in this lab.' }
 if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
     throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
 }
@@ -414,6 +411,8 @@ function New-CoreDcrBody {
                             'System!*[System[(Level=1 or Level=2 or Level=3)]]'
                             'Security!*[System[(band(Keywords,4503599627370496))]]'
                             "Application!*[System[Provider[@Name='ArcLobBridgeApp'] and (EventID=4000) and (Level=4)]]"
+                            "Application!*[System[Provider[@Name='ArcSqlEngineDemo'] and (EventID=6000) and (Level=4)]]"
+                            "Application!*[System[Provider[@Name='ArcSqlEngineDemo'] and (EventID=6001) and (Level=4)]]"
                         )
                     }
                 )
@@ -550,16 +549,29 @@ $providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Micro
     'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab', 'Microsoft.Consumption')
 if ($DeployContainerApps) { $providers += 'Microsoft.App' }
 if ($DeployAks) { $providers += @('Microsoft.ContainerService', 'Microsoft.ManagedIdentity', 'Microsoft.Resources', 'Microsoft.Storage', 'Microsoft.ContainerInstance') }
-if ($InstallSql) { $providers += 'Microsoft.AzureArcData' }
 $principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $providers
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"
 $kvPrefix = "kv-$($NamePrefix -replace '-','')"
-$kvName = Invoke-DemoAz -Arguments @('keyvault', 'list', '-g', $infraRg, '--query', "[?starts_with(name, '$kvPrefix')].name | [0]", '-o', 'tsv') -AllowNotFound
+$vaultOutput = Invoke-DemoAz -Arguments @('keyvault', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
+$vaultRecords = @(if ($null -ne $vaultOutput) { $vaultOutput | ConvertFrom-Json })
+$vaultManifests = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '-o', 'json') | ConvertFrom-Json |
+    Where-Object { $_.properties.provisioningState -eq 'Succeeded' -and $_.properties.outputs.arcResourceGroup.value -eq $arcRg -and $_.properties.outputs.keyVaultName.value } |
+    Sort-Object { $_.properties.timestamp } -Descending)
+$kvName = if ($vaultManifests.Count) { $vaultManifests[0].properties.outputs.keyVaultName.value } else { '' }
+$freshVault = -not $kvName -and -not $vaultRecords.Count
+$vaultPublicAccess = 'Enabled'
 if ($kvName) {
+    $selectedVaults = @($vaultRecords | Where-Object name -eq $kvName)
+    if ($selectedVaults.Count -ne 1) { throw 'Canonical deployment-output vault is absent/ambiguous; never substitute a prefix match.' }
+    $selectedVault = Invoke-DemoAz -Arguments @('keyvault', 'show', '-g', $infraRg, '-n', $kvName, '-o', 'json') | ConvertFrom-Json
+    if ($selectedVault.id -ne "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.KeyVault/vaults/$kvName" -or
+        $selectedVault.properties.publicNetworkAccess -notin @('Enabled', 'Disabled')) { throw 'Retained vault identity/network mode is unknown.' }
+    $vaultPublicAccess = $selectedVault.properties.publicNetworkAccess
     Write-Step "Found existing Key Vault $kvName — preserving for idempotent redeploy"
 } else {
+    if ($vaultRecords.Count) { throw 'Existing vaults have no canonical retained deployment output; explicit ownership review is required, not first-prefix selection.' }
     $kvName  = New-KeyVaultName -Prefix $kvPrefix
     $kvName  = $kvName.Substring(0, [Math]::Min(24, $kvName.Length))
 }
@@ -567,6 +579,12 @@ if ($kvName) {
 # Phase 2: generate password, deploy Bicep
 Write-Header 'Generating admin password + deploying Bicep'
 $existingVms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound | ConvertFrom-Json)
+if (-not $freshVault -and -not $existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
+    throw 'Retained vault without current compute: supply the retained CURRENT AdminPassword; do not generate or overwrite a retained administrator credential.'
+}
+if ($vaultPublicAccess -eq 'Disabled' -and -not $AdminPassword -and -not $WhatIfPreference) {
+    throw 'Retained vault is private-only. Supply the CURRENT AdminPassword as SecureString; no workstation secret read, public access change or credential rotation.'
+}
 $existingSecret = if ($existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
     Invoke-DemoAz -Arguments @('keyvault', 'secret', 'show', '--vault-name', $kvName, '-n', 'vm-admin-password', '--query', 'value', '-o', 'tsv') -AllowNotFound
 }
@@ -674,6 +692,7 @@ $templateParameters = @{
     tenantId                = @{ value = $TenantId }
     deployerPrincipalId     = @{ value = $principalId }
     keyVaultName            = @{ value = $kvName }
+    keyVaultPublicNetworkAccess = @{ value = $vaultPublicAccess }
     adminUsername           = @{ value = 'azureuser' }
     adminPassword           = @{ value = $adminPwd }
     vmSize                  = @{ value = $VmSize }
@@ -721,7 +740,7 @@ $outputs = az deployment sub show --name $deploymentName --query properties.outp
     [System.IO.File]::Delete($paramFile)
 }
 Write-Ok 'Bicep deployment complete'
-if (-not $existingVms.Count -or $AdminPassword) {
+if ($freshVault -and -not $existingVms.Count) {
     az keyvault secret set --vault-name $kvName -n vm-admin-password --value $adminPwd -o none --only-show-errors
 }
 
@@ -743,7 +762,6 @@ $vmInsightsWindowsVms = @($vmInsightsFleet | Where-Object { $_.osType -eq 'Windo
 $changeTrackingFleet = @($deployedFleet | Where-Object { $_.supportsChangeTracking -eq $true })
 $changeTrackingWindowsVms = @($changeTrackingFleet | Where-Object { $_.osType -eq 'Windows' } | Select-Object -ExpandProperty name)
 $changeTrackingLinuxVms = @($changeTrackingFleet | Where-Object { $_.osType -eq 'Linux' } | Select-Object -ExpandProperty name)
-$sqlVms = @($deployedFleet | Where-Object { $_.supportsSql -eq $true } | Select-Object -ExpandProperty name)
 $arcOnlyVms = @($deployedFleet | Where-Object { $_.supportsAzureMonitor -ne $true } | Select-Object -ExpandProperty name)
 
 if ($deployedFleet.Count -gt 0) {
@@ -975,61 +993,7 @@ if ($jobs.Count -gt 0) {
     Write-Warn 'No Change Tracking-supported machines — skipping extension'
 }
 
-# Phase 9: Optional/advanced SQL install
-if (-not $InstallSql) {
-    if ($sqlVms) {
-        Write-Warn 'SQL optional/advanced path disabled — leaving SQL-capable hosts as Windows VMs. SQL Server can still be added later as a workload simulation, but do not claim Arc SQL validation in this Azure-VM-backed lab; see docs/sql-arc-spike.md.'
-    } else {
-        Write-Warn 'No SQL-capable machines — skipping SQL optional/advanced path'
-    }
-} elseif ($sqlVms) {
-    Write-Header "Phase 9 — Experimental SQL Server 2022 Developer install on $($sqlVms.Count) Azure-VM-backed hosts (~20 min; not a supported Arc SQL validation target)"
-    Write-Warn 'This legacy path mixes workload simulation with Arc SQL extension registration. Use only for experimentation; do not claim Arc SQL validation in this Azure-VM-backed lab. See docs/sql-arc-spike.md.'
-    $sqlScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) "sql-install-$(Get-Random).ps1"
-    $sqlScript = @'
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-$mediaDir = 'C:\SQL2022'
-New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
-Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2215158' `
-    -OutFile "$mediaDir\SSEI.exe" -UseBasicParsing
-& "$mediaDir\SSEI.exe" /ACTION=Download /MEDIAPATH=$mediaDir /MEDIATYPE=ISO /QUIET | Out-Null
-Start-Sleep 60
-$iso = Get-ChildItem $mediaDir -Filter '*.iso' | Select-Object -First 1
-$mount = Mount-DiskImage -ImagePath $iso.FullName -PassThru
-$drive = (Get-Volume -DiskImage $mount).DriveLetter
-& "${drive}:\setup.exe" /Q /ACTION=Install /FEATURES=SQLENGINE /INSTANCENAME=MSSQLSERVER `
-    /SQLSVCACCOUNT='NT AUTHORITY\NETWORK SERVICE' /SQLSYSADMINACCOUNTS='BUILTIN\Administrators' `
-    /AGTSVCACCOUNT='NT AUTHORITY\NETWORK SERVICE' /TCPENABLED=1 /SECURITYMODE=SQL `
-    /SAPWD='P@ssw0rd-DemoSQL-2026!' /IACCEPTSQLSERVERLICENSETERMS `
-    /SUPPRESSPRIVACYSTATEMENTNOTICE /UPDATEENABLED=0 /SQLCOLLATION='SQL_Latin1_General_CP1_CI_AS'
-Dismount-DiskImage -ImagePath $iso.FullName | Out-Null
-Get-Service MSSQLSERVER | Format-List Name, Status
-if ((Get-Service MSSQLSERVER).Status -ne 'Running') { throw 'SQL service is not running' }
-'ARC_DEMO_OK'
-'@
-    [System.IO.File]::WriteAllText($sqlScriptPath, $sqlScript, [System.Text.UTF8Encoding]::new($false))
-    try {
-    foreach ($vm in $sqlVms) {
-        $target = [pscustomobject]@{ Name = $vm; OsType = 'Windows'; Id = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$vm" }
-        Invoke-DemoGuestCommand -Machine $target -Script "@$sqlScriptPath"
-    }
-    } finally {
-        Remove-Item -LiteralPath $sqlScriptPath -Force
-    }
-
-    Write-Header 'Phase 10 — Arc-enable SQL (BPA + Defender for SQL)'
-    foreach ($vm in $sqlVms) {
-        az connectedmachine extension create -g $arcRg --machine-name $vm `
-          -n WindowsAgent.SqlServer --publisher Microsoft.AzureData --type WindowsAgent.SqlServer `
-          --enable-auto-upgrade true `
-          --settings '{\"SqlManagement\":{\"IsEnabled\":true}, \"LicenseType\":\"Paid\", \"AzureBestPracticesAssessment\":{\"IsEnabled\":true}}' `
-          --only-show-errors -o tsv | Out-Null
-    }
-    Write-Ok 'WindowsAgent.SqlServer extension installed on SQL hosts'
-} else {
-    Write-Warn 'InstallSql requested but no deployed fleet entries have supportsSql=true — skipping SQL optional/advanced path'
-}
+Write-Warn 'SQL engine/workload preparation is separate and skipped by deployment; see docs/sql-engine-workload.md. This script does not install Arc SQL extension/BPA.'
 } else {
     Write-Header 'Phases 4-10 — Arc server workload'
     Write-Warn 'DeployArcOnPrem is false or no VM outputs were returned — skipping Arc onboarding, Arc agent extensions, DCR associations, Dependency Agent, Change Tracking extension, and SQL phases'
@@ -1151,10 +1115,6 @@ Write-Host "  Infra RG:  https://portal.azure.com/#@$TenantId/resource/subscript
 Write-Host ''
 Write-Host "  Next steps:"
 Write-Host "    - Wait ~12h for MCSB/NIST compliance scores to populate."
-if ($InstallSql) {
-    Write-Host "    - Wait ~30-60m for SQL Best Practice Assessment first run."
-} else {
-    Write-Host "    - SQL Server/Arc SQL/BPA was skipped by default; use -InstallSql only for the optional advanced path."
-}
+Write-Host "    - SQL preparation is separate; use Invoke-SqlEngineOnArc.ps1 only with approved media/licence consent. No Arc SQL/BPA."
 Write-Host "    - After operator approval, use Hibernate-ArcDemo.ps1 with the same subscription, tenant and skin; retained services still incur costs."
 Write-Host ''

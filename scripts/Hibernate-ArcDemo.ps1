@@ -23,13 +23,26 @@ if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoS
 Assert-DemoName $NamePrefix
 Initialize-DemoContext $SubscriptionId $TenantId
 $inventory = Get-DemoInventory $NamePrefix -ForHibernation
+$nestedSqlGuest = $null
+try { $nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin }
+catch { Write-Warning "Nested SQL configuration is unreadable: $($_.Exception.Message) Continuing compute parking without guest shutdown verification." }
 try {
-    $strict = Get-DemoInventory $NamePrefix
+    $strict = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' })
     Assert-DemoSkinInventory $skin $strict
     if (@($strict.Machines | Where-Object { -not $_.Actual }).Count) { throw 'Expected VMs are missing.' }
 } catch { Write-Warning "Deployment/skin drift inspection: $($_.Exception.Message) Parking all compute in $($inventory.InfraRg), not starting or deleting it." }
-if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Deallocate VMs, stop AKS, deactivate Container App revisions and remove demo NAT/public IP')) { return }
+if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Shut down the configured nested SQL guest, deallocate VMs, stop AKS, deactivate Container App revisions and remove demo NAT/public IP')) { return }
 $infraRg = $inventory.InfraRg
+if ($nestedSqlGuest) {
+    $parent = $inventory.Machines | Where-Object Name -ceq $nestedSqlGuest.ParentVmName | Select-Object -First 1
+    try {
+        if (-not $parent -or -not $parent.Actual) { throw 'Configured nested SQL parent state is unreadable.' }
+        if ($parent.Actual.powerState -eq 'VM running') {
+            Invoke-DemoNestedSqlGuest -ParentMachine ([pscustomobject]@{ Name = $parent.Name; Id = $parent.Id
+                OsType = $parent.Actual.storageProfile.osDisk.osType }) -GuestVmName $nestedSqlGuest.GuestVmName -Action Stop
+        }
+    } catch { Write-Warning "Nested SQL graceful shutdown failed: $($_.Exception.Message) Continuing compute parking; guest data consistency is unverified." }
+}
 foreach ($machine in $inventory.Machines) {
     try {
         if ($machine.Actual.powerState -notin @('VM deallocated', 'VM deallocating')) {

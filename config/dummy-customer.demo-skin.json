@@ -20,6 +20,12 @@
     "installSql": false,
     "onPremFleetPath": ""
   },
+  "nestedSqlGuest": {
+    "enabled": false,
+    "parentVmName": "",
+    "guestVmName": "",
+    "arcMachineName": ""
+  },
   "compute": {
     "vmSize": "Standard_B2as_v2",
     "osDiskStorageAccountType": "StandardSSD_LRS"

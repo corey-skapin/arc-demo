@@ -26,6 +26,14 @@ If a tile is empty, the scoped queries below are the fallback.
 This lab simulates on-premises servers using Azure VMs and `MSFT_ARC_TEST=true`.
 It is a demo, not a hardened production architecture or blanket feature validation.
 
+**Optional engineer lens (substitute for part of this beat, not extra tour time):**
+
+{{OperationalWorkbookSection}}
+
+**Say:** "Once set up, an engineer can open the same timestamped evidence without
+logging into each server. A spike, pressure signal or ownership gap starts a
+review; an empty tile does not justify a sizing decision."
+
 ## 2. Show what Arc adds (2 minutes)
 
 Open [the Windows Arc machine]({{windowsMachineUrl}}), **{{windowsMachineName}}**.
@@ -122,7 +130,47 @@ October's fault as today's activity. Healthy event collection requires the
 source-specific DCR selector. Starting the app, changing collection or injecting
 a fault is operator preparation under separate approval, never a presenter step.
 
-## 6. Turn evidence into an alert (3 minutes)
+## 6. Show a real SQL workload (optional, 3 minutes)
+
+{{SqlAvailability}}
+
+When prepared, show the linked engine/database query result, including edition,
+version, actual row count and commit timestamp. Then use **Last 30 minutes** in
+the same workspace:
+
+```kusto
+Event
+| where TimeGenerated > ago(30m)
+{{SqlHostFilter}}
+| where Source =~ "ArcSqlEngineDemo" and EventID == 6000
+| project TimeGenerated, Computer, EventLevelName, RenderedDescription
+| order by TimeGenerated desc
+```
+
+**Say:** "This worker really commits orders to SQL Server and reads them back.
+Arc and Monitor carry its operational evidence; this is not Arc-enabled SQL
+Server inventory, BPA or Defender for SQL."
+
+The Information event follows a successful real SQL transaction/read, roughly
+once per minute. Fresh rows corroborate the saved query result; old evidence or
+SQL-shaped simulator events do not prove a running engine today.
+No rows means a gap, not permission to install, restart or change collection.
+If showing both application beats, keep this brief to retain the 20-30 minute tour.
+
+{{SqlIncidentAvailability}}
+
+If the SQL incident flow was prepared, have the operator trigger its approved
+one-shot probe, not a service outage. Show same-incident `6201` Error and `6001`
+recovery rows, then the **Arc SQL lock timeout** Sev2 alert. Continue in the SRE
+guide for the automatically triggered investigation and suggested steps.
+The actual lock self-recovers in about 12 seconds; explain historical SQL wait
+evidence, not a currently blocked orders worker or SRE-performed remediation.
+If the alert or investigation is absent, state that gap; do not trigger again
+blindly or manufacture evidence. The operator owns prerequisites and triggering,
+not the presenter. Use this incident beat instead of a second application
+incident to keep the presentation short.
+
+## 7. Turn evidence into an alert (3 minutes)
 
 Open [the missing-heartbeat alert rule]({{heartbeatAlertUrl}}),
 **{{heartbeatAlertName}}**. Show its scope, condition, severity and evaluation
@@ -138,7 +186,7 @@ inventory. Do not promise complete outage detection or a fixed notification time
 If existing alert history is populated, show the affected resource and timestamp.
 A healthy lab may have no fired alerts: show the rule, not a manufactured outage.
 
-## 7. Finish with operating posture (3-5 minutes)
+## 8. Finish with operating posture (3-5 minutes)
 
 Return to [the Windows Arc machine]({{windowsMachineUrl}}).
 Show its available **Updates** assessment/status view; point to **Last assessed**
@@ -152,7 +200,7 @@ updates**, install updates or alter schedules. Policy assignment is not evaluate
 compliance. Monitor readiness is not active AV, full EDR, patch completion or
 application proof. SQL Server/Arc SQL/BPA is not part of this default demo.
 
-## 8. Close or hand over
+## 9. Close or hand over
 
 Return to [the workbook]({{workbookUrl}}).
 
