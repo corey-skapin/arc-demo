@@ -1,0 +1,19 @@
+let Base = range Offset from 0 to 10080 step 1
+| extend TimeGenerated = now() - 1m * Offset;
+let FixturePerf = union
+    (Base | extend _ResourceId="__PARENT__", ObjectName="Processor Information", CounterName="% Processor Time", InstanceName="_Total", CounterValue=iff(Offset == 30, 100.0, 10.0)),
+    (Base | extend _ResourceId="__PARENT__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="_Total", CounterValue=99.0),
+    (Base | extend _ResourceId="__PARENT__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="0", CounterValue=100.0),
+    (Base | extend _ResourceId="__GUEST__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=40.0),
+    (Base | extend _ResourceId="__LOW__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=10.0),
+    (Base | where Offset >= 2880 | extend _ResourceId="__PARKED__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=1.0),
+    (Base | where Offset <= 60 | extend _ResourceId="__SHORT__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=1.0),
+    (Base | extend _ResourceId="__PRESSURE__", ObjectName="Memory", CounterName="% Committed Bytes In Use", InstanceName="", CounterValue=90.0),
+    (Base | extend _ResourceId="__PRESSURE__", ObjectName="Memory", CounterName="Available MBytes", InstanceName="", CounterValue=100.0),
+    (Base | extend _ResourceId="__INVALID__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=110.0),
+    (Base | extend _ResourceId="__FOREIGN__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=99.0)
+| project TimeGenerated, _ResourceId, ObjectName, CounterName, InstanceName, CounterValue;
+let FixtureInsights = union
+    (Base | extend _ResourceId="__PRESSURE__", Origin="vm.azm.ms", Namespace="LogicalDisk", Name="FreeSpacePercentage", Tags='{"vm.azm.ms/mountId":"C:"}', Val=80.0 - 20.0 * (10080 - Offset)/10080),
+    (Base | extend _ResourceId="__PRESSURE__", Origin="vm.azm.ms", Namespace="LogicalDisk", Name="FreeSpacePercentage", Tags='{"vm.azm.ms/mountId":"D:"}', Val=10.0)
+| project TimeGenerated, _ResourceId, Origin, Namespace, Name, Tags, Val;

@@ -44,8 +44,10 @@ registrations. Supplying a deployer principal ID does not bypass RBAC checks.
 Missing registrations must be approved and registered separately. Baseline
 providers include KeyVault, DevTestLab and Consumption. Optional Container Apps
 requires Microsoft.App; AKS additionally needs ContainerService, ManagedIdentity,
-Resources, Storage and ContainerInstance for its deployment script. AzureArcData
-is only needed for the experimental SQL path.
+Resources, Storage and ContainerInstance for its deployment script.
+The retired mixed SQL path no longer requests AzureArcData registration;
+optional real SQL preparation does not enable Arc SQL.
+The genuine nested guest uses its separate explicit extension helper.
 
 Parking/waking/removal does **not** invoke that deployment Graph/Owner/provider/
 capacity gate. Use the normal explicit context, retained workload inventory and
@@ -68,7 +70,45 @@ an arbitrary subscription. AKS node capacity is additional to backing VMs.
 credentials, repair resources or run guest commands. Deployment preview uses
 ARM what-if and a temporary parameter file removed in `finally`.
 
+## Nested SQL guest
+
+The [nested SQL runbook](nested-sql-demo.md) is the single build/park/wake/remove
+path. The proven scratch build is primary; Jumpstart is a manual alternative.
+The base Arc/Monitor deployment still does not install SQL.
+
+Define the guest once in the private skin:
+
+```json
+"nestedSqlGuest": {
+  "enabled": true,
+  "parentVmName": "sql-parent",
+  "guestVmName": "sql-guest",
+  "arcMachineName": "sql-guest"
+}
+```
+
+These are names in the confirmed demo groups, not credentials or arbitrary
+resource IDs. Defaults leave it disabled. Use the same skin for every operation.
+The exact configured Windows parent may already be in the retained fleet; a
+separately created parent is selected only from that same infra group.
+
+Activate restores outbound networking, starts the parent, starts an Off/Saved
+Hyper-V guest without restarting a Running guest, then waits for the guest's
+Arc connection. Hibernate uses normal `Stop-VM` (not `-Shutdown`, `-TurnOff` or
+forced power-off), waits for Off, then deallocates compute. If guest shutdown
+fails, it warns and still attempts spend-reducing parking of all targeted compute;
+that is not a guest-data-consistency claim. Remove gracefully stops a running
+guest before removing the two groups. A parked parent needs no guest boot for
+removal. Definitions/disks/credentials are retained on park/wake, not recreated.
+
+Readiness remains read-only. For Active it checks the configured Arc guest's
+connection; actual SQL query and extension startup are checked by
+`Test-NestedSqlDemoGuest.ps1`. SQL extension startup can lag after a cold wake.
+No automatic enrollment, SQL reinstall or credential rotation is a wake step.
+
 ## Inventory and retry semantics
+
+### Retained base fleet
 
 Successful subscription deployment outputs are retained as the lifecycle
 manifest, filtered by the exact Arc resource group. A later optional-workload-only
@@ -77,7 +117,12 @@ fleet. Lifecycle discovery uses the latest nonempty Arc fleet and retained
 native-VM/Container-App IDs. Older AKS manifests are supplemented only by tagged
 clusters in the demo infra group. Preserve deployment history. Missing manifests,
 unknown VMs, OS mismatch and IDs outside the demo infra group are errors, not
-reasons to guess which VMs to start or delete. Hibernate instead discovers all
+reasons to guess which VMs to start or delete. For an unused alternative parent,
+the private skin can explicitly set `operations.keepParkedVmNames` to an array
+of names in this infra group. Each must already be deallocated and outside the
+active retained fleet/configured nested parent. Activate never starts or invokes
+guests on these VMs; Active readiness verifies they remain deallocated. Other
+unknown VMs still fail closed. Hibernate instead discovers all
 VMs, AKS and Container Apps in the explicitly targeted `rg-<prefix>-infra`;
 manifest/OS/skin drift is a warning, not a reason to leave that compute running.
 No workload ID outside that exact subscription/group is accepted. If the skin
@@ -111,6 +156,10 @@ It conflicts with `-SkipPatchAssessment`; native VMs are not Arc assessment
 targets. The activation result records `not-required` when no hosts need default
 submission. This is not proof of earlier assessment success or freshness.
 Submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
+if Azure returns `OperationConflict` because an assess/patch operation is already
+running, activation warns and records `already-in-progress` in its per-host
+assessment output. It does not retry, cancel or claim completion. Other errors,
+including denied or missing resources, still fail activation.
 `-SkipValidate` opts out of final readiness and must never be reported as a
 validated demo. Activation never changes workload fault flags.
 
@@ -205,8 +254,15 @@ reuse `vm-admin-password` from their existing Key Vault; if that secret was neve
 stored, supply the **current** password as `-AdminPassword` (SecureString).
 Do not supply a new password as a convenience: credential rotation is a separate
 approved operation. Fresh deployments save the generated password to Key Vault.
-If new Arc onboarding is required and the SP already exists, supply its existing
+For `Deploy-ArcDemo.ps1`, if new Arc onboarding is required and the SP already exists, supply its existing
 secret as `-OnboardingSecret` (SecureString). Never commit or log either secret.
+
+Deploy selects a retained vault using the saved `keyVaultName` deployment output
+and preserves its public-network-access mode. A private-only vault requires the
+current `-AdminPassword`; Deploy does not open it for workstation secret reads.
+This protects the existing estate, not a nested-build prerequisite. The
+[nested build](nested-sql-demo.md) needs neither a vault nor a supplied onboarding
+secret: it creates and removes its own one-day app credential.
 
 Mandatory compute/Arc waits throw on timeout; inspection errors terminate. Native CLI
 failures terminate; authentication/authorization errors are never interpreted as
@@ -292,9 +348,12 @@ VM-path CT reconciliation produced guest provisioning success and CT records for
 all three Linux hosts without restarts. Do not delete stuck Arc extensions or
 change paths incidentally. See the [CT support matrix and CLI examples](https://learn.microsoft.com/azure/azure-change-tracking-inventory/change-tracking-inventory-support-matrix).
 
-Linux VM Insights/Dependency Agent map remains disabled. SQL-shaped workload
-simulation is separate from Arc SQL: no SQL Server enabled by Azure Arc/BPA
-validation is claimed in this Azure-only lab.
+Linux VM Insights/Dependency Agent map remains disabled. The optional
+[real SQL workload](sql-engine-workload.md) is separate from Arc SQL: no SQL Server
+enabled by Azure Arc/BPA validation is claimed. Hibernate/Activate retain its
+engine/database and startup configuration without an implicit install/reset.
+Verify real SQL queries separately after wake; Arc readiness does not establish
+optional database/worker health. A stopped/disabled worker remains disabled.
 
 ### Linux Defender is a separate diagnostic surface
 
@@ -314,9 +373,9 @@ service restart, VM restart or AV-mode change follows from diagnosis alone.
 ## Validation boundaries
 
 Mocked Pester tests, script parsing, PSScriptAnalyzer, Bicep compile and live
-read-only readiness are separate evidence. Keep dated operational observations in
-[the engineering reference](module-map.md#dated-operational-evidence-not-presenter-material),
-not agent instructions. They do not prove current health or validate new code.
+read-only readiness are separate evidence. Keep historical operational evidence
+privately and the working-path timings in the [nested SQL runbook](nested-sql-demo.md),
+not as extra review gates. They do not prove current health or validate new code.
 Keep script completion, independent readiness, fresh telemetry and assessment
 completion separate; preserve per-host attempt results outside git.
 

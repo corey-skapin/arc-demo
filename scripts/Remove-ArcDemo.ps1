@@ -7,7 +7,7 @@
     Identity deletion is separately opt-in; shared/ambiguous identities are refused.
     Successful completion verifies both groups and named policies/budget absent.
     Retained tenant identities, soft-deleted vaults and shared/subscription services
-    are explicit exclusions, not a zero-bill or tenant-wide cleanup claim.
+    are not deleted by this command and may still incur costs.
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -23,6 +23,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
 $skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
 if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
+$nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
 Assert-DemoName $NamePrefix
 if ($KeepDefender -and $DisableDefender) { throw 'KeepDefender and DisableDefender cannot both be supplied.' }
 Initialize-DemoContext $SubscriptionId $TenantId
@@ -38,6 +39,20 @@ if ($RemoveOnboardingIdentity) {
     }
 }
 if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", "Delete $($groups -join ', '), named policies and budget; identity deletion=$RemoveOnboardingIdentity; disable subscription Defender=$DisableDefender")) { return }
+if ($nestedSqlGuest) {
+    $raw = Invoke-DemoAz -Arguments @('vm', 'show', '-d', '-g', "rg-$NamePrefix-infra", '-n', $nestedSqlGuest.ParentVmName, '-o', 'json') -AllowNotFound
+    if ($raw) {
+        $parent = $raw | ConvertFrom-Json
+        $expectedId = "/subscriptions/$SubscriptionId/resourceGroups/rg-$NamePrefix-infra/providers/Microsoft.Compute/virtualMachines/$($nestedSqlGuest.ParentVmName)"
+        if ($parent.id -ne $expectedId -or $parent.storageProfile.osDisk.osType -ne 'Windows') { throw 'Configured nested SQL parent identity/OS is unexpected; refusing removal.' }
+        if ($parent.powerState -eq 'VM running') {
+            Invoke-DemoNestedSqlGuest -ParentMachine ([pscustomobject]@{ Name = $parent.name; Id = $parent.id; OsType = 'Windows' }) `
+                -GuestVmName $nestedSqlGuest.GuestVmName -Action Stop
+        } elseif ($parent.powerState -notin @('VM deallocated', 'VM deallocating')) {
+            throw "Nested SQL parent is in $($parent.powerState); retry removal after the transition settles."
+        }
+    }
+}
 foreach ($name in "mcsb-$NamePrefix", "nist-$NamePrefix") {
     $assignment = Invoke-DemoAz -Arguments @('policy', 'assignment', 'show', '-n', $name, '--scope', $scope, '-o', 'json') -AllowNotFound
     if ($assignment) { Invoke-DemoAz -Arguments @('policy', 'assignment', 'delete', '-n', $name, '--scope', $scope) | Out-Null }
@@ -67,4 +82,4 @@ Wait-Until -TimeoutSeconds 1800 -IntervalSeconds 20 -Message 'demo groups, named
 if ($DisableDefender) {
     Invoke-DemoAz -Arguments @('security', 'pricing', 'create', '--name', 'VirtualMachines', '--tier', 'Free', '-o', 'none') | Out-Null
 }
-Write-Ok 'Removed: both demo groups and named policies/budget verified absent. Tenant identities/applications, soft-deleted vaults and shared/subscription services are explicitly excluded unless separately removed; no purge or zero-bill claim.'
+Write-Ok 'Removed: both demo groups and named policies/budget verified absent. Tenant identities/applications, soft-deleted vaults and shared/subscription services remain unless separately removed; retained resources may still incur costs.'

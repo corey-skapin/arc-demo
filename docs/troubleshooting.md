@@ -6,6 +6,21 @@ scoped approval before any repair, restart, policy scan or fault operation.
 This is a symptom reference, not required presenter reading; use
 [the docs index](README.md) and [runsheet.md](runsheet.md) for the default tour.
 
+## Nested SQL build and cold-wake lessons
+
+Use the [short nested SQL runbook](nested-sql-demo.md), not retired V1-V3
+provisioning, first-boot or review controllers.
+
+| Symptom | Working-path lesson |
+|---|---|
+| Scratch Windows boot fails with `c000003a` | Use Server 2022 BCDBoot for the Server 2022 guest; the Server 2019 binary failed. |
+| Arc connect writes informational stderr under Windows PS5 | Capture native stdout/stderr and use the process exit code plus actual Arc connection; informational stderr alone is not failure. |
+| Managed Run Command creation fails at 25 saved commands | The VM limit is 25. Use the retained helper's completed demo-command cleanup; never remove another command or an in-flight operation. |
+| Hyper-V rejects `Stop-VM -Shutdown` | `-Shutdown` is not a valid parameter. Normal `Stop-VM -Confirm:$false` requests graceful shutdown; wait for Off before parking the parent. |
+| Downloads/onboarding fail just after static-IP setup | Cold DNS can lag. Wait for DNS/network readiness; do not repeatedly rebuild the guest or reset credentials. |
+| A large parent is unexpectedly deallocated | The platform can deallocate it during the demo. Inspect its actual power state and use Activate; do not treat missing guest output as a reason to rebuild. |
+| SQL extension is not immediately healthy after wake | Arc connection and SQL extension readiness are different. Allow bounded startup lag and run the SQL status helper; do not reinstall or reconnect automatically. |
+
 ## LOB app has only old error events in Log Analytics
 
 The healthy LOB worker emits Application event `4000` at Information level,
@@ -21,6 +36,16 @@ agent propagation/ingestion time. Verify new post-change records rather than
 historical rows. Use the [LOB sample's healthy activity query](../samples/lob-arc-app/README.md#showing-healthy-activity-in-log-analytics).
 Guest task/config/log inspection and any start/fault/repair need their own scope;
 do not induce a fault just to make this query nonempty.
+
+## SQL preparation reports a pending file rename
+
+A nonempty `PendingFileRenameOperations` value was observed during an approved
+SQL preflight even though the other checked reboot flags were clear.
+That observation does not identify the owning package, prove an active installer
+or authorize a reboot. The [real SQL helper](sql-engine-workload.md) fails closed
+before installation; it never deletes the flag or skips setup checks.
+Keep the running lab unchanged. Obtain separate scope for any deeper diagnosis
+and approval for an appropriate reboot/repair before retrying installation.
 
 ## Directory CLI rejects --subscription
 
@@ -177,6 +202,21 @@ EDR or blindly reinstall a working sensor. Keep timestamped observations separat
 review policy intent and the discrepancy under a new approved diagnostic scope
 before proposing a targeted change. See [lifecycle boundaries](lifecycle.md).
 
+## Linux activation waits behind a VM extension update
+
+After wake, Defender auto-provisioning can leave the MDE extension transitioning
+and other VM extension operations Updating. In the live rehearsal, Linux Run
+Command waited behind that update and reached its 15-minute checked-job timeout
+per VM, even though Heartbeats were fresh and the VM agent reported Ready.
+Activation collects those bounded results per VM, so these waits can dominate
+the wake time. Extension provisioning and direct sensor health are different
+signals; earlier direct checks reported a healthy sensor.
+
+Inspect VM instance view, extension state and exact-ID Heartbeats read-only.
+Do not cancel the update, remove/reinstall Defender, or infer readiness from
+Heartbeat alone. The wait/transport behaviour needs a separate operator decision;
+the weekend rehearsal did not redesign activation or repair the sensor.
+
 ## Arc reconnects after startup, but Windows Heartbeat is still pending
 
 First inspect exact backing-VM power and Arc connection read-only. Overnight
@@ -193,6 +233,14 @@ New ingestion of an old buffered record does not make its `TimeGenerated` fresh.
 If the deadline expires, report the actual missing IDs and inspect evidence;
 do not restart agents or substitute native-VM identities to manufacture success.
 
+## A rapid wake reports a patch assessment already in progress
+
+An earlier assessment can still be running when compute wakes again.
+`OperationConflict` from assessment submission is recorded as
+`already-in-progress`, with a warning; activation continues without retrying or
+cancelling that operation. This is not assessment completion or full readiness.
+Authentication, missing-resource and other submission errors still fail.
+
 ## Activation waits forever or reports success with missing hosts
 
 Old lifecycle scripts compared counts, inferred Windows from `win-*`, ignored
@@ -205,6 +253,27 @@ Resolve its failed checks; do not add unrelated hosts to satisfy a count.
 Do not delete subscription deployment history: missing/ambiguous inventory is an
 activation error requiring reconciliation, not a silent "no VMs" success.
 Parking instead uses actual compute in the explicit infra group.
+
+## Workbook deployment succeeds but content verification fails
+
+A plain ARM workbook GET can return metadata with empty `serializedData`.
+That is not proof the deployment lost its queries. `Set-OperationalWorkbook.ps1`
+requests the [full workbook content](https://learn.microsoft.com/rest/api/application-insights/workbooks/get)
+with `canFetchContent=true` before comparing it with the deployed JSON. It uses
+native REST so Windows CLI URL parsing does not split the query parameters.
+Do not redeploy the whole lab or change telemetry collection for this symptom.
+
+## Capacity workbook has Linux CPU but blank memory or disk
+
+The inspected existing demo stream contained Linux total CPU but no matching
+Linux memory/disk `Perf` or VM Insights samples. Configured DCR counters alone
+are not evidence they have arrived. The optional workbooks retain nulls and
+missing-data warnings rather than deriving zero or safe sizing from CPU.
+Windows `_Total` disk evidence is aggregate; per-volume evidence requires actual
+VM Insights rows. More than 15 minutes stale or low elapsed-window coverage can
+also follow parking; verify existing read-only readiness and timestamps, not an
+assumed agent fault. Do not activate, repair or broaden collection just to fill
+a workbook. See the [coverage rules](runbook.md#optional-capacity-and-optimisation-workbooks).
 
 ## Linux Change Tracking missing despite healthy AMA
 
@@ -237,11 +306,22 @@ Preflight no longer registers providers or skips RBAC for a supplied principal.
 Missing providers, insufficient effective permissions, malformed skins,
 SKU restrictions and insufficient quota terminate with instructions.
 Quota/listing checks are not capacity guarantees.
-Routine redeployment does not reset SP credentials or generate a new password for
+`Deploy-ArcDemo.ps1` does not reset SP credentials or generate a new password for
 existing VMs. Old labs without the saved Key Vault secret need their **current**
 password as `-AdminPassword` (SecureString); an existing SP needed for new
 onboarding needs `-OnboardingSecret`. Obtain the current values from the operator;
 do not rotate them as a shortcut. See [lifecycle semantics](lifecycle.md).
+The [nested build](nested-sql-demo.md) is separate: it needs no vault or supplied
+onboarding secret and creates/removes its own one-day app credential.
+
+## Activate rejects an unused alternative parent as outside the manifest
+
+If a parked alternative SQL parent remains alongside the selected scratch parent,
+Activate correctly refuses to guess its role. Set `operations.keepParkedVmNames`
+in the private skin to its exact name, only when it is already deallocated and
+not part of the active fleet. Activate leaves it parked and readiness checks it;
+unknown, running or missing exclusions still fail explicitly. Do not add it to
+the active manifest or boot its nested guest merely to clear the error.
 
 ## Deploy fails immediately with `SkuNotAvailable`
 
@@ -410,23 +490,67 @@ directory guard above; mismatches stop rather than silently switch accounts.
 
 **Fix** — Use `Invoke-RestMethod` PUT against the policyAssignments REST endpoint directly. The Bicep template in this repo handles this declaratively; if you're tweaking outside the template, the helper pattern is in `Deploy-ArcDemo.ps1`.
 
-## SQL Best Practice Assessment hasn't run yet
+## Real SQL workload has no Arc SQL or BPA experience
 
-This applies only to a **separate, supported SQL lab** using a real non-Azure SQL
-Server host. The default Azure-only demo skips SQL Server, Arc SQL registration,
-and BPA because SQL Server enabled by Azure Arc does not support SQL Server
-running in Azure Virtual Machines as the validation target. See
-[`sql-arc-spike.md`](sql-arc-spike.md).
+The [optional workload](sql-engine-workload.md) demonstrates an actual SQL engine,
+orders database and transaction-derived events, not Arc SQL registration or BPA.
+SQL Server in an Azure VM is not a supported Arc SQL validation target; see
+the [support decision](sql-arc-spike.md). Missing Arc SQL/BPA content is not a
+reason to install its extension, change licence metadata or promise that waiting
+will enable it. Genuine Arc SQL features need a separately approved supported
+non-Azure host. Any pre-existing extension needs reviewed diagnosis, not automatic
+removal or reconfiguration.
 
-**Symptom** — Arc SQL instance is registered, Defender shows protected, but the BPA tile in the Arc SQL portal blade is empty.
+## SQL-only block is effective but two SQL-related extension rows appear
 
-**Cause** — First BPA scan can take 30-60 min after the `WindowsAgent.SqlServer` extension reaches `Succeeded`.
+Observed after real engine installation: `WindowsAgent.SqlServer` was Failed
+with an explicit local-blocklist error, while `MicrosoftDefenderForSQL` was
+Succeeded. The former is a blocked ARM operation, not a successful guest Arc SQL
+installation. The latter is a separate security extension: activity claims and
+a correlated DeployIfNotExists deployment identified an inherited subscription
+security assignment acting on `mssqlDiscovered=true`.
 
-**Fix** — Wait. To verify the extension is healthy:
+Inspect exact publisher/type/state/error, policy assignment/definition and
+available activity evidence read-only. ARM-shaped extension responses expose
+metadata under `.properties`; missing flattened fields are not absence.
+An empty policy-state query does not overturn an actual policy deployment.
+Do not automatically delete the failed row, uninstall/block Defender, alter
+discovery or disable a plan to clear drift. A separately approved normal delete
+of only the Failed Arc SQL row can remain incomplete while disconnected; stop
+without forcing/replaying it, then inspect after separately approved activation.
+Retain required security and obtain policy-owner
+review if an engine-only exception is genuinely necessary. The Arc SQL opt-out
+does not exempt Defender; Succeeded with disconnected/empty sensor status does
+not establish protection or billing. See the [engine-only prerequisites](sql-engine-workload.md#approval-fit-and-media).
 
-```powershell
-az connectedmachine extension show --subscription <SUB> -g rg-arc-demo --machine-name win-sql-01 -n WindowsAgent.SqlServer --query "properties.provisioningState"
-```
+If Arc later reports Disconnected, inspect the exact backing VM power state
+before diagnosing an agent failure. A deallocated VM cannot provide fresh SQL
+or guest telemetry proof; earlier successful installation/Status evidence is
+historical, not permission to activate, reinstall or repair it.
+
+## SQL is queryable after wake but the worker is Ready with stale commits
+
+Observed after normal Arc activation: engine/database queries worked, but
+SQL Status remained pending with the enabled task Ready and only pre-parking
+commits. The boot-triggered task's LastTaskResult was 1; its LastRunTime preceded
+SQL's ready-for-client-connections event by about 151 seconds. This supports a
+startup-order race, not a proven SQL installation or data failure. The exact
+task exception was unavailable because its Operational log was disabled;
+do not enable that log or invent an exception during read-only diagnosis.
+
+Inspect the owned task action/trigger/settings, LastTaskResult/LastRunTime,
+engine service, actual SQL readiness events and owned `6000`/`6200` events.
+The originally installed worker checked engine/database before its
+transaction-loop catch, so absence of `6200` did not prove a successful start.
+The updated source waits within a 600-second startup budget and emits terminal
+`6200` with its failure phase; it does not retry ownership/schema/authentication
+failures. Scheduler restart settings are not evidence that a retry succeeded.
+
+Do not silently start/reset the worker as readiness or activation preparation.
+After diagnosis and separate scoped approval, the owned helper's `-Action Start`
+can start that task without SQL restart or installer replay; require subsequent
+fresh Status pass and actual commit evidence. Updating an installed worker is a separate operation; see
+[updating an existing worker](sql-engine-workload.md#updating-an-existing-owned-worker).
 
 ## Compliance scorecards (MCSB/NIST) are empty
 

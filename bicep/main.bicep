@@ -31,6 +31,10 @@ param deployerPrincipalId string
 @description('Globally-unique Key Vault name (e.g. kv-arcdemo-xxxxxx)')
 param keyVaultName string
 
+@description('Preserve the exact retained vault network mode on reconcile; private bootstrap is an explicit separate phase.')
+@allowed(['Enabled', 'Disabled'])
+param keyVaultPublicNetworkAccess string = 'Enabled'
+
 @description('Admin username for all VMs')
 param adminUsername string = 'azureuser'
 
@@ -289,6 +293,7 @@ module kvMod 'modules/keyvault.bicep' = {
     location: location
     tags: tags
     vaultName: keyVaultName
+    publicNetworkAccess: keyVaultPublicNetworkAccess
     tenantId: tenantId
     deployerPrincipalId: deployerPrincipalId
   }

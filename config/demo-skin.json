@@ -17,8 +17,13 @@
     "deployAzureVMs": false,
     "deployContainerApps": false,
     "deployAks": false,
-    "installSql": false,
     "onPremFleetPath": ""
+  },
+  "nestedSqlGuest": {
+    "enabled": false,
+    "parentVmName": "",
+    "guestVmName": "",
+    "arcMachineName": ""
   },
   "compute": {
     "vmSize": "Standard_B2as_v2",

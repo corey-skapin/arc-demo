@@ -1,0 +1,20 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "name": "capacity-introduction",
+      "content": {
+        "json": "# Capacity and headroom\nUse this after setup without guest login. Compare CPU mean/P95/maximum with memory and disk evidence, then inspect hourly trends. Thresholds are triage heuristics, not sizing recommendations. CPU alone cannot size a server or SQL instance; review concurrency, latency, I/O, working set and business cycles separately.\n\nOne row per exact resource ID/metric/volume. Parent, guest and standalone are operator-declared topology, not discovered hardware capacity. Unclassified stays explicit. Never sum parent and guest CPU/memory/disk or infer physical capacity from this view. SQL host counters are not SQL engine capacity evidence.\n\nMissing values remain blank, never zero. Coverage counts observed one-minute bins over the entire elapsed window (including parking); it is not uptime or agent availability. Freshness >15m, <24h history and <80% coverage warn explicitly. Disk Delta is last minus first free-space percentage points, not a forecast; `_Total (aggregate)` is not per-volume evidence. Queries use existing Perf/InsightsMetrics only; no new collection or retention."
+      }
+    },
+    { "type": 9, "name": "window", "content": { "version": "KqlParameterItem/1.0", "parameters": [
+      { "id": "window-hours", "name": "LookbackHours", "label": "Elapsed history window", "type": 2, "isRequired": true, "value": "168", "jsonData": "[{\"value\":\"24\",\"label\":\"24 hours\"},{\"value\":\"168\",\"label\":\"7 days\"},{\"value\":\"720\",\"label\":\"30 days\"}]" }
+    ] } },
+    { "type": 3, "name": "capacity-evidence", "content": { "version": "KqlItem/1.0", "title": "Capacity evidence and missing-data warnings", "query": "__SUMMARY__", "size": 0, "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "visualization": "table" } },
+    { "type": 3, "name": "capacity-trend", "content": { "version": "KqlItem/1.0", "title": "Hourly evidence (separate units and volumes; absent hours stay absent)", "query": "__TREND__", "size": 0, "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "visualization": "table" } },
+    { "type": 1, "name": "scope-note", "content": { "json": "__SCOPE_NOTE__" } }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": []
+}

@@ -12,6 +12,18 @@ the configured legacy OS mix. SQL-capable host names are not a SQL workload
 benchmark or proof of Arc SQL support. Do not remove host roles, Defender,
 patching, Change Tracking or alert data to make a smaller bill look equivalent.
 
+The optional [real SQL Developer workload](sql-engine-workload.md) adds no new VM
+or disk through its helper and is nonproduction-only, not a free all-in SQL lab.
+Account for media/setup and system/database footprint on the retained disk,
+existing VM uptime/CPU/I/O and roughly one added healthy event per minute when
+its narrow collection is approved. The 512-MB buffer-pool cap is not total SQL
+process RAM; demo database-file caps do not cap installer/system-database usage.
+Hibernate retains the installed engine/data and existing storage charges.
+The optional SQL incident adds an active one-minute scheduled log alert plus
+two events per successful probe; hibernation retains that alert and its charges.
+Price the selected rule/region/notifications separately rather than treating
+the self-recovering incident or automatic investigation as free.
+
 The observed eight-host lab already uses Standard HDD OS disks: five 127 GiB
 Windows disks and three 30 GiB Linux disks. Its successful warm activation and
 fresh 79-check Monitor snapshot show that this tier can support the current

@@ -1,7 +1,7 @@
 # Arc demo module map
 
 **Engineering reference, not presenter reading.** This is the maintained surface map;
-dated observations below are not current health proof. Line numbers are intentionally omitted
+source and mocked tests do not prove current health. Line numbers are intentionally omitted
 because they become stale as the scripts evolve. For safe operations and the
 readiness contract, see [lifecycle.md](lifecycle.md).
 
@@ -22,6 +22,7 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 | `bicep/modules/defender.bicep` | Subscription Defender for Servers P2 |
 | `bicep/modules/policy.bicep` | Named MCSB/NIST assignments |
 | `bicep/modules/budget.bicep` | Named budget filtered to demo RGs, notification thresholds |
+| `bicep/modules/operational-workbook.bicep` | Optional standalone shared workbook only; existing workspace, deterministic owned ID, no workload/telemetry changes |
 
 Fresh deployment creates NAT/PIP; hibernation deletes them and activation
 recreates them. A routine Bicep rerun preserves an existing gateway. The backing compute is an Azure-hosted simulation;
@@ -32,14 +33,24 @@ the customer-facing Arc records and observability plane are in the other group.
 | Entry point | Responsibility |
 |---|---|
 | `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions/baseline provider checks |
+| `scripts/New-NestedSqlDemoGuest.ps1`, `Connect-NestedSqlDemoGuest.ps1`, `Install-NestedSqlDemoEngine.ps1` | Primary scratch Windows/SQL/Arc guest build; private credentials and approved media |
+| `scripts/New-NestedSqlDemo.ps1`, `Invoke-NestedSqlDemoStep.ps1`, `scripts/lib/NestedSqlDemo.psm1` | Working build sequence, protected parent-side step transport and retained Windows answer-file generator; no retired V1-V3 controller layers |
+| `scripts/Test-NestedSqlDemoGuest.ps1`, `Enable-NestedSqlDemoExtension.ps1`, `Remove-NestedSqlDemoGuest.ps1` | Actual guest/SQL checks, Arc SQL extension and explicit scratch-guest teardown |
+| `scripts/Install-ArcSqlDemoExtension.ps1`, `Test-ArcSqlDemoInventory.ps1`, `Remove-NestedSqlDemo.ps1` | LicenseOnly extension, actual Azure SQL/database inventory and exact guest/Arc/SQL teardown |
+| `scripts/Set-NestedSqlDemoState.ps1` | Optional parent/guest-only park/wake, using the same skin and Common guest helper; retains shared network and other workloads |
+| `.github/workflows/lint.yml` Windows job | Executes nested guest and real SQL regressions with mocked Windows APIs |
 | `scripts/Deploy-ArcDemo.ps1` | Selected-provider and SKU/quota checks; Bicep preview/create; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness |
 | `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL from the single tracked `docs/runsheet.md` template; no Azure calls or lifecycle changes |
-| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads/reconnect where needed, optional asynchronous patch submission, readiness |
+| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads/reconnect where needed, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness |
 | `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; optional identity/Defender changes |
 | `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table; Active (Ready alias), compute-only Hibernated with network cost diagnostics, Removed; bounded retries, exit 0/1/2 |
 | `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, `@file` guest-script transport/markers, capacity/quota, readiness checks |
+| `Get-DemoNestedSqlGuestConfig`, `Invoke-DemoNestedSqlGuest`, `Wait-DemoNestedSqlArcConnected` in `Common.psm1`, `tests/NestedSqlLifecycle.Tests.ps1` | One skin-defined nested guest, normal graceful shutdown/start and bounded Arc connection wait across Activate/Hibernate/Remove |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
+| `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved ISO/hash/terms, isolated local instance, bounded database/startup, phase-specific terminal errors and hash-checked worker ownership; no Arc SQL or automatic reboot/repair; independent policy-deployed Defender is not removed or disabled |
+| `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; SQL incident uses owned sessions/probe, rollback and transaction-derived events, not synthetic SQL proof or SRE remediation |
+| `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1` | Default read-only preview/scoped approved publication; exact Arc roster, optional declared topology, ownership guards, hypothetical one-resource decimal scenario, no lifecycle/collection actions |
 
 All four lifecycle/deployment scripts require explicit subscription/tenant and
 support ShouldProcess. Missing explicitly supplied skins are errors except approved parking with an
@@ -86,6 +97,15 @@ collection provide the presenter surfaces. `docs/runsheet.md` keeps the
 20-30 minute standalone Arc/Monitor story. SRE Agent is an optional later layer
 consuming the same alerts, not a prerequisite or replacement.
 
+`workbooks/capacity-headroom.workbook.json`,
+`workbooks/optimisation-opportunities.workbook.json` and shared
+`workbooks/queries/operational-*.kql` provide optional existing-telemetry review.
+The single presenter template accepts actual published optional links; missing
+or stale telemetry stays explicit and parent/guest rows are never totalled.
+`tests/OperationalWorkbooks.Tests.ps1` covers scope/preview/scenario behavior;
+`tests/OperationalWorkbookQueries.Tests.ps1` explicitly opts into read-only
+execution of deterministic literal-table fixtures, not a live fault or ingestion.
+
 `tests/Lifecycle.Tests.ps1` exercises waits, errors, config, mixed/native
 classification, retained additive manifests, ShouldProcess previews, guest/job
 failures and the JSON/exit-code contract without a cloud deployment.
@@ -94,42 +114,3 @@ conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile
 and advisory documentation lint. Inspect the Markdown log rather than treating
 the job's success alone as lint-clean. Pester is development-only.
-
-## Dated operational evidence (not presenter material)
-
-These observations belong here rather than in AGENTS.md. Raw targets, timestamps,
-logs and results stay in private operator evidence. They describe earlier merged
-source, **not live validation of the best-effort/concurrent refactor**.
-
-- **Linux monitoring reconciliation:** approved VM-path Change Tracking produced
-  guest success and fresh CT records on three Linux hosts without reboot.
-  Stuck Arc extensions were not deleted. DCRAs remained on Arc IDs; Linux
-  Dependency Agent/VM Insights stayed disabled. This verifies that repair only,
-  not generic extension support on simulated Arc-enabled Azure VMs.
-- **Linux endpoint-protection diagnosis:** direct sensors were healthy/licensed
-  but passive, with real-time protection disabled and engine not loaded.
-  Extension event-provider issues differed from newer direct sensor health.
-  Neither Monitor readiness nor a Succeeded extension proved active AV/full EDR;
-  no AV policy change or manual MDE repair followed from those observations.
-- **20 October 2026 rehearsal:** eight exact VM/Arc/Heartbeat identities and
-  all 79 then-current infrastructure/Monitor checks passed. Windows telemetry
-  followed Arc reconnection without repair. This was a dated snapshot.
-- **21 October activation retry:** all eight guest checks passed without
-  unnecessary service restarts; eight patch assessments were submitted and
-  independent readiness passed with fresh exact-ID Heartbeats and healthy
-  non-faulted ACA. It reused already-running compute/network after an earlier
-  Windows service-name check failure; it was not fresh cold-start validation.
-- **22 October cold start/recovery:** absent-NAT null parsing and standalone
-  WhatIf stderr capture defects were corrected. A later Windows AMA guard
-  expired before natural MonAgentCore startup around five minutes after boot;
-  read-only diagnosis found convergence, not a durable agent defect. A released
-  normal retry passed guest checks and independent Active readiness without
-  repair, timeout inflation or assessments on already-active hosts.
-- **22 October cost parking:** after the companion SRE layer parked, approved
-  normal Arc Hibernate completed and independent cost-state/retained-ID checks
-  passed. The estate was parked, not left Active with an incident still running.
-  This is historical completion, not permission for another cloud read or run.
-
-Fresh deployment, double-deploy, AKS park/start and teardown/recreate are separate
-unverified exercises. See [the proposed disposable smoke cycle](cost.md#proposed-disposable-smoke-cycle-not-executed)
-for approval scope and qualified cost. Retained storage/logs/alerts may still bill.

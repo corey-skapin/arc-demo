@@ -28,10 +28,12 @@ Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
 $skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
 if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
 if (-not $PSBoundParameters.ContainsKey('Location')) { $Location = Get-DemoSkinValue $skin 'azure.location' $Location }
+$nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
 Assert-DemoName $NamePrefix
 if ($SkipPatchAssessment -and $AssessPatches) { throw 'AssessPatches and SkipPatchAssessment cannot both be supplied.' }
 Initialize-DemoContext $SubscriptionId $TenantId
-$inventory = Get-DemoInventory $NamePrefix
+$inventory = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' }) `
+    -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
 Assert-DemoSkinInventory $skin $inventory
 $missing = @($inventory.Machines | Where-Object { -not $_.Actual })
 if ($missing) { throw "Missing expected VMs: $($missing.Name -join ', '). Reconcile deployment before activation." }
@@ -84,6 +86,12 @@ try {
         @($inventory.Machines | Where-Object { $_.Id -notin @($vms | Where-Object powerState -eq 'VM running' | ForEach-Object id) }).Count -eq 0
     } | Out-Null
 
+    if ($nestedSqlGuest) {
+        $parent = $inventory.Machines | Where-Object Name -ceq $nestedSqlGuest.ParentVmName | Select-Object -First 1
+        if (-not $parent) { throw 'Configured nested SQL parent was not found in the retained inventory.' }
+        Invoke-DemoNestedSqlGuest -ParentMachine $parent -GuestVmName $nestedSqlGuest.GuestVmName -Action Start
+        Wait-DemoNestedSqlArcConnected -ArcResourceGroup $inventory.ArcRg -ArcMachineName $nestedSqlGuest.ArcMachineName
+    }
     foreach ($id in $inventory.AksClusterIds) {
         $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
         if ($cluster.provisioningState -eq 'Starting') { continue }
@@ -165,11 +173,19 @@ while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonA
         foreach ($machine in $inventory.Machines | Where-Object { -not $_.Native -and ($AssessPatches -or $_.Id -in $startedVmIds) }) {
             $assessment = [ordered]@{ machineName = $machine.Name; resourceId = $machine.ArcId; status = 'pending' }
             $result.patchAssessments += $assessment
-            Invoke-DemoAz -Arguments @('connectedmachine', 'assess-patches', '--ids', $machine.ArcId, '--no-wait', '-o', 'none') | Out-Null
-            $assessment.status = 'submitted'
-            Write-Ok "Patch assessment submitted: $($machine.Name)"
+            try {
+                Invoke-DemoAz -Arguments @('connectedmachine', 'assess-patches', '--ids', $machine.ArcId, '--no-wait', '-o', 'none') | Out-Null
+                $assessment.status = 'submitted'
+                Write-Ok "Patch assessment submitted: $($machine.Name)"
+            } catch {
+                if ($_.Exception.Message -notmatch '\bERROR:\s*\(OperationConflict\)') { throw }
+                $assessment.status = 'already-in-progress'
+                $assessment['message'] = 'An assess/patch operation is already running; no retry or cancellation. Completion is not verified.'
+                Write-Warning "$($machine.Name): $($assessment.message)"
+            }
         }
-        $result.patchAssessment = if ($result.patchAssessments.Count) { 'submitted' } else { 'not-required' }
+        $result.patchAssessment = if (@($result.patchAssessments | Where-Object status -eq 'submitted').Count) { 'submitted' }
+            elseif ($result.patchAssessments.Count) { 'already-in-progress' } else { 'not-required' }
     }
     if (-not $SkipValidate) {
         $ready = & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -OutputFormat Json | ConvertFrom-Json

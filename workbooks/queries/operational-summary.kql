@@ -1,0 +1,35 @@
+let Observed = Samples
+| summarize Samples = countif(isnotnull(Value)), InvalidSamples = countif(Invalid),
+    Mean = avg(Value), P95 = percentile(Value, 95), Maximum = max(Value), Minimum = min(Value),
+    FirstSeen = minif(TimeGenerated, isnotnull(Value)), LastSeen = maxif(TimeGenerated, isnotnull(Value)),
+    Sources = make_set(Source, 4)
+    by ResourceId, Metric, Instance;
+let Minutes = Samples
+| where isnotnull(Value)
+| summarize by ResourceId, Metric, Instance, Minute = bin(TimeGenerated, 1m)
+| summarize ObservedMinutes = count() by ResourceId, Metric, Instance;
+let Edges = Samples
+| where isnotnull(Value)
+| summarize arg_min(TimeGenerated, Value), arg_max(TimeGenerated, Value) by ResourceId, Metric, Instance
+| project ResourceId, Metric, Instance, FirstValue = Value, LastValue = Value1;
+let Expected = Machines | extend JoinKey = 1
+| join kind=inner (datatable(Metric:string)["CPU percent", "Available MB", "Committed percent", "Disk free percent"] | extend JoinKey = 1) on JoinKey
+| project ResourceId, Machine, Layer, ParentResourceId, Metric;
+let Summary = Expected
+| join kind=leftouter Observed on ResourceId, Metric
+| join kind=leftouter Minutes on ResourceId, Metric, Instance
+| join kind=leftouter Edges on ResourceId, Metric, Instance
+| extend Mean = iff(isnan(Mean), real(null), Mean)
+| extend CoveragePercent = round(100.0 * coalesce(ObservedMinutes, 0) / (1 + datetime_diff("minute", bin(WindowEnd, 1m), bin(WindowStart, 1m))), 1),
+    AgeMinutes = datetime_diff("minute", WindowEnd, LastSeen),
+    HistoryHours = round(toreal(datetime_diff("minute", LastSeen, FirstSeen)) / 60.0, 1),
+    Delta = LastValue - FirstValue
+| extend Evidence = case(InvalidSamples > 0, "Invalid samples - investigate",
+    isnull(Samples) or Samples == 0, "Missing data - not zero",
+    AgeMinutes > 15, "Stale - parked or collection gap; verify state",
+    HistoryHours < 24, "Insufficient history (<24h)",
+    CoveragePercent < 80, "Gaps (<80% elapsed-window minutes); no continuity claim",
+    "Covered window - still review workload context")
+| project ResourceId, Machine, Layer, ParentResourceId, Metric, Instance, Mean, P95, Maximum, Minimum,
+    FirstValue, LastValue, Delta, Samples, InvalidSamples, ObservedMinutes, CoveragePercent, FirstSeen, LastSeen,
+    AgeMinutes, HistoryHours, Evidence, Sources;

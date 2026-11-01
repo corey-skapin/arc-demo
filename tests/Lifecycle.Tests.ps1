@@ -46,6 +46,14 @@ Describe 'Skin and fleet validation' {
         Get-DemoSkinValue $skin 'azure.namePrefix' '' | Should -Be 'retail-demo'
         Get-DemoSkinValue $skin 'workloads.deployAks' $true | Should -BeFalse
     }
+    It 'rejects malformed or duplicate keep-parked names' -TestCases @(
+        @{ Names = '"image-parent"' }, @{ Names = '["image-parent","IMAGE-parent"]' },
+        @{ Names = '[null]' }, @{ Names = '["../foreign"]' }
+    ) {
+        param($Names)
+        Set-Content (Join-Path $TestDrive 'parked.json') ('{"schemaVersion":1,"operations":{"keepParkedVmNames":' + $Names + '}}')
+        { Get-DemoSkin -Path 'parked.json' -RepoRoot $TestDrive } | Should -Throw '*keepParkedVmNames*'
+    }
     It 'preserves native JSON dictionaries, arrays and false overrides' {
         Set-Content (Join-Path $TestDrive 'nested.json') '{"schemaVersion":1,"workloads":{"deployAks":false},"compute":{"sizes":["first","second"]},"tags":{"role":"fixture"}}'
         $skin = Get-DemoSkin -Path 'nested.json' -RepoRoot $TestDrive
@@ -123,12 +131,14 @@ Describe 'Narrow LOB heartbeat collection' {
         . ([scriptblock]::Create($function.Extent.Text))
         $body = New-CoreDcrBody -Location 'australiaeast' -Tags @{ purpose = 'fixture' } -WorkspaceId '/fixture/workspace' -WorkspaceName 'law-fixture'
     }
-    It 'collects only the LOB informational heartbeat alongside existing event selectors' {
+    It 'collects only source-specific LOB and real SQL informational heartbeats alongside existing selectors' {
         $sources = @($body.properties.dataSources.windowsEventLogs)
         $sources.Count | Should -Be 1
         $sources[0].streams | Should -Be @('Microsoft-Event')
-        $sources[0].xPathQueries.Count | Should -Be 4
+        $sources[0].xPathQueries.Count | Should -Be 6
         $sources[0].xPathQueries | Should -Contain "Application!*[System[Provider[@Name='ArcLobBridgeApp'] and (EventID=4000) and (Level=4)]]"
+        $sources[0].xPathQueries | Should -Contain "Application!*[System[Provider[@Name='ArcSqlEngineDemo'] and (EventID=6000) and (Level=4)]]"
+        $sources[0].xPathQueries | Should -Contain "Application!*[System[Provider[@Name='ArcSqlEngineDemo'] and (EventID=6001) and (Level=4)]]"
         $sources[0].xPathQueries | Should -Contain 'Application!*[System[(Level=1 or Level=2 or Level=3)]]'
         $sources[0].xPathQueries | Should -Contain 'System!*[System[(Level=1 or Level=2 or Level=3)]]'
         $sources[0].xPathQueries | Should -Contain 'Security!*[System[(band(Keywords,4503599627370496))]]'
@@ -210,6 +220,30 @@ Describe 'Retained workload identity classification' {
         It 'rejects unknown VMs for strict activation inventory' {
             $script:vmFixtures += @{ name = 'foreign-01'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/foreign-01" }
             { Get-DemoInventory 'retail-demo' } | Should -Throw '*ambiguous fleet*'
+        }
+        It 'keeps only an explicitly named deallocated extra VM out of the active fleet' {
+            $script:vmFixtures += @{ name = 'image-parent'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/image-parent"; powerState = 'VM deallocated' }
+            $inventory = Get-DemoInventory retail-demo -KeepParkedVmNames image-parent
+            $inventory.Machines.Count | Should -Be 2
+            $inventory.ParkedMachines.Name | Should -Be 'image-parent'
+            $inventory.ParkedMachines.KeepParked | Should -BeTrue
+        }
+        It 'rejects a keep-parked VM that is <State>' -TestCases @(
+            @{ State = 'VM running' }, @{ State = 'VM stopped' }, @{ State = '' }
+        ) {
+            param($State)
+            $script:vmFixtures += @{ name = 'image-parent'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/image-parent"; powerState = $State }
+            { Get-DemoInventory retail-demo -KeepParkedVmNames image-parent } | Should -Throw '*must exist*deallocated*'
+        }
+        It 'rejects missing keep-parked VMs, active-fleet conflicts and unsafe names' {
+            { Get-DemoInventory retail-demo -KeepParkedVmNames missing } | Should -Throw '*must exist*'
+            { Get-DemoInventory retail-demo -KeepParkedVmNames branch-01 } | Should -Throw '*outside the active*'
+            { Get-DemoInventory retail-demo -KeepParkedVmNames '../foreign' } | Should -Throw '*valid*'
+        }
+        It 'does not let an explicit keep-parked VM hide another unknown VM' {
+            $script:vmFixtures += @{ name = 'image-parent'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/image-parent"; powerState = 'VM deallocated' }
+            $script:vmFixtures += @{ name = 'foreign'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/foreign" }
+            { Get-DemoInventory retail-demo -KeepParkedVmNames image-parent } | Should -Throw '*ambiguous fleet*'
         }
         It 'rejects OS drift between the manifest and actual VM' {
             $script:vmFixtures[0].storageProfile.osDisk.osType = 'Linux'
@@ -393,6 +427,7 @@ Describe 'WhatIf lifecycle safety' {
             param($Arguments)
             if ($Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return 'preview' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -in @('keyvault', 'network', 'consumption')) { return $null }
             throw "Unexpected preview operation: $($Arguments[0..1] -join ' ')"
@@ -408,10 +443,11 @@ Describe 'WhatIf lifecycle safety' {
             param($Arguments)
             if ($Arguments[0] -eq 'vm') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
-            if ($Arguments[0] -eq 'deployment') {
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') {
                 $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
                 $global:ArcDiskPreview = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
         }
         try {
             & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -OsDiskStorageAccountType Standard_LRS -WhatIf
@@ -437,10 +473,11 @@ Describe 'WhatIf lifecycle safety' {
             }
             if ($Arguments[0] -eq 'disk') { return 'Standard_LRS' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
-            if ($Arguments[0] -eq 'deployment') { throw 'must not reach template preview' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { throw 'must not reach template preview' }
         }
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -DeployAzureVMs $true -WhatIf } | Should -Throw '*tier mismatch*'
-        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'deployment' }
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if' }
     }
     It 'preserves Container App fault and skips AKS sample bootstrap in a redeploy preview' {
         Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
@@ -451,10 +488,11 @@ Describe 'WhatIf lifecycle safety' {
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -eq 'aks') { return '{"powerState":{"code":"Running"},"provisioningState":"Succeeded"}' }
             if ($Arguments[0] -eq 'containerapp') { return '{"properties":{"template":{"containers":[{"env":[{"name":"SIMULATE_CRASH","value":"true"}]}]}}}' }
-            if ($Arguments[0] -eq 'deployment') {
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') {
                 $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
                 $global:ArcPreviewParameters = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
         }
         try {
             & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -DeployContainerApps $true -DeployAks $true -WhatIf
@@ -463,6 +501,45 @@ Describe 'WhatIf lifecycle safety' {
         } finally {
             Remove-Variable ArcPreviewParameters -Scope Global -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Describe 'Retained vault deployment selection' {
+    BeforeEach {
+        Mock Import-Module {}
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
+        Mock Test-DemoComputeCapacity {}
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'list') { return '[{"name":"kv-fixture-old"},{"name":"kv-fixture-current"}]' }
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'show') {
+                return '{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.KeyVault/vaults/kv-fixture-current","properties":{"publicNetworkAccess":"Disabled"}}'
+            }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') {
+                return '[{"properties":{"provisioningState":"Succeeded","timestamp":"2026-01-02","outputs":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-current"}}}},{"properties":{"provisioningState":"Succeeded","timestamp":"2026-01-01","outputs":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-old"}}}}]'
+            }
+            if ($Arguments[0] -eq 'vm') { return '[]' }
+            if ($Arguments[0] -eq 'network' -or $Arguments[0] -eq 'consumption') { return $null }
+            if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') {
+                $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
+                $global:ArcVaultPreview = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+                return
+            }
+            throw 'Unexpected operation in vault selection preview.'
+        }
+    }
+    AfterEach { Remove-Variable ArcVaultPreview -Scope Global -ErrorAction SilentlyContinue }
+    It 'preserves the latest exact-estate vault and its disabled public access, not first prefix match' {
+        & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix fixture -AdminEmail 'test@example.com' -WhatIf
+        $global:ArcVaultPreview.parameters.keyVaultName.value | Should -Be 'kv-fixture-current'
+        $global:ArcVaultPreview.parameters.keyVaultPublicNetworkAccess.value | Should -Be 'Disabled'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'secret' }
+    }
+    It 'blocks ambiguous retained vaults instead of choosing one' {
+        Mock Invoke-DemoAz { '[]' } -ParameterFilter { $Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list' }
+        { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix fixture -AdminEmail 'test@example.com' -WhatIf } | Should -Throw '*no canonical*'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if' }
     }
 }
 
@@ -562,7 +639,8 @@ Describe 'Activation with the real optional-network preflight' {
             Mock Get-DemoInventory {
                 $f = $global:ArcLifecycleFixture
                 [pscustomobject]@{ Machines = @($f.machine); ArcRg = 'rg-retail-demo'; InfraRg = 'rg-retail-demo-infra'
-                    ContainerAppIds = @($f.appIds | Where-Object { $_ }); AksClusterIds = @("$($f.root)/Microsoft.ContainerService/managedClusters/retail-demo-aks"); Resources = $f.resources }
+                    ContainerAppIds = @($f.appIds | Where-Object { $_ }); AksClusterIds = @("$($f.root)/Microsoft.ContainerService/managedClusters/retail-demo-aks"); Resources = $f.resources
+                    ParkedMachines = @($f.parkedMachines | Where-Object { $_ }) }
             }
             Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/id' 'parked' 'parked' 'pass' }
             Mock Get-DemoNetworkState {
@@ -602,6 +680,16 @@ Describe 'Activation with the real optional-network preflight' {
             Should -Invoke Invoke-DemoGuestCommand -Times 1 -ParameterFilter { $AsJob -and $Script -match 'MonAgentCore' -and $Script -notmatch 'Restart-Service|AzureMonitorAgent' }
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'start' -in $Arguments -or 'create' -in $Arguments -or 'update' -in $Arguments }
             Should -Invoke Invoke-DemoAz -Times 2 -Exactly -ParameterFilter { $Arguments[0] -eq 'aks' -and '-g' -in $Arguments -and '-n' -in $Arguments -and '--ids' -notin $Arguments }
+        }
+        It 'never starts or invokes a guest command on an explicit keep-parked VM' {
+            $f = $global:ArcLifecycleFixture
+            $f.parkedMachines = @([pscustomobject]@{ Name = 'image-parent'; Id = "$($f.root)/Microsoft.Compute/virtualMachines/image-parent"
+                KeepParked = $true; Actual = @{ powerState = 'VM deallocated' } })
+            Mock Get-DemoSkin { @{ operations = @{ keepParkedVmNames = @('image-parent') } } }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            Should -Invoke Get-DemoInventory -Times 1 -ParameterFilter { $KeepParkedVmNames -contains 'image-parent' }
+            Should -Invoke Invoke-DemoGuestCommand -Times 0 -ParameterFilter { $Machine.Name -eq 'image-parent' }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { ($Arguments -join ' ') -match 'image-parent' }
         }
         It 'validates a connected Windows Arc host without resubmitting assessments on an already-active retry' {
             $f = $global:ArcLifecycleFixture
@@ -726,6 +814,38 @@ Describe 'Activation with the real optional-network preflight' {
             $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
             & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -AssessPatches
             Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' -and '--no-wait' -in $Arguments }
+        }
+        It 'records an already-running assessment and continues a default wake without retrying' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            $f.machine.Actual.powerState = 'VM deallocated'
+            Mock Invoke-DemoAz { $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM running' } -ParameterFilter { $Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'start' }
+            Mock Invoke-DemoAz { throw "Azure CLI connectedmachine assess-patches failed (exit 1): WARNING: subscription ignored`nERROR: (OperationConflict) Assess or Patch operation is already running on this resource." } -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+            $path = Join-Path $TestDrive 'assessment-already-running.json'
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -ResultPath $path -WarningVariable warnings
+            $report = Get-Content $path -Raw | ConvertFrom-Json
+            $report.status | Should -Be pass
+            $report.patchAssessment | Should -Be 'already-in-progress'
+            $report.patchAssessments[0].status | Should -Be 'already-in-progress'
+            $report.patchAssessments[0].message | Should -Match 'Completion is not verified'
+            ($warnings -join ' ') | Should -Match 'already running'
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+        }
+        It 'does not swallow assessment <Code> errors or an incidental conflict mention' -TestCases @(
+            @{ Code = 'AuthorizationFailed' }, @{ Code = 'ResourceNotFound' }, @{ Code = 'InternalServerError' }
+        ) {
+            param($Code)
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            Mock Invoke-DemoAz { throw "ERROR: ($Code) Real failure; diagnostic text mentions (OperationConflict)." } -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+            $path = Join-Path $TestDrive 'assessment-real-error.json'
+            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -AssessPatches -SkipValidate -ResultPath $path } | Should -Throw "*$Code*"
+            $report = Get-Content $path -Raw | ConvertFrom-Json
+            $report.status | Should -Be fail
+            $report.patchAssessments[0].status | Should -Be fail
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
         }
         It 'assesses a newly started Arc host by default' {
             $f = $global:ArcLifecycleFixture
@@ -1272,6 +1392,18 @@ Describe 'Readiness CLI contract' {
                 $check = Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Hibernated | Where-Object id -like 'vm/*'
                 $check.status | Should -Be 'fail'
                 $check.message | Should -Match 'unknown'
+            }
+            It 'requires explicitly kept-parked machines to remain deallocated during Active readiness' {
+                $script:parkedInventory.Machines = @()
+                $script:parkedInventory | Add-Member ParkedMachines @([pscustomobject]@{
+                    Name = 'image-parent'; Id = '/vm/image-parent'; KeepParked = $true; Actual = @{ powerState = 'VM deallocated' }
+                })
+                $check = Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Active | Where-Object id -like 'vm/*'
+                $check.expected | Should -Be 'VM deallocated'
+                $check.status | Should -Be pass
+                $script:parkedInventory.ParkedMachines[0].Actual.powerState = 'VM running'
+                $check = Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Active | Where-Object id -like 'vm/*'
+                $check.status | Should -Be pending
             }
         }
     }

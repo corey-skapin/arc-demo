@@ -28,10 +28,14 @@ exists. Leave the lab unchanged at the end.
   on-premises infrastructure or blanket support validation.
 - Arc identities, workspace, DCRs, workbooks, alerts, Change Tracking,
   VM Insights, Update Manager and security/governance configuration.
-- Optional LOB sample, Azure-native VM, Container App, AKS and SQL-shaped
-  simulator. Source presence does not mean these apps are installed or healthy.
+- Optional LOB sample, [real SQL workload](docs/sql-engine-workload.md),
+  Azure-native VM, Container App and AKS. Source presence does not prove installation/health.
+- Optional [nested SQL/Arc demo](docs/nested-sql-demo.md): proven scratch Windows
+  guest build, SQL Developer, Arc connection and config-driven park/wake/remove.
 
-SQL Server/Arc SQL/BPA is skipped by default. Linux dependency mapping is off.
+SQL preparation is separate and optional; the base Azure-VM simulation keeps
+Arc SQL/BPA off. The genuine nested guest has its own explicit extension step.
+Linux dependency mapping is off.
 Monitor readiness does not establish active antivirus, full EDR, patch completion
 or application health. See [support boundaries](docs/lifecycle.md).
 
@@ -40,6 +44,7 @@ or application health. See [support boundaries](docs/lifecycle.md).
 | Need | Reference |
 |---|---|
 | Build, prepare the presenter guide, or operate an existing lab | [Runbook](docs/runbook.md) |
+| Build, park, wake or remove the nested SQL guest | [Short nested SQL runbook](docs/nested-sql-demo.md) |
 | Activate, park, remove, retry or understand readiness | [Lifecycle contract](docs/lifecycle.md) |
 | Investigate a symptom | [Troubleshooting](docs/troubleshooting.md) |
 | Costs and retained charges | [Cost reference](docs/cost.md) |
