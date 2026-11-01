@@ -98,15 +98,6 @@
 .PARAMETER BudgetAmount
     Monthly budget threshold in subscription currency. Default 200.
 
-.PARAMETER InstallSql
-    Retired mixed SQL/Arc SQL path. Enabling it fails before deployment.
-    Use Invoke-SqlEngineOnArc.ps1 for separately approved real SQL preparation,
-    without Arc SQL extension/licensing/BPA features.
-
-.PARAMETER SkipSqlInstall
-    Deprecated compatibility switch. The default path already skips SQL; keep
-    this only for older automation that explicitly passes it.
-
 .PARAMETER WhatIf
     Show the Bicep what-if output and stop.
 
@@ -136,9 +127,7 @@ param(
     [int]$BudgetAmount = 200,
     [string]$SkinPath = '',
     [securestring]$AdminPassword,
-    [securestring]$OnboardingSecret,
-    [switch]$InstallSql,
-    [switch]$SkipSqlInstall
+    [securestring]$OnboardingSecret
 )
 
 $ErrorActionPreference = 'Stop'
@@ -166,16 +155,6 @@ Assert-DemoName $NamePrefix
 if ($Location -notmatch '^[a-z0-9]+$') { throw 'Location must be an Azure region name.' }
 if ($AutoShutdownTime -notmatch '^([01][0-9]|2[0-3])[0-5][0-9]$') { throw 'AutoShutdownTime must be HHmm.' }
 if ($BudgetAmount -lt 1) { throw 'BudgetAmount must be positive.' }
-if ($PSBoundParameters.ContainsKey('InstallSql') -and $PSBoundParameters.ContainsKey('SkipSqlInstall')) {
-    throw 'Use only one of -InstallSql or -SkipSqlInstall. The legacy mixed SQL installation path is retired.'
-}
-$defaultInstallSql = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.installSql' -Default (-not [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.skipSqlInstall' -Default $true)))
-if ($PSBoundParameters.ContainsKey('SkipSqlInstall')) {
-    $InstallSql = -not [bool]$SkipSqlInstall
-} elseif (-not $PSBoundParameters.ContainsKey('InstallSql')) {
-    $InstallSql = [switch]$defaultInstallSql
-}
-if ($InstallSql) { throw 'The mixed InstallSql/Arc SQL path is retired. Use Invoke-SqlEngineOnArc.ps1 with approved SQL 2022 Developer media/licence consent; no Arc SQL extension or BPA is permitted in this lab.' }
 if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
     throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
 }

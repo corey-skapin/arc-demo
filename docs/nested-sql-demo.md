@@ -15,10 +15,14 @@ The normal fleet's `MSFT_ARC_TEST=true` simulation is a separate path.
 ## Prepare once
 
 Keep the existing Windows Hyper-V parent, switch/NAT, mounted Windows Server 2022
-and SQL Server 2022 media, and private Arc onboarding secret. Do not rotate
-credentials, change Defender policy/pricing, or rebuild a retained parent to wake
-the guest. The parent needs sufficient memory, nested-virtualization support and
-space for the guest's 64-GiB OS and 32-GiB data disks.
+and SQL Server 2022 media, and the onboarding application with its approved
+permissions. Each build adds a uniquely named one-day application credential,
+delivers it only through the protected Connect parameter, and removes that
+credential in `finally`, verifying the pre-build key IDs are unchanged. No vault
+or private-endpoint inputs are needed. Do not rotate existing credentials,
+change Defender policy/pricing, or rebuild a retained parent to wake the guest.
+The parent needs sufficient memory, nested-virtualization support and space for
+the guest's 64-GiB OS and 32-GiB data disks.
 
 Copy the selected skin to `.local\demo-skin.json`; set its `azure.namePrefix` to
 the actual demo prefix and enable:
@@ -39,9 +43,10 @@ state helper. Both bundled skins leave it disabled.
 Put the build's nonsecret arguments in `.local\nested-sql-build.json`: explicit
 `SubscriptionId`, `TenantId`, retained `ParentVmId`, `Location`, parent-side
 `WindowsIsoPath` and `SqlIsoPath`, `SwitchName`, `GuestAddress`, `Gateway`,
-`DnsServer`, `OnboardingApplicationId`, exact `SecretVersionUri`, and
-`VaultPrivateAddress`. All IDs, addresses, media paths and results stay outside
-git. `Get-Help .\scripts\New-NestedSqlDemo.ps1 -Full` lists these inputs.
+`DnsServer`, and `OnboardingApplicationId`. All IDs, addresses, media paths and
+results stay outside git. The build obtains and removes the one-day credential;
+the credential value is never a build-file input. `Get-Help
+.\scripts\New-NestedSqlDemo.ps1 -Full` lists these inputs.
 
 ## Build
 
@@ -69,10 +74,12 @@ $result = .\scripts\New-NestedSqlDemo.ps1 @build -SkinPath $skinPath -Confirm:$f
 $result | ConvertTo-Json -Depth 12 | Set-Content .local\nested-sql-result.json
 ```
 
-Preview is not creation. The real invocation creates only a new named guest/root,
-waits for unattended setup, connects Arc, installs SQL, enables the SQL extension
-in LicenseOnly mode, and checks local SQL plus Azure inventory. It stops on a
-failed step; do not blindly rerun the whole build against an existing guest.
+Preview is not creation. The real invocation mints a one-day credential, creates
+only a new named guest/root, waits for unattended setup, connects Arc, installs
+SQL, enables the SQL extension in LicenseOnly mode, checks local SQL plus Azure
+inventory, then removes the minted credential and verifies the original key IDs.
+Cleanup runs after build failures too. It stops on a failed step; do not blindly
+rerun the whole build against an existing guest.
 The individual New/Wait/Connect/Engine/Enable/Test scripts support targeted
 continuation through `Invoke-NestedSqlDemoStep.ps1`.
 
@@ -91,6 +98,15 @@ continuation through `Invoke-NestedSqlDemoStep.ps1`.
 Times exclude earlier failed attempts, debugging and removal. Scratch fixes were
 cold DNS readiness, actual SQL bootstrap paths, parsing the agent block list,
 and treating the first extension GET 404 as bounded creation lag.
+
+The one-day-credential path was rebuilt from zero on 1 November 2026:
+**42m21s** for the build (**42m30s** including credential handling). It passed
+OOBE, Arc Connected, a real SQL Server 2022 Developer version query, extension
+service/login checks and fresh Azure inventory with all four system databases
+Online. The new credential was removed on successful completion. The final
+park verified guest Off followed by parent deallocation; existing Arc/SQL
+resources remained. The retained vault, original app credentials and other
+guests were not changed.
 
 ## Hibernate and activate
 

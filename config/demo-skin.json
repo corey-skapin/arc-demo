@@ -17,7 +17,6 @@
     "deployAzureVMs": false,
     "deployContainerApps": false,
     "deployAks": false,
-    "installSql": false,
     "onPremFleetPath": ""
   },
   "nestedSqlGuest": {

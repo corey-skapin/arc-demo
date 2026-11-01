@@ -112,7 +112,7 @@ Summary
     }
     $file = if ($Purpose -eq 'capacity') { 'capacity-headroom.workbook.json' } else { 'optimisation-opportunities.workbook.json' }
     $book = Get-Content -LiteralPath (Join-Path $root $file) -Raw | ConvertFrom-Json -Depth 100
-    $note = "Scope frozen at preparation $([datetime]::UtcNow.ToString('o')): $($roster.Count) explicit Arc IDs in $scope; workspace $WorkspaceResourceId. New hosts require a separately approved workbook refresh. Topology is operator-declared; absent declarations remain unclassified. No backing-VM duplicates or hardware capacity totals. Preparation does not prove telemetry is current."
+    $note = "Prepared $([datetime]::UtcNow.ToString('o')) for $($roster.Count) Arc IDs in $scope; workspace $WorkspaceResourceId. Refresh the workbook to include new hosts. Topology is operator-declared; absent declarations remain unclassified. Parent and guest rows are not hardware totals. Check telemetry timestamps before using this evidence."
     foreach ($item in $book.items) {
         if ($item.type -eq 3) {
             if (-not $queries.ContainsKey($item.content.query)) { throw 'Unknown operational query token.' }

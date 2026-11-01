@@ -101,7 +101,7 @@ Describe 'Real SQL guest safeguards and query evidence' {
     It 'does not replay a partial or reboot-pending installation' -ForEach @('installing', 'initializing', 'pending-reboot', 'setup-failed') {
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         @{ schemaVersion = 1; instance = $instance; database = $database; phase = $_; scriptSha256 = $hash; mediaSha256 = $hash } | ConvertTo-Json | Set-Content $manifestPath
-        { Install-DemoEngine -MediaIsoPath 'C:\fixture.iso' -MediaSha256 $hash -AcceptDeveloperLicenseTerms -ArcSqlAutoConnectOptOutConfirmed } | Should -Throw '*diagnose rather than replay*'
+        { Install-DemoEngine -MediaIsoPath 'C:\fixture.iso' -MediaSha256 $hash -AcceptDeveloperLicenseTerms -ArcSqlAutoConnectOptOutConfirmed } | Should -Throw '*inspect setup before retrying*'
         Should -Invoke Start-Process -Times 0
     }
 
@@ -289,7 +289,7 @@ Describe 'SQL worker cold-start readiness and terminal evidence' {
         Should -Invoke Invoke-DemoSql -Times 0
         Should -Invoke Invoke-DemoOrder -Times 0
         Should -Invoke Write-EventLog -Times 1 -ParameterFilter {
-            $EventId -eq 6200 -and $EntryType -eq 'Error' -and $Message -match 'phase=startup' -and $Message -match 'no service restart'
+            $EventId -eq 6200 -and $EntryType -eq 'Error' -and $Message -match 'phase=startup' -and $Message -match 'Inspect MSSQL'
         }
         Should -Invoke Write-EventLog -Times 0 -ParameterFilter { $EventId -eq 6000 }
     }
@@ -661,17 +661,10 @@ Describe 'SQL operation offline export and legacy path restriction' {
             Should -Throw '*effective Arc SQL*'
     }
 
-    It 'retires the mixed deployment installer without Arc SQL extension or shared credentials' {
+    It 'keeps SQL installation out of the estate deployment' {
         $deploy = Get-Content (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -Raw
-        $deploy | Should -Match 'if \(\$InstallSql\) \{ throw'
+        $deploy | Should -Not -Match '\$InstallSql|\$SkipSqlInstall'
         $deploy | Should -Not -Match 'WindowsAgent\.SqlServer|SAPWD|Microsoft\.AzureArcData'
     }
 
-    It 'rejects enabling the retired mixed path before preflight or cloud calls' -ForEach @(
-        @{ Flag = @{ InstallSql = $true } }
-        @{ Flag = @{ SkipSqlInstall = $false } }
-    ) {
-        $deploy = Join-Path $repo 'scripts\Deploy-ArcDemo.ps1'
-        { & $deploy -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' @Flag -WhatIf } | Should -Throw '*mixed InstallSql/Arc SQL path is retired*'
-    }
 }

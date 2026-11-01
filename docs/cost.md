@@ -5,21 +5,6 @@ This lab is cost-controlled, not free. Price the selected skin/workloads using t
 check actual Cost Management charges in the **confirmed** subscription.
 Dated retail examples below are not a current quote or a complete bill.
 
-## Optional private onboarding path
-
-The separately approved [private onboarding initializer](lifecycle.md#private-onboarding-optional)
-retains a vault private endpoint and private DNS zone while compute is parked.
-The reviewed public AUD example is **AUD 11.0783/month fixed** at 730 hours:
-one endpoint at 0.0142/hour = 10.366, plus a Zone 2 private DNS zone at
-0.7123/month. This is not a current quote or an all-in total.
-Additional reviewed meters are DNS queries at 0.5698/million and private endpoint
-data at 0.0142/GB for each applicable ingress/egress direction. Key Vault
-operations, other networking, retained disks/monitoring, tax and any applicable
-contract terms remain additional; reprice the selected region/subscription.
-No extra VM, VPN, Bastion or private resolver is introduced by this path.
-Hibernation removes neither the endpoint nor zone; do not describe it as free
-parking. Removing a secret/vault does not revoke the independent Entra app key.
-
 ## Reviewed demo choices (21 October 2026)
 
 The representative core remains **five Windows and three Linux hosts** with

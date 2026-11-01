@@ -24,7 +24,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 Change per customer:
 
 - `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
-- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. Keep `workloads.installSql=false`; enabling the retired mixed SQL path fails. [Real SQL preparation](sql-engine-workload.md) is a separate approved operation.
+- `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. [Real SQL preparation](sql-engine-workload.md) is a separate operation, not a deployment flag.
 - `workloads.onPremFleetPath` for a custom OS mix.
 - Match `compute.osDiskStorageAccountType` to the existing OS disks for a
   retained lab. New labs should keep SSD: HDD OS disks retire on 8 September

@@ -17,6 +17,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('New','WaitSetup','Connect','Engine','EnableExtension','Test','Remove')][string]$Step,
     [Parameter(Mandatory)][hashtable]$Parameters,
     [pscredential]$GuestCredential,
+    [securestring]$OnboardingSecret,
     [ValidateRange(60,7200)][int]$TimeoutSeconds = 1800
 )
 $ErrorActionPreference = 'Stop'
@@ -41,15 +42,18 @@ $json = $Parameters | ConvertTo-Json -Depth 10 -Compress
 $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
 $credentialMode = if ($Step -eq 'New') { 'Password' } elseif ($Step -eq 'Remove') { 'None' } else { 'Credential' }
 if ($credentialMode -ne 'None' -and -not $GuestCredential) { throw 'This step requires the retained guest credential.' }
+if ($Step -eq 'Connect' -and -not $OnboardingSecret) { throw 'Connect requires the one-build onboarding secret as a protected parameter.' }
+if ($Step -ne 'Connect' -and $OnboardingSecret) { throw 'The onboarding secret is accepted only by the Connect step.' }
 $userName = if ($GuestCredential) { $GuestCredential.UserName.Replace("'","''") } else { '' }
 $scriptText = @"
-param([string]`$GuestPassword)
+param([string]`$GuestPassword,[string]`$OnboardingSecretValue)
 `$ErrorActionPreference='Stop'
 `$values=ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encoded')))
 `$arguments=@{}
 `$values.PSObject.Properties | ForEach-Object { `$arguments[`$_.Name]=`$_.Value }
 if ('$Step' -ne 'Test') { `$arguments.Confirm=`$false }
 `$secure=`$null
+`$onboardingSecure=`$null
 try {
     if ('$credentialMode' -ne 'None') {
         `$secure=ConvertTo-SecureString `$GuestPassword -AsPlainText -Force
@@ -57,12 +61,22 @@ try {
         if ('$credentialMode' -eq 'Password') { `$arguments.AdministratorPassword=`$secure }
         else { `$arguments.GuestCredential=[pscredential]::new('$userName',`$secure) }
     }
+    if ('$Step' -eq 'Connect') {
+        `$onboardingSecure=ConvertTo-SecureString `$OnboardingSecretValue -AsPlainText -Force
+        `$OnboardingSecretValue=`$null
+        `$arguments.OnboardingClientSecret=`$onboardingSecure
+    }
     `$step={
 $source
     }
     & `$step @arguments | ConvertTo-Json -Depth 10 -Compress
     if ('$Step' -eq 'New') { Write-Output ('NESTED_DEMO_VM_ID=' + (Get-VM -Name `$arguments.VmName).VMId) }
-} finally { if (`$secure) { `$secure.Dispose() } }
+} finally {
+    if (`$secure) { `$secure.Dispose() }
+    if (`$onboardingSecure) { `$onboardingSecure.Dispose() }
+    `$GuestPassword=`$null
+    `$OnboardingSecretValue=`$null
+}
 "@
 if (-not $PSCmdlet.ShouldProcess($id,"Run repository nested demo step $Step")) { return }
 $collection = "https://management.azure.com${id}/runCommands?api-version=2024-07-01"
@@ -86,12 +100,20 @@ $body = @{
     location=$parent.location
     properties=@{source=@{script=$scriptText};timeoutInSeconds=$TimeoutSeconds;asyncExecution=$true}
 }
-if ($GuestCredential) {
-    $body.properties.protectedParameters = @(@{name='GuestPassword';value=$GuestCredential.GetNetworkCredential().Password})
+if ($GuestCredential -or $OnboardingSecret) {
+    $protectedParameters = @()
+    if ($GuestCredential) {
+        $protectedParameters += @{name='GuestPassword';value=$GuestCredential.GetNetworkCredential().Password}
+    }
+    if ($OnboardingSecret) {
+        $protectedParameters += @{name='OnboardingSecretValue';value=[pscredential]::new('onboarding',$OnboardingSecret).GetNetworkCredential().Password}
+    }
+    $body.properties.protectedParameters = $protectedParameters
+    $protectedParameters = $null
 }
 $clock = [Diagnostics.Stopwatch]::StartNew()
 try { $null = Invoke-AzRest -Method Put -Url $url -Body $body }
-finally { $body=$null }
+finally { $body=$null; $protectedParameters=$null }
 Write-Verbose "Managed command: $name"
 do {
     Start-Sleep 10

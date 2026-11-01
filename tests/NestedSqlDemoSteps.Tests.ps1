@@ -47,10 +47,11 @@ Describe 'Simple nested demo step previews' {
     BeforeEach {
         $script:password = ConvertTo-SecureString 'Synthetic!Credential12345678901234567890' -AsPlainText -Force
         $script:credential = [pscredential]::new('Administrator',$script:password)
+        $script:onboardingSecret = ConvertTo-SecureString 'Synthetic-Onboarding-Secret-Only-In-Memory' -AsPlainText -Force
         Mock Invoke-Command { throw 'Preview must not enter the guest' }
         Mock Invoke-RestMethod { throw 'Preview must not request credentials' }
     }
-    AfterEach { $script:password.Dispose() }
+    AfterEach { $script:password.Dispose(); $script:onboardingSecret.Dispose() }
 
     It 'previews Arc onboarding without guest or vault operations' {
         & $script:connect -VmName DEMOSQL -GuestCredential $script:credential `
@@ -59,8 +60,7 @@ Describe 'Simple nested demo step previews' {
             -TenantId '22222222-2222-2222-2222-222222222222' `
             -ResourceGroup rg-demo -Location australiaeast -ArcName DEMOSQL `
             -OnboardingApplicationId '33333333-3333-3333-3333-333333333333' `
-            -SecretVersionUri 'https://example.vault.azure.net/secrets/arc-onboarding-client-secret/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' `
-            -VaultPrivateAddress 10.1.0.4 -WhatIf
+            -OnboardingClientSecret $script:onboardingSecret -WhatIf
         Should -Invoke Invoke-Command -Times 0
         Should -Invoke Invoke-RestMethod -Times 0
     }

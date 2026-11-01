@@ -1,13 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Installs and connects the new nested demo guest using the parent's private vault access.
+    Installs and connects the new nested demo guest using a protected credential.
 .DESCRIPTION
-    Run on the Hyper-V parent with the retained guest credential. Requires an
-    OOBE-complete guest and an existing, approved private onboarding secret version.
-    No identity creation, role assignment, secret rotation, or SQL installation.
+    Run on the Hyper-V parent with the retained guest credential and the
+    one-build onboarding secret. No identity, role, or SQL creation.
 #>
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The private HTTPS vault response is immediately converted in memory, never logged or exported.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The protected onboarding parameter is immediately converted in memory and written only to the ACL-restricted guest config required by azcmagent.')]
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory)][string]$VmName,
@@ -21,16 +20,10 @@ param(
     [Parameter(Mandatory)][string]$Location,
     [Parameter(Mandatory)][string]$ArcName,
     [Parameter(Mandatory)][guid]$OnboardingApplicationId,
-    [Parameter(Mandatory)][uri]$SecretVersionUri,
-    [Parameter(Mandatory)][string]$VaultPrivateAddress
+    [Parameter(Mandatory)][securestring]$OnboardingClientSecret
 )
 $ErrorActionPreference = 'Stop'
-if ($SecretVersionUri.Scheme -ne 'https' -or
-    $SecretVersionUri.Host -notlike '*.vault.azure.net' -or
-    $SecretVersionUri.AbsolutePath -notmatch '\A/secrets/arc-onboarding-client-secret/[a-f0-9]{32}\z') {
-    throw 'Supply the retained exact private onboarding secret version URI.'
-}
-if (-not $PSCmdlet.ShouldProcess($VmName, 'Configure NAT networking, install Arc, block SQL extension and connect with retained private onboarding')) { return }
+if (-not $PSCmdlet.ShouldProcess($VmName, 'Configure NAT networking, install Arc, block SQL extension and connect with the one-build credential')) { return }
 $state = Invoke-Command -VMName $VmName -Credential $GuestCredential -ArgumentList $GuestAddress,$Gateway,$DnsServer -ScriptBlock {
     param($Address,$GatewayAddress,$DnsAddress)
     $ErrorActionPreference = 'Stop'
@@ -92,20 +85,7 @@ if ($state.status -eq 'Connected') {
 }
 if ($state.status -ne 'Disconnected') { throw 'Arc state is not ready for enrollment' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$addresses = @(Resolve-DnsName $SecretVersionUri.Host -Type A | Where-Object Type -EQ A | Select-Object -ExpandProperty IPAddress -Unique)
-if ($addresses.Count -ne 1 -or $addresses[0] -ne $VaultPrivateAddress) { throw 'Private vault DNS differs' }
-$token = Invoke-RestMethod 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net' -Headers @{Metadata='true'}
-$headers = @{Authorization=('Bearer ' + $token.access_token)}
-$onboarding = $null
-try {
-    $secret = Invoke-RestMethod ($SecretVersionUri.AbsoluteUri + '?api-version=7.4') -Headers $headers
-    if ($secret.id -ne $SecretVersionUri.AbsoluteUri -or -not $secret.attributes.enabled -or
-        $secret.tags.appId -ne "$OnboardingApplicationId" -or $secret.tags.state -ne 'initialized' -or
-        $secret.attributes.exp -le [datetimeoffset]::UtcNow.ToUnixTimeSeconds()) { throw 'Retained secret metadata differs' }
-    $onboarding = ConvertTo-SecureString $secret.value -AsPlainText -Force
-} finally { $secret = $null; $headers.Clear(); $token = $null }
-try {
-    Invoke-Command -VMName $VmName -Credential $GuestCredential -ArgumentList $onboarding,"$SubscriptionId","$TenantId",$ResourceGroup,$Location,$ArcName,"$OnboardingApplicationId" -ScriptBlock {
+Invoke-Command -VMName $VmName -Credential $GuestCredential -ArgumentList $OnboardingClientSecret,"$SubscriptionId","$TenantId",$ResourceGroup,$Location,$ArcName,"$OnboardingApplicationId" -ScriptBlock {
         param([securestring]$OnboardingSecret,$Subscription,$Tenant,$Group,$Region,$Name,$Application)
         $ErrorActionPreference = 'Stop'
         $agent = "$env:ProgramFiles\AzureConnectedMachineAgent\azcmagent.exe"
@@ -113,6 +93,7 @@ try {
         & icacls.exe $directory.FullName /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Protected directory ACL failed' }
         $path = Join-Path $directory.FullName 'connect.json'
+        $config = $null
         try {
             $config = @{
                 'subscription-id'=$Subscription; 'tenant-id'=$Tenant; 'resource-group'=$Group
@@ -127,9 +108,12 @@ try {
             Get-Content "$env:TEMP\arc-connect.stdout.txt" | Out-Host
             Get-Content "$env:TEMP\arc-connect.stderr.txt" | Out-Host
             if ($process.ExitCode -ne 0) { throw "Arc connect failed: $($process.ExitCode)" }
-        } finally { Remove-Item -LiteralPath $path -Force; $config=$null }
+        } finally {
+            $config = $null
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $path) { throw 'Protected Arc config cleanup failed; guest credential file remains.' }
+        }
         $state = & $agent show --json | ConvertFrom-Json
         if ($LASTEXITCODE -ne 0 -or $state.status -ne 'Connected') { throw 'Arc connection not verified' }
         $state
     }
-} finally { $onboarding.Dispose() }

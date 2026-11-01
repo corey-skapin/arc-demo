@@ -105,15 +105,15 @@ if (-not $entries -or @($entries | Where-Object { $_.code -match 'failed|error' 
     $stdout -notmatch '(?m)^ARC_DEMO_OK\r?$') {
     $errorLines = @($stdout -split '\r?\n' | Where-Object { $_.StartsWith('ARC_SQL_ERROR=') })
     $detail = if ($errorLines.Count -eq 1) { ($errorLines[0].Substring('ARC_SQL_ERROR='.Length) | ConvertFrom-Json).message } else { 'No structured guest error was returned.' }
-    throw "SQL guest operation failed/unknown on $MachineName`: $detail Preserve RunCommand/setup state before retrying. No automatic replay."
+    throw "SQL guest operation failed/unknown on $MachineName`: $detail Inspect Run Command and setup state before retrying."
 }
 $lines = @($stdout -split '\r?\n' | Where-Object { $_.StartsWith('ARC_SQL_RESULT=') })
-if ($lines.Count -ne 1) { throw 'SQL guest operation returned no unique structured query result; no success claim or retry.' }
+if ($lines.Count -ne 1) { throw 'SQL guest operation did not return exactly one structured query result.' }
 $snapshot = $lines[0].Substring('ARC_SQL_RESULT='.Length) | ConvertFrom-Json
 if ($snapshot.status -notin @('pass', 'pending', 'stopped', 'recovered', 'protected') -or $snapshot.instance -ne 'ARCDEMO' -or $snapshot.database -ne 'ArcDemoOrders' -or
     ($Action -eq 'ProtectArcSql' -and ($snapshot.status -ne 'protected' -or $snapshot.blockedType -ne 'Microsoft.AzureData/WindowsAgent.SqlServer' -or $snapshot.monitoringUnchanged -ne $true)) -or
     ($Action -eq 'Incident' -and ($snapshot.status -ne 'recovered' -or $snapshot.sqlErrorNumber -ne 1222 -or $snapshot.ownedSessionsRemaining -ne 0 -or $snapshot.ordersWorkerHealthy -ne $true))) {
-    throw 'SQL guest query result does not match the owned workload contract; no success claim.'
+    throw 'SQL guest query result does not match the expected workload.'
 }
 $result = [pscustomobject]@{
     schemaVersion = 1; workload = 'arc-sql-engine'; resourceId = $target.ArcId

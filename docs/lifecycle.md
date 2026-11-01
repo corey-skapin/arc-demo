@@ -106,14 +106,6 @@ connection; actual SQL query and extension startup are checked by
 `Test-NestedSqlDemoGuest.ps1`. SQL extension startup can lag after a cold wake.
 No automatic enrollment, SQL reinstall or credential rotation is a wake step.
 
-## Private onboarding (optional)
-
-Existing private-vault initialization remains separate from this demo's build
-and lifecycle. `Initialize-PrivateOnboarding.ps1` previews by default and requires
-explicit setup inputs for creation. Preserve existing keys and private access;
-never use the VM administrator password as onboarding authentication. The demo
-uses retained credentials, not prototype recovery/receipt workflows.
-
 ## Inventory and retry semantics
 
 ### Retained base fleet

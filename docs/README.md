@@ -26,7 +26,7 @@ or realised savings. The Arc/Monitor story remains 20-30 minutes.
 
 The scratch nested Windows/SQL path is primary. The prebuilt Jumpstart image
 remains a documented alternative with manual licence/OOBE, password and network
-steps; see the [side-by-side results](sql-arc-spike.md#nested-sql-demo-prototype-race).
+steps; see the [side-by-side results](nested-sql-demo.md#alternative-jumpstart-prebuilt-image).
 Use the same private skin for build and lifecycle; do not rotate credentials,
 reset faults or run destructive rehearsals incidentally.
 

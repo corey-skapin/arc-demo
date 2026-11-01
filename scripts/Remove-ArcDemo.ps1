@@ -7,7 +7,7 @@
     Identity deletion is separately opt-in; shared/ambiguous identities are refused.
     Successful completion verifies both groups and named policies/budget absent.
     Retained tenant identities, soft-deleted vaults and shared/subscription services
-    are explicit exclusions, not a zero-bill or tenant-wide cleanup claim.
+    are not deleted by this command and may still incur costs.
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -82,4 +82,4 @@ Wait-Until -TimeoutSeconds 1800 -IntervalSeconds 20 -Message 'demo groups, named
 if ($DisableDefender) {
     Invoke-DemoAz -Arguments @('security', 'pricing', 'create', '--name', 'VirtualMachines', '--tier', 'Free', '-o', 'none') | Out-Null
 }
-Write-Ok 'Removed: both demo groups and named policies/budget verified absent. Tenant identities/applications, soft-deleted vaults and shared/subscription services are explicitly excluded unless separately removed; no purge or zero-bill claim.'
+Write-Ok 'Removed: both demo groups and named policies/budget verified absent. Tenant identities/applications, soft-deleted vaults and shared/subscription services remain unless separately removed; retained resources may still incur costs.'

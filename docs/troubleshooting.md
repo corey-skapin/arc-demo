@@ -487,7 +487,7 @@ without forcing/replaying it, then inspect after separately approved activation.
 Retain required security and obtain policy-owner
 review if an engine-only exception is genuinely necessary. The Arc SQL opt-out
 does not exempt Defender; Succeeded with disconnected/empty sensor status does
-not establish protection or billing. See the [automatic-extension boundary](sql-engine-workload.md#automatic-extension-attempts-and-inherited-security).
+not establish protection or billing. See the [engine-only prerequisites](sql-engine-workload.md#approval-fit-and-media).
 
 If Arc later reports Disconnected, inspect the exact backing VM power state
 before diagnosing an agent failure. A deallocated VM cannot provide fresh SQL
@@ -515,23 +515,8 @@ failures. Scheduler restart settings are not evidence that a retry succeeded.
 Do not silently start/reset the worker as readiness or activation preparation.
 After diagnosis and separate scoped approval, the owned helper's `-Action Start`
 can start that task without SQL restart or installer replay; require subsequent
-fresh Status pass and actual commit evidence. Deploying the startup-order fix
-to an installed worker needs the [reviewed update and rollback procedure](sql-engine-workload.md#updating-an-existing-owned-worker),
-not an unreviewed overwrite that bypasses the source-hash/manifest contract.
-
-## Worker migration stops with a `File.Replace` path error
-
-Observed on guest Windows PowerShell 5: passing a null backup argument to
-`File.Replace` produced "The path is not of a legal form" before replacement;
-the same call also prevented the initial file rollback. Inspect the journal
-and exact installed/backup hashes read-only before acting. In the observed
-case both old files were unchanged and the owned task was stopped/disabled;
-verified task-state-only recovery was sufficient, not another file overwrite.
-
-Use explicit unique backup paths and verify displaced bytes. Test both a full
-replacement/rollback and a real second-file sharing failure on local Windows
-PowerShell 5. Unknown hashes or incomplete state must leave the task stopped;
-do not force restoration or replay the failed migration.
+fresh Status pass and actual commit evidence. Updating an installed worker is a separate operation; see
+[updating an existing worker](sql-engine-workload.md#updating-an-existing-owned-worker).
 
 ## Compliance scorecards (MCSB/NIST) are empty
 
@@ -624,17 +609,3 @@ disk. Select its current tier using the CLI input or private
 Do not bypass the check or run an implicit conversion. An approved disk-tier
 migration needs a maintenance window with stop/deallocate/restart; HDD OS
 support retires on 8 September 2028. See [cost.md](cost.md).
-
-## Private initializer reports another endpoint when the vault connection collection is null
-
-The original initializer counted a null `privateEndpointConnections` pipeline
-entry as a conflicting endpoint. An exact successful vault management GET can
-legitimately return null for this optional collection. The corrected guard
-filters null entries only; it still rejects foreign and malformed nonnull
-connections. Local regressions cover all three cases and an empty collection.
-This fix does not waive private endpoint ownership or private DNS checks.
-
-Use the maintained initializer's read-only WhatIf with the same private setup
-inputs. Do not remove real endpoint connections or treat a failed preview as
-initialization permission. This is separate private-vault setup, not a nested
-SQL build or lifecycle step.

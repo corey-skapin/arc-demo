@@ -104,8 +104,8 @@ function Assert-DemoTask {
 
 function Get-DemoSqlStatus {
     $record = Get-DemoManifest
-    if ($record.phase -ne 'ready') { throw "SQL preparation is '$($record.phase)'; inspect prior setup/reboot before retrying. Never replay a possibly active installer." }
-    if ((Get-FileHash -LiteralPath $installedScript -Algorithm SHA256).Hash -ne $record.scriptSha256) { throw 'Installed SQL worker differs from the owned manifest; no execution or health claim.' }
+    if ($record.phase -ne 'ready') { throw "SQL preparation is '$($record.phase)'; inspect prior setup/reboot before retrying." }
+    if ((Get-FileHash -LiteralPath $installedScript -Algorithm SHA256).Hash -ne $record.scriptSha256) { throw 'Installed SQL worker differs from its manifest.' }
     $engine = Assert-DemoEngine
     Assert-DemoDatabase
     $rows = Invoke-DemoSql @'
@@ -113,7 +113,7 @@ SELECT DB_NAME() AS DatabaseName, COUNT_BIG(*) AS OrderCount,
        MAX(CommittedAtUtc) AS LastCommitUtc, SUM(Amount) AS TotalAmount
 FROM dbo.Orders;
 '@ $database
-    if ($rows.Rows.Count -ne 1 -or $rows.Rows[0].OrderCount -lt 0 -or $rows.Rows[0].OrderCount -gt 1000) { throw 'Unexpected SQL query shape/row bound; no healthy workload claim.' }
+    if ($rows.Rows.Count -ne 1 -or $rows.Rows[0].OrderCount -lt 0 -or $rows.Rows[0].OrderCount -gt 1000) { throw 'Unexpected SQL query shape/row bound.' }
     $task = Assert-DemoTask
     $lastCommit = if ($rows.Rows[0].LastCommitUtc -is [DBNull]) { $null } else { [DateTime]::SpecifyKind([datetime]$rows.Rows[0].LastCommitUtc, [DateTimeKind]::Utc) }
     $fresh = $lastCommit -and ([DateTime]::UtcNow - $lastCommit).TotalSeconds -ge 0 -and ([DateTime]::UtcNow - $lastCommit).TotalSeconds -le 120
@@ -234,7 +234,7 @@ function Wait-DemoSqlReady {
         if ($remaining -le 0) { break }
         Start-Sleep -Seconds ([Math]::Min(5, $remaining))
     }
-    throw "SQL startup did not become ready within the $TimeoutSeconds-second budget ($observed). Inspect MSSQL`$ARCDEMO and database recovery; no service restart, schema change or installer replay."
+    throw "SQL startup did not become ready within the $TimeoutSeconds-second budget ($observed). Inspect MSSQL`$ARCDEMO and database recovery."
 }
 
 function Invoke-DemoWorkload {
@@ -379,7 +379,7 @@ END CATCH;
         do {
             $locks = Invoke-DemoSql "SELECT COUNT(*) AS LockCount FROM sys.dm_tran_locks WHERE request_session_id=$($incident.blockerSessionId) AND resource_type='KEY' AND request_mode='X' AND request_status='GRANT' AND resource_associated_entity_id IN (SELECT hobt_id FROM sys.partitions WHERE object_id=OBJECT_ID(N'dbo.IncidentProbe'));" $database -TimeoutSeconds 2
             if ($locks.Rows.Count -eq 1 -and $locks.Rows[0].LockCount -gt 0) { break }
-            if ($blockAsync.IsCompleted -or $clock.Elapsed.TotalSeconds -ge 2) { throw 'The owned blocking session did not acquire the probe lock; no incident claim.' }
+            if ($blockAsync.IsCompleted -or $clock.Elapsed.TotalSeconds -ge 2) { throw 'The blocking session did not acquire the probe lock.' }
             Start-Sleep -Milliseconds 100
         } while ($true)
         $victimCommand = $victim.CreateCommand()
@@ -402,12 +402,12 @@ END CATCH;
         do {
             $waiting = Invoke-DemoSql "SELECT session_id AS VictimSessionId, blocking_session_id AS BlockerSessionId, wait_type AS WaitType, wait_resource AS WaitResource FROM sys.dm_exec_requests WHERE session_id=$($incident.victimSessionId) AND blocking_session_id=$($incident.blockerSessionId) AND database_id=DB_ID();" $database -TimeoutSeconds 2
             if ($waiting.Rows.Count -eq 1 -and $waiting.Rows[0].WaitType -match '^LCK_M_') { break }
-            if ($victimAsync.IsCompleted -or $clock.Elapsed.TotalSeconds -ge 2) { throw 'No actual victim/blocker lock-wait evidence was captured; no incident claim.' }
+            if ($victimAsync.IsCompleted -or $clock.Elapsed.TotalSeconds -ge 2) { throw 'No actual victim/blocker lock-wait evidence was captured.' }
             Start-Sleep -Milliseconds 100
         } while ($true)
         $incident.waitType = [string]$waiting.Rows[0].WaitType
         $incident.waitResource = [string]$waiting.Rows[0].WaitResource
-        if (-not $victimAsync.AsyncWaitHandle.WaitOne(10000)) { throw 'Victim completion is unknown after its bounded wait; no expected-timeout claim.' }
+        if (-not $victimAsync.AsyncWaitHandle.WaitOne(10000)) { throw 'Victim completion is unknown after its bounded wait.' }
         $timedOut = $false
         try { $victimCommand.EndExecuteNonQuery($victimAsync) | Out-Null }
         catch {
@@ -437,7 +437,7 @@ END CATCH;
     $probe = Invoke-DemoSql 'SELECT ProbeValue FROM dbo.IncidentProbe WHERE ProbeId=1;' $database -TimeoutSeconds 3
     $sessions = Invoke-DemoSql "SELECT COUNT(*) AS Remaining FROM sys.dm_exec_sessions WHERE session_id IN ($($incident.blockerSessionId),$($incident.victimSessionId)) AND program_name IN (N'ArcSqlEngineDemo-IncidentBlocker',N'ArcSqlEngineDemo-IncidentVictim');" $database -TimeoutSeconds 3
     if ($probe.Rows.Count -ne 1 -or $probe.Rows[0].ProbeValue -ne 0 -or $sessions.Rows.Count -ne 1 -or $sessions.Rows[0].Remaining -ne 0) {
-        throw 'Rollback/probe/session cleanup is not verified; no recovery event or automatic replay.'
+        throw 'Rollback/probe/session cleanup is not verified; recovery was not recorded.'
     }
     if ((Get-DemoSqlStatus).status -ne 'pass') { throw 'Orders worker is no longer proven healthy; no recovery event or automatic repair.' }
     $incident.state = 'recovered'
@@ -491,15 +491,15 @@ function Install-DemoEngine {
             (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash -ne $record.scriptSha256) { throw 'Owned worker source differs; no implicit upgrade/restart.' }
         if ($record.phase -eq 'ready') { return Get-DemoSqlStatus }
         if ($record.phase -notin @('initializing', 'pending-reboot') -or $record.setupExitCode -notin @(0, 3010)) {
-            throw "Prior SQL installation is '$($record.phase)'; diagnose rather than replay."
+            throw "Prior SQL installation is '$($record.phase)'; inspect setup before retrying."
         }
     }
-    if (Get-Process | Where-Object { $_.ProcessName -in @('setup', 'ScenarioEngine', 'SqlSetupBootstrapper') -or $_.ProcessName -match '^SQL.*SSEI' }) { throw 'An installer may be active. Inspect it; do not replay SQL setup.' }
+    if (Get-Process | Where-Object { $_.ProcessName -in @('setup', 'ScenarioEngine', 'SqlSetupBootstrapper') -or $_.ProcessName -match '^SQL.*SSEI' }) { throw 'An installer may be active. Inspect it before another setup attempt.' }
     if (Test-DemoRebootPending) { throw 'A reboot/pending rename is recorded. Resolve with the operator; no automatic reboot or bypass.' }
     if ($record) {
         if ($record.phase -eq 'pending-reboot') {
             $boot = (Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 20).LastBootUpTime.ToUniversalTime()
-            if ($boot -le ([datetime]$record.startedAtUtc).ToUniversalTime()) { throw 'Setup requested a reboot and no later boot is observed; no automatic reboot or setup replay.' }
+            if ($boot -le ([datetime]$record.startedAtUtc).ToUniversalTime()) { throw 'Setup requested a reboot and no later boot is observed.' }
         }
         return Complete-DemoWorkload $record
     }
@@ -545,11 +545,11 @@ function Install-DemoEngine {
             '/UPDATEENABLED=False', '/IACCEPTSQLSERVERLICENSETERMS'
         )
         $process = Start-Process -FilePath $setup -ArgumentList $arguments -PassThru
-        if (-not $process.WaitForExit(1200000)) { throw 'SQL setup still active after 20 minutes; no kill, replay or reboot. Inspect setup and manifest.' }
+        if (-not $process.WaitForExit(1200000)) { throw 'SQL setup still active after 20 minutes. Inspect setup and manifest; the installer is left running.' }
         $record.setupExitCode = $process.ExitCode
         $record.phase = if ($process.ExitCode -eq 0) { 'initializing' } elseif ($process.ExitCode -eq 3010) { 'pending-reboot' } else { 'setup-failed' }
         $record | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-        if ($process.ExitCode -ne 0) { throw "SQL setup exit $($process.ExitCode), phase=$($record.phase); inspect Summary.txt. No automatic reboot or replay." }
+        if ($process.ExitCode -ne 0) { throw "SQL setup exit $($process.ExitCode), phase=$($record.phase); inspect Summary.txt." }
     } finally {
         if ($mountedHere -and -not ($process -and -not $process.HasExited)) { Dismount-DiskImage -ImagePath $MediaIsoPath | Out-Null }
     }

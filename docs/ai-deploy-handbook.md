@@ -56,7 +56,6 @@ The [runbook](runbook.md) owns commands and preflight; [cost.md](cost.md) owns
 selected-workload estimates. The [nested SQL runbook](nested-sql-demo.md) owns
 the proven scratch build and config-driven park/wake/remove path. Keep its
 credentials private; Jumpstart requires manual OOBE/password/network setup.
-No prototype tuples, receipts or inventory rounds are presenter prerequisites.
 SQL Server/Arc SQL/BPA stays off in the default base simulation; read
 [the support decision](sql-arc-spike.md) before considering it.
 The [LOB sample](../samples/lob-arc-app/README.md) needs separate preparation and

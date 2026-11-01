@@ -216,7 +216,7 @@ reported as deployed.
 
 Real SQL setup is a separate approved operation using
 [the isolated Developer workload helper](sql-engine-workload.md).
-The retired mixed `-InstallSql` path fails rather than enabling Arc SQL/BPA.
+Deployment has no SQL installation switch; use the separate SQL build/workload helpers.
 
 Bicep provisions static resources in `rg-<prefix>` (Arc/Monitor) and
 `rg-<prefix>-infra` (backing/optional compute). The wrapper handles DCR table

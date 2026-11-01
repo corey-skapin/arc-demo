@@ -16,7 +16,6 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 | `bicep/modules/aks.bicep` | Optional AKS, Container Insights, managed deployment-script identity, sample workload and restart alert |
 | `bicep/modules/network.bicep` | VNet/subnet/NSG; creates fresh NAT/PIP before compute or preserves the existing NAT attachment |
 | `bicep/modules/keyvault.bicep` | Shared admin-credential vault and deployer RBAC |
-| `bicep/modules/private-onboarding-vault.bicep`, `private-secret-placeholder.bicep` | Separately approved existing-estate private endpoint/DNS and exact-secret readers; disabled nonsecret initial scope, never actual credentials in ARM |
 | `bicep/modules/workspace.bicep` | Log Analytics and VMInsights/ChangeTracking solutions |
 | `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; `New-CoreDcrBody` in the deploy wrapper owns selectors, including the source/event-specific LOB informational heartbeat |
 | `bicep/modules/alerts.bicep` | Action Group and missing-Heartbeat alert |
@@ -39,13 +38,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Test-NestedSqlDemoGuest.ps1`, `Enable-NestedSqlDemoExtension.ps1`, `Remove-NestedSqlDemoGuest.ps1` | Actual guest/SQL checks, Arc SQL extension and explicit scratch-guest teardown |
 | `scripts/Install-ArcSqlDemoExtension.ps1`, `Test-ArcSqlDemoInventory.ps1`, `Remove-NestedSqlDemo.ps1` | LicenseOnly extension, actual Azure SQL/database inventory and exact guest/Arc/SQL teardown |
 | `scripts/Set-NestedSqlDemoState.ps1` | Optional parent/guest-only park/wake, using the same skin and Common guest helper; retains shared network and other workloads |
-| `scripts/Initialize-PrivateOnboarding.ps1`, `scripts/lib/PrivateOnboarding.psm1`, `scripts/guest/Set-PrivateVaultSecret.ps1` | Default read-only preview; one-shot private credential initialization, exact parent/app ownership, protected REST writer, original-key retention and returned-new-key rollback; not guest onboarding or lifecycle/fresh admin bootstrap |
-| `tests/PrivateWriterProof.Tests.ps1`, `tests/fixtures/PrivateWriterProof.Ps5Harness.ps1`, `tests/fixtures/PrivateMarker.Ps5Harness.ps1` | Retained private-vault writer regressions; not nested SQL lifecycle prerequisites |
-| `scripts/guest/Test-PrivateVaultPath.ps1`, `tests/PrivateFailureDiagnostics.Tests.ps1` | Separately released parent-only `InspectPath` source: immutable compute metadata, pinned private DNS/IP/TCP/hostname-validated TLS, no identity token/secret/role operation; bounded sanitized failure proof saved before terminal cleanup; no automatic initializer resume |
-| `tests/PrivatePathPs5.Tests.ps1`, `tests/fixtures/PrivatePath.Ps5Harness.ps1` | Real Windows PS5 native parameter/JSON-array regressions, synthetic metadata/DNS only: shared PS5 nesting defect, quote-free address transport, narrow identity/metadata/input substages; Windows CI required, explicitly skipped on non-Windows |
-| `tests/fixtures/PrivateTls.Ps5Harness.ps1` | Actual Inspector TLS/task/deadline blocks under native PS5 using a memory stream and synthetic typed failures: bounded phase, task, exception-kind and native-code evidence; no socket, certificate bypass or live-cause claim |
-| `tests/fixtures/PrivateHttp.Ps5Harness.ps1` | Native PS5 request-local TLS1.2 handler/default-validation configuration and real HttpClient message/content/response/disposal mechanics with a synthetic network handler; HTTP denial, redirect and foreign-route rejection, no global protocol or trust mutation |
-| `.github/workflows/lint.yml` Windows PS5 job | Executes private-path and retained nested SQL regressions on Windows; mocked tests are not live deployment proof |
+| `.github/workflows/lint.yml` Windows job | Executes nested guest and real SQL regressions with mocked Windows APIs |
 | `scripts/Deploy-ArcDemo.ps1` | Selected-provider and SKU/quota checks; Bicep preview/create; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness |
 | `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL from the single tracked `docs/runsheet.md` template; no Azure calls or lifecycle changes |
 | `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads/reconnect where needed, optional asynchronous patch submission, readiness |
