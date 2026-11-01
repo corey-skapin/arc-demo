@@ -156,6 +156,10 @@ It conflicts with `-SkipPatchAssessment`; native VMs are not Arc assessment
 targets. The activation result records `not-required` when no hosts need default
 submission. This is not proof of earlier assessment success or freshness.
 Submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
+if Azure returns `OperationConflict` because an assess/patch operation is already
+running, activation warns and records `already-in-progress` in its per-host
+assessment output. It does not retry, cancel or claim completion. Other errors,
+including denied or missing resources, still fail activation.
 `-SkipValidate` opts out of final readiness and must never be reported as a
 validated demo. Activation never changes workload fault flags.
 

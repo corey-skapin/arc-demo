@@ -173,11 +173,19 @@ while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonA
         foreach ($machine in $inventory.Machines | Where-Object { -not $_.Native -and ($AssessPatches -or $_.Id -in $startedVmIds) }) {
             $assessment = [ordered]@{ machineName = $machine.Name; resourceId = $machine.ArcId; status = 'pending' }
             $result.patchAssessments += $assessment
-            Invoke-DemoAz -Arguments @('connectedmachine', 'assess-patches', '--ids', $machine.ArcId, '--no-wait', '-o', 'none') | Out-Null
-            $assessment.status = 'submitted'
-            Write-Ok "Patch assessment submitted: $($machine.Name)"
+            try {
+                Invoke-DemoAz -Arguments @('connectedmachine', 'assess-patches', '--ids', $machine.ArcId, '--no-wait', '-o', 'none') | Out-Null
+                $assessment.status = 'submitted'
+                Write-Ok "Patch assessment submitted: $($machine.Name)"
+            } catch {
+                if ($_.Exception.Message -notmatch '\bERROR:\s*\(OperationConflict\)') { throw }
+                $assessment.status = 'already-in-progress'
+                $assessment['message'] = 'An assess/patch operation is already running; no retry or cancellation. Completion is not verified.'
+                Write-Warning "$($machine.Name): $($assessment.message)"
+            }
         }
-        $result.patchAssessment = if ($result.patchAssessments.Count) { 'submitted' } else { 'not-required' }
+        $result.patchAssessment = if (@($result.patchAssessments | Where-Object status -eq 'submitted').Count) { 'submitted' }
+            elseif ($result.patchAssessments.Count) { 'already-in-progress' } else { 'not-required' }
     }
     if (-not $SkipValidate) {
         $ready = & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -OutputFormat Json | ConvertFrom-Json

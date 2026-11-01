@@ -218,6 +218,14 @@ New ingestion of an old buffered record does not make its `TimeGenerated` fresh.
 If the deadline expires, report the actual missing IDs and inspect evidence;
 do not restart agents or substitute native-VM identities to manufacture success.
 
+## A rapid wake reports a patch assessment already in progress
+
+An earlier assessment can still be running when compute wakes again.
+`OperationConflict` from assessment submission is recorded as
+`already-in-progress`, with a warning; activation continues without retrying or
+cancelling that operation. This is not assessment completion or full readiness.
+Authentication, missing-resource and other submission errors still fail.
+
 ## Activation waits forever or reports success with missing hosts
 
 Old lifecycle scripts compared counts, inferred Windows from `win-*`, ignored

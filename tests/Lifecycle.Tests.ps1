@@ -815,6 +815,38 @@ Describe 'Activation with the real optional-network preflight' {
             & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -AssessPatches
             Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' -and '--no-wait' -in $Arguments }
         }
+        It 'records an already-running assessment and continues a default wake without retrying' {
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            $f.machine.Actual.powerState = 'VM deallocated'
+            Mock Invoke-DemoAz { $global:ArcLifecycleFixture.machine.Actual.powerState = 'VM running' } -ParameterFilter { $Arguments[0] -eq 'vm' -and $Arguments[1] -eq 'start' }
+            Mock Invoke-DemoAz { throw "Azure CLI connectedmachine assess-patches failed (exit 1): WARNING: subscription ignored`nERROR: (OperationConflict) Assess or Patch operation is already running on this resource." } -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+            $path = Join-Path $TestDrive 'assessment-already-running.json'
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -ResultPath $path -WarningVariable warnings
+            $report = Get-Content $path -Raw | ConvertFrom-Json
+            $report.status | Should -Be pass
+            $report.patchAssessment | Should -Be 'already-in-progress'
+            $report.patchAssessments[0].status | Should -Be 'already-in-progress'
+            $report.patchAssessments[0].message | Should -Match 'Completion is not verified'
+            ($warnings -join ' ') | Should -Match 'already running'
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+        }
+        It 'does not swallow assessment <Code> errors or an incidental conflict mention' -TestCases @(
+            @{ Code = 'AuthorizationFailed' }, @{ Code = 'ResourceNotFound' }, @{ Code = 'InternalServerError' }
+        ) {
+            param($Code)
+            $f = $global:ArcLifecycleFixture
+            $f.machine.Native = $false
+            $f.machine | Add-Member ArcId '/arc/machines/windows-fixture'
+            Mock Invoke-DemoAz { throw "ERROR: ($Code) Real failure; diagnostic text mentions (OperationConflict)." } -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+            $path = Join-Path $TestDrive 'assessment-real-error.json'
+            { & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -AssessPatches -SkipValidate -ResultPath $path } | Should -Throw "*$Code*"
+            $report = Get-Content $path -Raw | ConvertFrom-Json
+            $report.status | Should -Be fail
+            $report.patchAssessments[0].status | Should -Be fail
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter { $Arguments[1] -eq 'assess-patches' }
+        }
         It 'assesses a newly started Arc host by default' {
             $f = $global:ArcLifecycleFixture
             $f.machine.Native = $false
