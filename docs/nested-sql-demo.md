@@ -155,16 +155,30 @@ The extension ARM state temporarily returned `Creating` before `Succeeded`;
 bounded read-only observation settled it without reinstall or repair. No
 fleet-wide lifecycle operation was run, and the pair was left parked.
 
-On 1 November 2026, whole-estate Activate completed in 10m23s: eight managed
-hosts started and the configured nested Arc guest connected; the explicitly
-excluded Jumpstart parent stayed deallocated. Full Active readiness remained
-pending on four Windows Heartbeats after a further 7m16s bounded observation,
-despite passing guest service checks. The rehearsal stopped early: the nested
-SQL query and 45-minute telemetry window were not completed. Azure SQL inventory
-did refresh during the wake, with all four system databases Online.
-Whole-estate Hibernate then passed in 7m19s, including graceful guest shutdown,
-all nine VMs deallocated, no active Container App revisions and NAT/PIP removal.
-This proves startup/parking, not a fully Ready whole-estate demo.
+The 1 November 2026 whole-estate rehearsals started eight managed hosts and the
+configured nested guest while leaving the excluded Jumpstart parent parked.
+The repeat wake used default patch-assessment settings, not the skip switch.
+All eight monitored fleet hosts produced fresh Heartbeats: first post-wake
+samples were generated after 3.2-3.7 minutes on Linux and 7.6-8.4 minutes on
+Windows. The protected nested SQL query, extension service/login, fresh
+four-database Azure inventory, real SQL orders worker and LOB health checks
+passed.
+
+After 56 minutes awake, all four actual workbook queries passed without errors.
+The unchanged roster had 24 fresh metric rows, five stale historical disk rows,
+13 missing rows and 24 history-gap warnings; fresh rows can still have gaps.
+Full Active readiness nevertheless remained pending on six Linux AMA/Change
+Tracking extension models reporting `Updating`. Default Activate did not
+complete: Linux Run Command was blocked behind a VM extension update, rather
+than missing Heartbeats. See [the Linux wait symptom](troubleshooting.md#linux-activation-waits-behind-a-vm-extension-update).
+The Linux command was not resubmitted; no sensor repair or further wake was
+attempted.
+
+Final whole-estate Hibernate passed in 7m42s, with graceful nested guest shutdown;
+independent Hibernated readiness passed in 52 seconds. Direct reads verified all
+nine VMs deallocated, no active Container App revisions and no NAT gateway or
+public IP. This proves wake, SQL, fresh telemetry and parking, not clean
+completion of default Activate or a fully Ready whole-estate demo.
 
 Arc Connected is not SQL readiness. After wake, run the parent-side SQL check:
 

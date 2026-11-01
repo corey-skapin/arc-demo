@@ -202,6 +202,21 @@ EDR or blindly reinstall a working sensor. Keep timestamped observations separat
 review policy intent and the discrepancy under a new approved diagnostic scope
 before proposing a targeted change. See [lifecycle boundaries](lifecycle.md).
 
+## Linux activation waits behind a VM extension update
+
+After wake, Defender auto-provisioning can leave the MDE extension transitioning
+and other VM extension operations Updating. In the live rehearsal, Linux Run
+Command waited behind that update and reached its 15-minute checked-job timeout
+per VM, even though Heartbeats were fresh and the VM agent reported Ready.
+Activation collects those bounded results per VM, so these waits can dominate
+the wake time. Extension provisioning and direct sensor health are different
+signals; earlier direct checks reported a healthy sensor.
+
+Inspect VM instance view, extension state and exact-ID Heartbeats read-only.
+Do not cancel the update, remove/reinstall Defender, or infer readiness from
+Heartbeat alone. The wait/transport behaviour needs a separate operator decision;
+the weekend rehearsal did not redesign activation or repair the sensor.
+
 ## Arc reconnects after startup, but Windows Heartbeat is still pending
 
 First inspect exact backing-VM power and Arc connection read-only. Overnight
