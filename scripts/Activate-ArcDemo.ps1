@@ -32,7 +32,8 @@ $nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
 Assert-DemoName $NamePrefix
 if ($SkipPatchAssessment -and $AssessPatches) { throw 'AssessPatches and SkipPatchAssessment cannot both be supplied.' }
 Initialize-DemoContext $SubscriptionId $TenantId
-$inventory = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' })
+$inventory = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' }) `
+    -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
 Assert-DemoSkinInventory $skin $inventory
 $missing = @($inventory.Machines | Where-Object { -not $_.Actual })
 if ($missing) { throw "Missing expected VMs: $($missing.Name -join ', '). Reconcile deployment before activation." }

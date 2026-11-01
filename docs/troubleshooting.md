@@ -291,6 +291,15 @@ do not rotate them as a shortcut. See [lifecycle semantics](lifecycle.md).
 The [nested build](nested-sql-demo.md) is separate: it needs no vault or supplied
 onboarding secret and creates/removes its own one-day app credential.
 
+## Activate rejects an unused alternative parent as outside the manifest
+
+If a parked alternative SQL parent remains alongside the selected scratch parent,
+Activate correctly refuses to guess its role. Set `operations.keepParkedVmNames`
+in the private skin to its exact name, only when it is already deallocated and
+not part of the active fleet. Activate leaves it parked and readiness checks it;
+unknown, running or missing exclusions still fail explicitly. Do not add it to
+the active manifest or boot its nested guest merely to clear the error.
+
 ## Deploy fails immediately with `SkuNotAvailable`
 
 **Symptom** — `Deploy-ArcDemo.ps1` fails at the VM creation phase with:

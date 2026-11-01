@@ -27,7 +27,8 @@ $nestedSqlGuest = $null
 try { $nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin }
 catch { Write-Warning "Nested SQL configuration is unreadable: $($_.Exception.Message) Continuing compute parking without guest shutdown verification." }
 try {
-    $strict = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' })
+    $strict = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' }) `
+        -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
     Assert-DemoSkinInventory $skin $strict
     if (@($strict.Machines | Where-Object { -not $_.Actual }).Count) { throw 'Expected VMs are missing.' }
 } catch { Write-Warning "Deployment/skin drift inspection: $($_.Exception.Message) Parking all compute in $($inventory.InfraRg), not starting or deleting it." }

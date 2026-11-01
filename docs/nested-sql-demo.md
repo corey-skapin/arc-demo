@@ -40,6 +40,13 @@ Use actual names privately; the scratch guest and Arc names must match. The same
 block drives normal Activate, Hibernate and Remove and the optional pair-only
 state helper. Both bundled skins leave it disabled.
 
+If an unused alternative parent remains in the same infra group, explicitly list
+its name under `operations.keepParkedVmNames` in the private skin, for example
+`"operations": { "keepParkedVmNames": ["unused-image-parent"] }`. It must already
+be deallocated and outside the active fleet. Whole-estate Activate leaves it
+parked, readiness checks that state, and Hibernate still parks all group compute.
+This does not permit starting unknown VMs or touching their nested guests.
+
 Put the build's nonsecret arguments in `.local\nested-sql-build.json`: explicit
 `SubscriptionId`, `TenantId`, retained `ParentVmId`, `Location`, parent-side
 `WindowsIsoPath` and `SqlIsoPath`, `SwitchName`, `GuestAddress`, `Gateway`,
@@ -137,7 +144,7 @@ For **only this pair**, retaining shared networking and all other workloads:
 The pair-only helper refuses to park its parent after failed graceful shutdown.
 Use normal Activate if whole-estate parking removed NAT. The live pair proof used
 the retained parent; the consolidated whole-estate wiring has mocked coverage,
-not a newly executed whole-estate lifecycle proof.
+plus the partial live whole-estate rehearsal described below.
 
 The merged skin/Common **pair-only** path was also exercised live on
 31 October 2026: wake, including Arc Connected, took 311.3 seconds; graceful
@@ -147,6 +154,17 @@ and all four system databases remained Online with a fresh inventory upload.
 The extension ARM state temporarily returned `Creating` before `Succeeded`;
 bounded read-only observation settled it without reinstall or repair. No
 fleet-wide lifecycle operation was run, and the pair was left parked.
+
+On 1 November 2026, whole-estate Activate completed in 10m23s: eight managed
+hosts started and the configured nested Arc guest connected; the explicitly
+excluded Jumpstart parent stayed deallocated. Full Active readiness remained
+pending on four Windows Heartbeats after a further 7m16s bounded observation,
+despite passing guest service checks. The rehearsal stopped early: the nested
+SQL query and 45-minute telemetry window were not completed. Azure SQL inventory
+did refresh during the wake, with all four system databases Online.
+Whole-estate Hibernate then passed in 7m19s, including graceful guest shutdown,
+all nine VMs deallocated, no active Container App revisions and NAT/PIP removal.
+This proves startup/parking, not a fully Ready whole-estate demo.
 
 Arc Connected is not SQL readiness. After wake, run the parent-side SQL check:
 

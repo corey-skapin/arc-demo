@@ -142,6 +142,14 @@ function Get-DemoSkin {
     foreach ($section in 'azure', 'workloads', 'compute', 'operations', 'cost', 'labels', 'tags', 'notifications', 'nestedSqlGuest') {
         if ($null -ne $skin.$section -and $skin.$section -isnot [System.Collections.IDictionary]) { throw "Skin $section must be a JSON object." }
     }
+    if ($skin.operations -and $skin.operations.Contains('keepParkedVmNames')) {
+        $names = $skin.operations.keepParkedVmNames
+        if ($names -isnot [array] -or @($names | Where-Object {
+            $_ -isnot [string] -or $_ -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'
+        }).Count -or @($names | Sort-Object -Unique).Count -ne $names.Count) {
+            throw 'Skin operations.keepParkedVmNames must be an array of unique VM names.'
+        }
+    }
     foreach ($key in 'deployArcOnPrem', 'deployAzureVMs', 'deployContainerApps', 'deployAks') {
         if ($skin.workloads -and $skin.workloads.Contains($key) -and $skin.workloads[$key] -isnot [bool]) {
             throw "Skin workloads.$key must be a JSON boolean, not a string."
@@ -342,7 +350,8 @@ function Initialize-DemoContext {
 
 function Get-DemoInventory {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$NamePrefix, [switch]$ForHibernation, [string]$NestedSqlParentVmName = '')
+    param([Parameter(Mandatory)][string]$NamePrefix, [switch]$ForHibernation, [string]$NestedSqlParentVmName = '',
+        [string[]]$KeepParkedVmNames = @())
     Assert-DemoName $NamePrefix
     $arcRg = "rg-$NamePrefix"
     $infraRg = "rg-$NamePrefix-infra"
@@ -409,13 +418,26 @@ function Get-DemoInventory {
                 OsType = 'Windows'; Monitor = $false; VmInsights = $false; ChangeTracking = $false; Native = $true; Actual = $parent[0] }
         }
     }
-    $unknown = @($vmRecords | Where-Object { $_.id -notin $machines.Id })
+    $keptParked = @()
+    foreach ($name in $KeepParkedVmNames) {
+        if ($name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$' -or $name -in $machines.Name -or $name -in $keptParked.Name) {
+            throw 'Keep-parked VM names must be valid, unique and outside the active retained fleet.'
+        }
+        $id = "/subscriptions/$script:DemoSubscription/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$name"
+        $actual = @($vmRecords | Where-Object id -eq $id)
+        if ($actual.Count -ne 1 -or $actual[0].powerState -ne 'VM deallocated') {
+            throw "Explicit keep-parked VM $name must exist in $infraRg and be deallocated; no start or guest command will be attempted."
+        }
+        $keptParked += [pscustomobject]@{ Name = $name; Id = $id; Actual = $actual[0]; KeepParked = $true }
+        Write-Verbose "Leaving explicitly configured VM $name deallocated."
+    }
+    $unknown = @($vmRecords | Where-Object { $_.id -notin $machines.Id -and $_.id -notin $keptParked.Id })
     if ($unknown) { throw "VMs outside the retained deployment manifests found in $infraRg`: $($unknown.name -join ', '). Refusing to manage an ambiguous fleet." }
     foreach ($machine in $machines | Where-Object { $_.Actual }) {
         if ($machine.OsType -ne $machine.Actual.storageProfile.osDisk.osType) { throw "OS metadata differs from manifest for $($machine.Name)." }
     }
     return [pscustomobject]@{ ArcRg = $arcRg; InfraRg = $infraRg; Machines = $machines; ContainerAppIds = $appIds
-        AksClusterIds = $clusterIds; Outputs = $deployments[0].properties.outputs; Resources = $resources }
+        AksClusterIds = $clusterIds; Outputs = $deployments[0].properties.outputs; Resources = $resources; ParkedMachines = $keptParked }
 }
 
 function Get-DemoNestedSqlGuestConfig {
@@ -759,8 +781,8 @@ function Get-DemoReadinessChecks {
         [ValidateSet('Active', 'Ready', 'Hibernated')][string]$DesiredState = 'Ready'
     )
     $parked = $DesiredState -eq 'Hibernated'
-    foreach ($machine in $Inventory.Machines) {
-        $power = if ($parked) { 'VM deallocated' } else { 'VM running' }
+    foreach ($machine in @($Inventory.Machines) + @($Inventory.ParkedMachines) | Where-Object { $_ }) {
+        $power = if ($parked -or $machine.KeepParked) { 'VM deallocated' } else { 'VM running' }
         $observed = $machine.Actual.powerState
         New-DemoCheck "vm/$($machine.Name)/power" $machine.Id $power $observed $(if (-not $observed) { 'fail' } elseif ($observed -eq $power) { 'pass' } else { 'pending' }) -Message $(if (-not $observed) { 'Power state unknown; not verified stopped.' } else { '' })
     }

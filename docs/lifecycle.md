@@ -117,7 +117,12 @@ fleet. Lifecycle discovery uses the latest nonempty Arc fleet and retained
 native-VM/Container-App IDs. Older AKS manifests are supplemented only by tagged
 clusters in the demo infra group. Preserve deployment history. Missing manifests,
 unknown VMs, OS mismatch and IDs outside the demo infra group are errors, not
-reasons to guess which VMs to start or delete. Hibernate instead discovers all
+reasons to guess which VMs to start or delete. For an unused alternative parent,
+the private skin can explicitly set `operations.keepParkedVmNames` to an array
+of names in this infra group. Each must already be deallocated and outside the
+active retained fleet/configured nested parent. Activate never starts or invokes
+guests on these VMs; Active readiness verifies they remain deallocated. Other
+unknown VMs still fail closed. Hibernate instead discovers all
 VMs, AKS and Container Apps in the explicitly targeted `rg-<prefix>-infra`;
 manifest/OS/skin drift is a warning, not a reason to leave that compute running.
 No workload ID outside that exact subscription/group is accepted. If the skin

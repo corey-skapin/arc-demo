@@ -32,7 +32,8 @@ try {
             @(Get-DemoRemovalChecks -NamePrefix $NamePrefix)
         } else {
             $inventory = Get-DemoInventory $NamePrefix -ForHibernation:($DesiredState -eq 'Hibernated') `
-                -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' })
+                -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' }) `
+                -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
             if ($DesiredState -ne 'Hibernated') { Assert-DemoSkinInventory $skin $inventory }
             @(Get-DemoReadinessChecks -Inventory $inventory -NamePrefix $NamePrefix -DesiredState $DesiredState)
             if ($nestedSqlGuest) {

@@ -79,7 +79,9 @@ $skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
 if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }
 Assert-DemoName $NamePrefix
 Initialize-DemoContext $SubscriptionId $TenantId
-$inventory = Get-DemoInventory $NamePrefix
+$nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
+$inventory = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' }) `
+    -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
 Assert-DemoSkinInventory $skin $inventory
 $targets = @($inventory.Machines | Where-Object Name -eq $MachineName)
 if ($targets.Count -ne 1 -or $targets[0].Native -or $targets[0].OsType -ne 'Windows' -or

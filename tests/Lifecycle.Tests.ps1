@@ -46,6 +46,14 @@ Describe 'Skin and fleet validation' {
         Get-DemoSkinValue $skin 'azure.namePrefix' '' | Should -Be 'retail-demo'
         Get-DemoSkinValue $skin 'workloads.deployAks' $true | Should -BeFalse
     }
+    It 'rejects malformed or duplicate keep-parked names' -TestCases @(
+        @{ Names = '"image-parent"' }, @{ Names = '["image-parent","IMAGE-parent"]' },
+        @{ Names = '[null]' }, @{ Names = '["../foreign"]' }
+    ) {
+        param($Names)
+        Set-Content (Join-Path $TestDrive 'parked.json') ('{"schemaVersion":1,"operations":{"keepParkedVmNames":' + $Names + '}}')
+        { Get-DemoSkin -Path 'parked.json' -RepoRoot $TestDrive } | Should -Throw '*keepParkedVmNames*'
+    }
     It 'preserves native JSON dictionaries, arrays and false overrides' {
         Set-Content (Join-Path $TestDrive 'nested.json') '{"schemaVersion":1,"workloads":{"deployAks":false},"compute":{"sizes":["first","second"]},"tags":{"role":"fixture"}}'
         $skin = Get-DemoSkin -Path 'nested.json' -RepoRoot $TestDrive
@@ -212,6 +220,30 @@ Describe 'Retained workload identity classification' {
         It 'rejects unknown VMs for strict activation inventory' {
             $script:vmFixtures += @{ name = 'foreign-01'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/foreign-01" }
             { Get-DemoInventory 'retail-demo' } | Should -Throw '*ambiguous fleet*'
+        }
+        It 'keeps only an explicitly named deallocated extra VM out of the active fleet' {
+            $script:vmFixtures += @{ name = 'image-parent'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/image-parent"; powerState = 'VM deallocated' }
+            $inventory = Get-DemoInventory retail-demo -KeepParkedVmNames image-parent
+            $inventory.Machines.Count | Should -Be 2
+            $inventory.ParkedMachines.Name | Should -Be 'image-parent'
+            $inventory.ParkedMachines.KeepParked | Should -BeTrue
+        }
+        It 'rejects a keep-parked VM that is <State>' -TestCases @(
+            @{ State = 'VM running' }, @{ State = 'VM stopped' }, @{ State = '' }
+        ) {
+            param($State)
+            $script:vmFixtures += @{ name = 'image-parent'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/image-parent"; powerState = $State }
+            { Get-DemoInventory retail-demo -KeepParkedVmNames image-parent } | Should -Throw '*must exist*deallocated*'
+        }
+        It 'rejects missing keep-parked VMs, active-fleet conflicts and unsafe names' {
+            { Get-DemoInventory retail-demo -KeepParkedVmNames missing } | Should -Throw '*must exist*'
+            { Get-DemoInventory retail-demo -KeepParkedVmNames branch-01 } | Should -Throw '*outside the active*'
+            { Get-DemoInventory retail-demo -KeepParkedVmNames '../foreign' } | Should -Throw '*valid*'
+        }
+        It 'does not let an explicit keep-parked VM hide another unknown VM' {
+            $script:vmFixtures += @{ name = 'image-parent'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/image-parent"; powerState = 'VM deallocated' }
+            $script:vmFixtures += @{ name = 'foreign'; id = "$script:infraRoot/Microsoft.Compute/virtualMachines/foreign" }
+            { Get-DemoInventory retail-demo -KeepParkedVmNames image-parent } | Should -Throw '*ambiguous fleet*'
         }
         It 'rejects OS drift between the manifest and actual VM' {
             $script:vmFixtures[0].storageProfile.osDisk.osType = 'Linux'
@@ -607,7 +639,8 @@ Describe 'Activation with the real optional-network preflight' {
             Mock Get-DemoInventory {
                 $f = $global:ArcLifecycleFixture
                 [pscustomobject]@{ Machines = @($f.machine); ArcRg = 'rg-retail-demo'; InfraRg = 'rg-retail-demo-infra'
-                    ContainerAppIds = @($f.appIds | Where-Object { $_ }); AksClusterIds = @("$($f.root)/Microsoft.ContainerService/managedClusters/retail-demo-aks"); Resources = $f.resources }
+                    ContainerAppIds = @($f.appIds | Where-Object { $_ }); AksClusterIds = @("$($f.root)/Microsoft.ContainerService/managedClusters/retail-demo-aks"); Resources = $f.resources
+                    ParkedMachines = @($f.parkedMachines | Where-Object { $_ }) }
             }
             Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/id' 'parked' 'parked' 'pass' }
             Mock Get-DemoNetworkState {
@@ -647,6 +680,16 @@ Describe 'Activation with the real optional-network preflight' {
             Should -Invoke Invoke-DemoGuestCommand -Times 1 -ParameterFilter { $AsJob -and $Script -match 'MonAgentCore' -and $Script -notmatch 'Restart-Service|AzureMonitorAgent' }
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'start' -in $Arguments -or 'create' -in $Arguments -or 'update' -in $Arguments }
             Should -Invoke Invoke-DemoAz -Times 2 -Exactly -ParameterFilter { $Arguments[0] -eq 'aks' -and '-g' -in $Arguments -and '-n' -in $Arguments -and '--ids' -notin $Arguments }
+        }
+        It 'never starts or invokes a guest command on an explicit keep-parked VM' {
+            $f = $global:ArcLifecycleFixture
+            $f.parkedMachines = @([pscustomobject]@{ Name = 'image-parent'; Id = "$($f.root)/Microsoft.Compute/virtualMachines/image-parent"
+                KeepParked = $true; Actual = @{ powerState = 'VM deallocated' } })
+            Mock Get-DemoSkin { @{ operations = @{ keepParkedVmNames = @('image-parent') } } }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            Should -Invoke Get-DemoInventory -Times 1 -ParameterFilter { $KeepParkedVmNames -contains 'image-parent' }
+            Should -Invoke Invoke-DemoGuestCommand -Times 0 -ParameterFilter { $Machine.Name -eq 'image-parent' }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { ($Arguments -join ' ') -match 'image-parent' }
         }
         It 'validates a connected Windows Arc host without resubmitting assessments on an already-active retry' {
             $f = $global:ArcLifecycleFixture
@@ -1317,6 +1360,18 @@ Describe 'Readiness CLI contract' {
                 $check = Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Hibernated | Where-Object id -like 'vm/*'
                 $check.status | Should -Be 'fail'
                 $check.message | Should -Match 'unknown'
+            }
+            It 'requires explicitly kept-parked machines to remain deallocated during Active readiness' {
+                $script:parkedInventory.Machines = @()
+                $script:parkedInventory | Add-Member ParkedMachines @([pscustomobject]@{
+                    Name = 'image-parent'; Id = '/vm/image-parent'; KeepParked = $true; Actual = @{ powerState = 'VM deallocated' }
+                })
+                $check = Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Active | Where-Object id -like 'vm/*'
+                $check.expected | Should -Be 'VM deallocated'
+                $check.status | Should -Be pass
+                $script:parkedInventory.ParkedMachines[0].Actual.powerState = 'VM running'
+                $check = Get-DemoReadinessChecks -Inventory $script:parkedInventory -NamePrefix retail-demo -DesiredState Active | Where-Object id -like 'vm/*'
+                $check.status | Should -Be pending
             }
         }
     }
