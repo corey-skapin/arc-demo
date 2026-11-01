@@ -8,7 +8,7 @@ inventory with four Online system databases. These are observed timings, not SLA
 
 This is an Azure-hosted nested **demo**, not a production support claim. The
 from-zero proof rebuilt the guest, **not** the prepared Azure parent, media,
-Hyper-V network or private onboarding infrastructure. Use approved Windows/SQL
+Hyper-V network or onboarding application. Use approved Windows/SQL
 media and terms; Developer/Evaluation editions are not production licences.
 The normal fleet's `MSFT_ARC_TEST=true` simulation is a separate path.
 
@@ -83,17 +83,18 @@ rerun the whole build against an existing guest.
 The individual New/Wait/Connect/Engine/Enable/Test scripts support targeted
 continuation through `Invoke-NestedSqlDemoStep.ps1`.
 
-| Successful scratch-build step | Observed time |
+| One-day-credential scratch-build step | Observed time |
 |---|---:|
-| Create/image/first boot | 11m51s |
-| Wait for unattended setup | 5m07s |
-| Arc connect/private vault | 7m16s |
-| SQL install/version query | 7m26s |
-| SYSTEM permission check/SQL-only unblock | 2m59s |
-| Arc SQL extension | 5m31s |
-| Azure SQL/database inventory | 1m46s |
-| Local Windows/Arc/SQL/extension check | 2m34s |
-| Total including orchestration | 45m44s |
+| Create/image/first boot | 10m37s |
+| Wait for unattended setup | 5m12s |
+| Arc connect | 6m16s |
+| SQL install/version query | 8m25s |
+| SYSTEM permission check/SQL-only unblock | 2m11s |
+| Arc SQL extension | 4m48s |
+| Azure SQL/database inventory | 2m38s |
+| Local Windows/Arc/SQL/extension check | 42s |
+| Build total | 42m21s |
+| Total including credential handling | 42m30s |
 
 Times exclude earlier failed attempts, debugging and removal. Scratch fixes were
 cold DNS readiness, actual SQL bootstrap paths, parsing the agent block list,
@@ -194,7 +195,7 @@ Jumpstart remains a working, **manual** alternative, not a second build framewor
 
 | Approach | Needed and broke | Repeatability and time evidence |
 |---|---|---|
-| Scratch, primary | Prepared parent/media/network/vault; corrected Server 2022 BCDBoot, DNS, bootstrap/block-list parsing and extension creation lag | Repo-only guest build 45m44s; park 4m03s; wake 2m41s; repark 3m02s; retained identities and fresh SQL inventory |
+| Scratch, primary | Prepared parent/media/network and onboarding application; corrected Server 2022 BCDBoot, DNS, bootstrap/block-list parsing and extension creation lag | One-day-credential build 42m30s; earlier run: build 45m44s, park 4m03s, wake 2m41s, repark 3m02s; retained identities and fresh SQL inventory |
 | Jumpstart image | Acquire image and accept licence; finish OOBE, set Administrator password and static IP/DNS; private Arc/SQL setup; invalid `Stop-VM -Shutdown` and empty inline Run Command output were fixed | SQL 2019 Developer and Arc SQL inventory worked; setup remained manual. No comparable end-to-end build time was captured |
 
 For Jumpstart, complete those manual steps, prevent guest IMDS access, and then

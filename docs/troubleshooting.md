@@ -283,11 +283,13 @@ Preflight no longer registers providers or skips RBAC for a supplied principal.
 Missing providers, insufficient effective permissions, malformed skins,
 SKU restrictions and insufficient quota terminate with instructions.
 Quota/listing checks are not capacity guarantees.
-Routine redeployment does not reset SP credentials or generate a new password for
+`Deploy-ArcDemo.ps1` does not reset SP credentials or generate a new password for
 existing VMs. Old labs without the saved Key Vault secret need their **current**
 password as `-AdminPassword` (SecureString); an existing SP needed for new
 onboarding needs `-OnboardingSecret`. Obtain the current values from the operator;
 do not rotate them as a shortcut. See [lifecycle semantics](lifecycle.md).
+The [nested build](nested-sql-demo.md) is separate: it needs no vault or supplied
+onboarding secret and creates/removes its own one-day app credential.
 
 ## Deploy fails immediately with `SkuNotAvailable`
 

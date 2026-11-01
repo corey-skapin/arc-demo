@@ -232,11 +232,14 @@ read-only readiness and propose the exact required reconciliation.
 Preserve subscription deployment history: it is the lifecycle manifest.
 Incremental optional-only deployments do not delete earlier Arc hosts.
 
-VM credentials are not regenerated on a routine redeploy. Reuse the existing
+`Deploy-ArcDemo.ps1` does not regenerate VM credentials on a routine redeploy. Reuse the existing
 Key Vault secret; old labs without it must supply their **current**
 `-AdminPassword` as a SecureString. New Arc onboarding with an existing SP
 requires its existing `-OnboardingSecret`; no routine SP credential reset.
 Resolve missing credentials with the operator, never silently rotate them.
+These are estate-deployment inputs, not nested-build prerequisites: the
+[nested build](nested-sql-demo.md) creates and removes a one-day app credential
+without a vault or a supplied onboarding secret.
 
 Match the effective disk tier too: fresh deployments default to SSD, but an
 existing HDD lab requires `-OsDiskStorageAccountType Standard_LRS` or that value

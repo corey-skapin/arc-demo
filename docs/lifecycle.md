@@ -245,8 +245,15 @@ reuse `vm-admin-password` from their existing Key Vault; if that secret was neve
 stored, supply the **current** password as `-AdminPassword` (SecureString).
 Do not supply a new password as a convenience: credential rotation is a separate
 approved operation. Fresh deployments save the generated password to Key Vault.
-If new Arc onboarding is required and the SP already exists, supply its existing
+For `Deploy-ArcDemo.ps1`, if new Arc onboarding is required and the SP already exists, supply its existing
 secret as `-OnboardingSecret` (SecureString). Never commit or log either secret.
+
+Deploy selects a retained vault using the saved `keyVaultName` deployment output
+and preserves its public-network-access mode. A private-only vault requires the
+current `-AdminPassword`; Deploy does not open it for workstation secret reads.
+This protects the existing estate, not a nested-build prerequisite. The
+[nested build](nested-sql-demo.md) needs neither a vault nor a supplied onboarding
+secret: it creates and removes its own one-day app credential.
 
 Mandatory compute/Arc waits throw on timeout; inspection errors terminate. Native CLI
 failures terminate; authentication/authorization errors are never interpreted as
