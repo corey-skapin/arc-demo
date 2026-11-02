@@ -4,7 +4,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# 🤖 Azure Arc Machine Intelligence Centre\n\n## **Your Complete Single-Machine Dashboard**\n\n**🎯 What This Does**: Get a complete 360-degree view of any Azure Arc machine in your organisation with just one click.\n\n**✨ What You'll See:**\n- **🔍 Live Performance Data** - CPU, memory, disk, and network activity\n- **🛡️ Security Health** - Defender alerts, threats, and security status\n- **� Vulnerability Intelligence** - Real CVSS risk scores and detailed security assessments\n- **📊 Security Health Summary** - Complete security report card with compliance scores\n- **�💾 Software Tracking** - Recent installs, removals, and change history\n- **🗄️ SQL Server Details** - Database inventory, performance, and security (when available)\n- **⚙️ Arc Management** - Extensions, policies, and compliance status\n- **📊 Operations Timeline** - Connection history, updates, and maintenance events\n\n**🚀 Why This Matters**: This dashboard shows how Azure Arc transforms any machine into a fully managed, monitored, and secured part of your cloud environment with real-time vulnerability intelligence.\n\n---\n\n### 📋 **Choose Your Arc Machine**"
+        "json": "# 🤖 Azure Arc Machine Intelligence Centre\n\n## **Your Complete Single-Machine Dashboard**\n\n**🎯 What This Does**: Get a complete 360-degree view of any Azure Arc machine in your organisation with just one click.\n\n**✨ What You'll See:**\n- **🔍 Live Performance Data** - CPU, memory, disk, and network activity\n- **🛡️ Security Health** - Defender alerts, threats, and security status\n- **🔍 Vulnerability Intelligence** - Real CVSS risk scores and detailed security assessments\n- **📊 Security Health Summary** - Complete security report card with compliance scores\n- **💾 Software Tracking** - Recent installs, removals, and change history\n- **🗄️ SQL Server Details** - Database inventory, performance, and security (when available)\n- **⚙️ Arc Management** - Extensions, policies, and compliance status\n- **📊 Operations Timeline** - Connection history, updates, and maintenance events\n\n**🚀 Why This Matters**: This dashboard shows how Azure Arc transforms any machine into a fully managed, monitored, and secured part of your cloud environment with real-time vulnerability intelligence.\n\n---\n\n### 📋 **Choose Your Arc Machine**"
       },
       "name": "title"
     },
@@ -263,7 +263,7 @@
           "yAxisMinimum": 0,
           "yAxisMaximum": 100
         },
-        "title": "� Disk Free Space Trend Over Time",
+        "title": "💿 Disk Free Space Trend Over Time",
         "description": "Historical disk free space percentage - tracks storage consumption and helps prevent disk full situations"
       }
     },
@@ -508,7 +508,7 @@
     {
       "type": 1,
       "content": {
-        "json": "## 🛡️ **Security & Defender Intelligence**\n\n**What You're Looking At**: Microsoft Defender for Cloud security assessments, recommendations, and alerts for this Arc machine.\n\n**Why This Matters**: See your security status, get specific recommendations to improve it, and check compliance through Defender for Cloud's comprehensive security monitoring.\n\n### **🎯 How to Read the Security Assessment Tile:**\n\n**📊 The Big Number (Top)**: Your security compliance score (0-100%)\n- Shows what percentage of security recommendations are currently \"Healthy\"\n- **Higher percentage = Better security** (90%+ is excellent, below 70% needs attention)\n\n**� The Small Number (Bottom)**: Count of **High Severity** security issues\n- This is the number of critical security problems found\n- **Lower number = Better security** (0 is ideal, 3+ means urgent action needed)\n\n**🎨 Tile Colour & Status Text Meanings**:\n- 🟢 **Green \"Healthy\"**: No high-severity issues, good security posture\n- 🟡 **Yellow \"Multiple Medium Issues\"**: Some medium-priority items to address\n- 🟠 **Orange \"Some Medium Issues\"**: Few medium-priority concerns\n- 🔴 **Red \"Critical Issues\"**: High-severity security problems requiring immediate action\n- ⚪ **Grey \"No Assessments Found\"**: Defender for Cloud not configured or no data\n\n**💡 Example**: If you see a red tile showing \"Critical Issues\" with score 65% and small number 3, this means:\n- 65% of security checks are passing (the big number)\n- You have 3 high-severity security problems (the small number)\n- The red colour warns you about those 3 critical issues that need immediate attention"
+        "json": "## 🛡️ **Security & Defender Intelligence**\n\n**What You're Looking At**: Microsoft Defender for Cloud security assessments, recommendations, and alerts for this Arc machine.\n\n**Why This Matters**: See your security status, get specific recommendations to improve it, and check compliance through Defender for Cloud's comprehensive security monitoring.\n\n### **🎯 How to Read the Security Assessment Tile:**\n\n**📊 The Big Number (Top)**: Your security compliance score (0-100%)\n- Shows what percentage of security recommendations are currently \"Healthy\"\n- **Higher percentage = Better security** (90%+ is excellent, below 70% needs attention)\n\n**🔢 The Small Number (Bottom)**: Count of **High Severity** security issues\n- This is the number of critical security problems found\n- **Lower number = Better security** (0 is ideal, 3+ means urgent action needed)\n\n**🎨 Tile Colour & Status Text Meanings**:\n- 🟢 **Green \"Healthy\"**: No high-severity issues, good security posture\n- 🟡 **Yellow \"Multiple Medium Issues\"**: Some medium-priority items to address\n- 🟠 **Orange \"Some Medium Issues\"**: Few medium-priority concerns\n- 🔴 **Red \"Critical Issues\"**: High-severity security problems requiring immediate action\n- ⚪ **Grey \"No Assessments Found\"**: Defender for Cloud not configured or no data\n\n**💡 Example**: If you see a red tile showing \"Critical Issues\" with score 65% and small number 3, this means:\n- 65% of security checks are passing (the big number)\n- You have 3 high-severity security problems (the small number)\n- The red colour warns you about those 3 critical issues that need immediate attention"
       }
     },
     {
@@ -557,7 +557,7 @@
           "value::all"
         ],
         "visualization": "table",
-        "title": "� Security Schema Exploration - What Data Exists?",
+        "title": "🔍 Security Schema Exploration - What Data Exists?",
         "description": "Find security assessments specifically for the chosen Arc machine using the correct data structure"
       }
     },

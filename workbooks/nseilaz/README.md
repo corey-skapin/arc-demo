@@ -21,6 +21,24 @@ lookup constants and required upstream attribution are retained.
 | `GovernanceComplianceWorkbook_Experiment.json` | Governance & Compliance (experimental) | Larger compliance workbook with deeper drill-downs. |
 | `SQL_Estate_Dashboard.json` | SQL Estate Dashboard | Arc-enabled SQL inventory + Best Practice Assessment results. |
 
+## Local changes to the vendored snapshot
+
+The deployed copies differ from upstream in small query-text and default-value
+ways. Re-apply or re-check them after refreshing the snapshot below, or the
+refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
+
+- Subscription pickers (Asset Inventory, Compliance, Governance) default to
+  **All** (`value::all`), so tiles populate when the workbook opens.
+- Tag queries (Asset Inventory, Governance) also read the lab's `costcenter`,
+  `owner` and `env` tags. Resource Graph tag names are case-sensitive, so
+  `CostCentre`/`Owner`/`Environment` alone reported every machine as untagged.
+- Governance: the Governance Health Score tile projects the `Compliant` column its
+  tile reads. A few titles and headings that held a replacement character (U+FFFD)
+  in Governance and Machine Intelligence Center now carry an emoji.
+- SQL Estate Dashboard: the version and licence charts understand Arc SQL text
+  values such as `SQL Server 2022` and `Free`, not only numeric versions. The BPA
+  tiles remain explained placeholders because this lab collects no BPA data.
+
 ## How they get into your workspace
 
 `scripts/Deploy-ArcDemo.ps1` reads each file, sets `sourceId` to your demo workspace, and PUTs them as shared workbooks in the Arc resource group. Search **Workbooks** and choose the demo group/workspace; the Arc portal navigation can vary.
