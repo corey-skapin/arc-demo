@@ -80,7 +80,7 @@ each plus its conversation. What to drop:
   In chapter 2 use the SQL host and the Linux host, and say the data collection rule
   in one sentence instead of opening it. In chapter 3 show **Policy compliance** and
   the table of pending updates only. In chapter 4 show **SQL at a glance** and **Lock
-  timeouts and recoveries over time** only. In chapter 6 show the summary tiles and
+  timeouts and recoveries** only. In chapter 6 show the summary tiles and
   one review card. In chapter 7 show the missing-heartbeat rule and the SQL rule. In
   the close, read the table only.
 - **15 minutes:** everything above, and skip chapters 3 and 4 entirely (say in the
@@ -230,8 +230,7 @@ Engineer task 1.
    identity** is its Azure resource identity and **Newest telemetry** is how fresh its
    data is, without logging in.
 2. The **Performance** tab for CPU, memory and free disk, then the **SQL Server** tab:
-   **SQL commit and read health from Azure Monitor (events per interval)** is the
-   orders database's pulse.
+   **SQL worker events over time** is the orders database's pulse.
 3. Switch **Machine** to the Linux host **{{linuxMachineName}}**: the same tabs and the
    same charts.
 4. The data collection rule behind all of it, in the last minute of this chapter.
@@ -373,8 +372,8 @@ modernisation.
 2. **What Azure Arc inventories**: **SQL Server instances registered with Arc** and
    **Databases discovered by Arc**, with the **Edition mix**, **Version mix** and
    **Licence mix** tiles. Say the boundary first (see Say).
-3. **What Azure Monitor observes**: **Healthy commit events per minute**, then **Lock
-   timeouts and recoveries over time** and **Lock-timeout incidents (SQL error 1222)**:
+3. **What Azure Monitor observes**: **Healthy commits per minute**, then **Lock
+   timeouts and recoveries** and **Lock-timeout incidents (SQL error 1222)**:
    earlier incidents, dated.
 4. **Alerts raised by the lock-timeout rule**: the same rule that starts the night
    shift in chapter 7.
@@ -389,8 +388,8 @@ modernisation.
 > timeout, it leaves a mark, here, with a recovery after it. And a rule is watching for
 > exactly that mark. Hold on to it."
 
-**Wow:** **Lock timeouts and recoveries over time** draws a past incident as a spike and
-a recovery, next to the rule that watches for it.
+**Wow:** **Lock timeouts and recoveries** draws a past incident as a spike and a
+recovery, next to the rule that watches for it.
 
 **Bridge:** "So we know what we have and what it is doing. Now the planning question: is
 there room for what comes next?"

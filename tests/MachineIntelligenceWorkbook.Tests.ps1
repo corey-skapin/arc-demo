@@ -76,8 +76,9 @@ Describe 'Machine Intelligence Center opens populated, with no clicks and no wai
         foreach ($parameter in $parameters) { $parameter.isRequired | Should -BeTrue -Because $parameter.name }
     }
 
-    It 'ships no workspace scope of its own: Phase 11 pins every Log Analytics tile to the deployment workspace at publish' {
+    It 'ships no workspace scope of its own: Phase 11 pins every Log Analytics tile and hidden switch to the deployment workspace at publish' {
         foreach ($item in $la) { $item.content.PSObject.Properties.Name | Should -Not -Contain 'crossComponentResources' -Because $item.name }
+        foreach ($parameter in @($parameters | Where-Object { $_.queryType -eq 0 })) { $parameter.PSObject.Properties.Name | Should -Not -Contain 'crossComponentResources' -Because $parameter.name }
         @(($parameters | Where-Object name -eq 'Machine').crossComponentResources) | Should -Be @('value::all')
         $book.PSObject.Properties.Name | Should -Not -Contain 'fallbackResourceIds'
         $raw | Should -Not -Match '/subscriptions/'
@@ -242,49 +243,69 @@ Describe 'Machine Intelligence Center renders cleanly in the portal' {
 
     It 'formats every date and time column as a readable local date instead of a raw ISO string' {
         foreach ($item in $queries) {
-            foreach ($formatter in @($item.content.gridSettings.formatters | Where-Object { $_.columnMatch -match '^(TimeGenerated|Since|Evaluated|LastSample|LastInventory|Last)$' })) {
+            foreach ($formatter in @($item.content.gridSettings.formatters | Where-Object { $_.columnMatch -match '^(TimeGenerated|Since|LastSample|Last)$' })) {
                 $formatter.formatter | Should -Be 6 -Because "$($item.name) $($formatter.columnMatch)"
                 $formatter.dateFormat.formatName | Should -Be 'shortDateTimeNoMsPattern' -Because "$($item.name) $($formatter.columnMatch)"
+                $formatter.dateFormat.showUtcTime | Should -BeNullOrEmpty -Because "$($item.name): null means local time"
             }
         }
-        foreach ($pair in @(@('perf-volumes', 'LastSample'), @('security-open', 'Since'), @('arc-policy-table', 'Evaluated'), @('software-table', 'TimeGenerated'), @('events-sources', 'Last'), @('sql-instances', 'LastInventory'))) {
+        foreach ($pair in @(@('perf-volumes', 'LastSample'), @('security-open', 'Since'), @('software-table', 'TimeGenerated'), @('events-sources', 'Last'))) {
             $item = $queries | Where-Object name -eq $pair[0]
             @($item.content.gridSettings.formatters | Where-Object { $_.columnMatch -eq $pair[1] -and $_.formatter -eq 6 }).Count | Should -Be 1 -Because "$($pair[0]) $($pair[1])"
         }
     }
 
-    It 'sizes every grid column so its header and its status chip are not cut' {
+    It 'sizes every grid column in proportional fr units that fit any container, with no header or status chip cut' {
         foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'table' })) {
             $labels = @{}
             foreach ($label in @($item.content.gridSettings.labelSettings)) { $labels[$label.columnId] = $label.label }
+            $budget = if ($item.customWidth -and [int]$item.customWidth -le 50) { 58 } else { 115 }
+            $sum = 0
             foreach ($formatter in @($item.content.gridSettings.formatters)) {
                 $width = [string]$formatter.formatOptions.customColumnWidthSetting
-                if ($width -notmatch '^(\d+)ch$') { continue }
-                $chars = [int]$Matches[1]
+                $width | Should -Match '^\d+fr$' -Because "$($item.name): $($formatter.columnMatch) needs an fr width, because fixed ch widths overflow a narrow container and push columns off screen"
+                $fr = [int]($width -replace 'fr$', '')
                 $header = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { [string]$formatter.columnMatch }
-                $chars | Should -BeGreaterOrEqual ($header.Length + 4) -Because "$($item.name) header '$header'"
+                $fr | Should -BeGreaterOrEqual ($header.Length + 5) -Because "$($item.name): header '$header' is cut off at $width"
                 if ($formatter.formatter -eq 18) {
                     $longest = ($formatter.formatOptions.thresholdsGrid | Where-Object { $_.thresholdValue } | ForEach-Object { ([string]$_.thresholdValue).Length } | Measure-Object -Maximum).Maximum
-                    $chars | Should -BeGreaterOrEqual ($longest + 6) -Because "$($item.name) chip $($formatter.columnMatch)"
+                    $fr | Should -BeGreaterOrEqual ($longest + 6) -Because "$($item.name) chip $($formatter.columnMatch)"
                 }
+                if ($formatter.formatter -eq 6) { $fr | Should -BeGreaterOrEqual 26 -Because "$($item.name): 26 characters keep the AM/PM of a 12-hour clock from being clipped" }
+                $sum += $fr
             }
+            $sum | Should -BeLessOrEqual $budget -Because "$($item.name): the column widths add up to $sum characters"
         }
     }
 
-    It 'rounds decimals in grids with an explicit number format instead of showing 85.900-style values' {
+    It 'gives every projected grid column an explicit width, so no column is left to auto-size and widen the grid past its tile' {
+        foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'table' })) {
+            $columns = Get-ProjectedColumn $item.content.query
+            if (-not $columns) { continue }
+            $formatted = @($item.content.gridSettings.formatters | ForEach-Object { [string]$_.columnMatch })
+            foreach ($column in $columns) { $formatted | Should -Contain $column -Because "$($item.name) column $column" }
+        }
+    }
+
+    It 'rounds decimals in grids with an explicit number format and prints percentages as percentages' {
         foreach ($pair in @(@('perf-volumes', 'FreePct'), @('perf-volumes', 'LowestPct'), @('perf-volumes', 'FreeGb'), @('perf-volumes', 'SizeGb'), @('perf-dist', 'SharePct'), @('sql-databases', 'SizeMB'))) {
             $item = $queries | Where-Object name -eq $pair[0]
             $formatter = $item.content.gridSettings.formatters | Where-Object columnMatch -eq $pair[1]
             $formatter.numberFormat.options.maximumFractionDigits | Should -BeLessOrEqual 1 -Because "$($pair[0]) $($pair[1])"
         }
+        foreach ($pair in @(@('perf-volumes', 'FreePct'), @('perf-volumes', 'LowestPct'), @('perf-dist', 'SharePct'))) {
+            $item = $queries | Where-Object name -eq $pair[0]
+            ($item.content.gridSettings.formatters | Where-Object columnMatch -eq $pair[1]).numberFormat.unit | Should -Be 1 -Because "$($pair[0]) $($pair[1]): a bar or heat cell without a percentage format prints 7.100"
+        }
     }
 
-    It 'shows policy and initiative display names, never the raw definition GUIDs' {
+    It 'shows policy and initiative display names, never the raw definition GUIDs, one row per policy and initiative' {
         $query = ($arg | Where-Object name -eq 'arc-policy-table').content.query
         $query | Should -Match 'Windows machines should meet requirements of the Azure compute security baseline'
         $query | Should -Match 'Microsoft cloud security benchmark'
         $query | Should -Match 'NIST SP 800-53 Rev\. 5'
-        $query | Should -Match '\| project Policy, Initiative, Assignment = tostring\(properties\.policyAssignmentName\), Evaluated = todatetime\(properties\.timestamp\)'
+        $query | Should -Match 'summarize Assignments = dcount\(AssignmentName\), LastEvaluated = max\(EvaluatedAt\) by Policy, Initiative'
+        $query | Should -Match '\| project Policy, Initiative, Assignments, EvaluatedAge = case\('
         $query | Should -Not -Match '(?m)^\| project .*policyDefinitionName'
     }
 
@@ -292,5 +313,102 @@ Describe 'Machine Intelligence Center renders cleanly in the portal' {
         $query = ($arg | Where-Object name -eq 'glance-identity').content.query
         $query | Should -Match "replace_string\(OsSku, 'Windows Server ', 'Server '\)"
         $query | Should -Match 'substring\(OsShort, 0, 30\)'
+    }
+
+    It 'keeps the identity strip to four tiles so a fifth never wraps alone' {
+        $query = ($arg | Where-Object name -eq 'glance-identity').content.query
+        @([regex]::Matches($query, "pack\('Label'")).Count | Should -Be 4
+        $query | Should -Match "'Role'"
+        $query | Should -Match "strcat\('agent v', AgentMajor, ', since ', ChangedText\)"
+    }
+
+    It 'keeps chart titles and legend labels short enough not to be cut, and names the level a threshold line marks' {
+        foreach ($item in @($la | Where-Object { $_.content.visualization -eq 'barchart' })) {
+            $width = if ($item.customWidth) { [int]$item.customWidth } else { 100 }
+            $limit = if ($width -le 33) { 28 } elseif ($width -le 50) { 34 } else { 80 }
+            $item.content.title.Length | Should -BeLessOrEqual $limit -Because "$($item.name): '$($item.content.title)' is cut off at $width% width"
+            foreach ($series in @($item.content.chartSettings.seriesLabelSettings)) { $series.label.Length | Should -BeLessOrEqual 22 -Because "$($item.name) legend '$($series.label)'" }
+            $line = $item.content.chartSettings.customThresholdLine
+            if ($line) { $item.content.title | Should -Match "line at $line%" -Because "$($item.name): an unlabeled threshold line leaves the reader guessing" }
+        }
+    }
+
+    It 'prints percentage charts as percentages' {
+        foreach ($name in 'perf-cpu-avg', 'perf-cpu-peak', 'perf-mem', 'perf-disk', 'events-heartbeat') {
+            ($la | Where-Object name -eq $name).content.chartSettings.ySettings.numberFormatSettings.unit | Should -Be 1 -Because $name
+        }
+    }
+
+    It 'colours free space on the same thresholds as the Level chip: green at 30% free or more, red under 15%' {
+        $volumes = $la | Where-Object name -eq 'perf-volumes'
+        $volumes.content.query | Should -Match "FreePct < 15, 'Low free space', FreePct < 30, 'Watch', 'Healthy'"
+        foreach ($name in 'FreePct', 'LowestPct') {
+            $formatter = $volumes.content.gridSettings.formatters | Where-Object columnMatch -eq $name
+            $formatter.formatOptions.palette | Should -Be 'redGreen' -Because $name
+            $formatter.formatOptions.min | Should -Be 0 -Because $name
+            $formatter.formatOptions.max | Should -Be 30 -Because "$name is full green at 30% free, like the Healthy chip"
+        }
+    }
+
+    It 'does not contradict itself on the SQL tab: the engine tiles say they describe the host, and the instance message allows for a running SQL Server' {
+        ($arg | Where-Object name -eq 'sql-detect').content.query | Should -Match "'SQL Server on host'"
+        ($arg | Where-Object name -eq 'sql-instances').content.noDataMessage | Should -Match 'even if SQL Server is running'
+    }
+}
+
+Describe 'Machine Intelligence Center shows one explanation instead of message-only charts' {
+    It 'derives two hidden switches from Log Analytics for the selected machine and time range' {
+        foreach ($name in 'Telemetry', 'SqlWorker') {
+            $switch = $parameters | Where-Object name -eq $name
+            $switch.type | Should -Be 2 -Because $name
+            $switch.isHiddenWhenLocked | Should -BeTrue -Because $name
+            $switch.isRequired | Should -BeTrue -Because $name
+            $switch.queryType | Should -Be 0 -Because $name
+            $switch.resourceType | Should -Be 'microsoft.operationalinsights/workspaces' -Because $name
+            $switch.timeContextFromParameter | Should -Be 'TimeRange' -Because $name
+            $switch.query | Should -Match "split\('\{Machine\}', '/'\)\[-1\]" -Because $name
+            $switch.query | Should -Match '\| summarize \w+ = count\(\)' -Because "$name returns exactly one row even when nothing matches"
+            $switch.query | Should -Match 'selected = true' -Because $name
+        }
+        ($parameters | Where-Object name -eq 'Telemetry').query | Should -Match '\bHeartbeat\b'
+        ($parameters | Where-Object name -eq 'Telemetry').query | Should -Match "'data'.+'none'"
+        ($parameters | Where-Object name -eq 'SqlWorker').query | Should -Match "Source == 'ArcSqlEngineDemo'"
+        ($parameters | Where-Object name -eq 'SqlWorker').query | Should -Match "'worker'.+'none'"
+    }
+
+    It 'hides every Log Analytics chart, grid and header of a tab behind its switch, so a machine without data gets no chart-height blank band' {
+        $tabItems = @($items | Where-Object { $_.name -match '^(perf|software|events|sql)-' })
+        foreach ($item in $tabItems) {
+            if ($item.name -in 'perf-nodata', 'software-nodata', 'events-nodata', 'sql-noworker', 'sql-detect', 'sql-instances', 'sql-databases', 'sql-header') { continue }
+            $parameter = if ($item.name -like 'sql-*') { 'SqlWorker' } else { 'Telemetry' }
+            $value = if ($item.name -like 'sql-*') { 'worker' } else { 'data' }
+            $item.conditionalVisibility.parameterName | Should -Be $parameter -Because $item.name
+            $item.conditionalVisibility.comparison | Should -Be 'isEqualTo' -Because $item.name
+            $item.conditionalVisibility.value | Should -Be $value -Because $item.name
+        }
+        foreach ($name in 'perf-cpu-avg', 'perf-volumes', 'software-chart', 'software-table', 'events-heartbeat', 'events-sources', 'sql-workload', 'sql-events') {
+            @($tabItems | Where-Object name -eq $name).Count | Should -Be 1 -Because "$name must be present and hidden when there is nothing to chart"
+        }
+    }
+
+    It 'shows one specific info message per tab for a machine without data, naming the machine' {
+        foreach ($pair in @(@('perf-nodata', 'Telemetry'), @('software-nodata', 'Telemetry'), @('events-nodata', 'Telemetry'), @('sql-noworker', 'SqlWorker'))) {
+            $message = $items | Where-Object name -eq $pair[0]
+            $message.type | Should -Be 1 -Because $pair[0]
+            $message.content.style | Should -Be 'info' -Because $pair[0]
+            $message.conditionalVisibility.parameterName | Should -Be $pair[1] -Because $pair[0]
+            $message.conditionalVisibility.value | Should -Be 'none' -Because $pair[0]
+            $message.content.json | Should -Match '\{Machine\}' -Because $pair[0]
+            $message.content.json.Length | Should -BeGreaterThan 120 -Because $pair[0]
+        }
+        foreach ($name in 'perf-nodata', 'software-nodata', 'events-nodata') { ($items | Where-Object name -eq $name).content.json | Should -Match 'no Azure Monitor Agent|has no Azure Monitor Agent|without the agent' -Because $name }
+        ($items | Where-Object name -eq 'sql-noworker').content.json | Should -Match 'ArcSqlEngineDemo'
+    }
+
+    It 'keeps the Arc, Defender and SQL inventory visible for a machine without an agent' {
+        foreach ($name in 'glance-identity', 'glance-live', 'security-tiles', 'security-open', 'sql-detect', 'sql-instances', 'sql-databases', 'arc-extensions', 'arc-policy-tiles', 'arc-policy-table') {
+            $item = $items | Where-Object name -eq $name
+            $item.conditionalVisibility.parameterName | Should -Not -Be 'Telemetry' -Because $name
+        }
     }
 }

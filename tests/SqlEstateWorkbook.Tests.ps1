@@ -49,9 +49,10 @@ Describe 'SQL Estate Dashboard tells one story and opens populated' {
         ($parameters | Where-Object name -eq 'TimeRange').value.durationMs | Should -BeGreaterThan 0
     }
 
-    It 'ships no workspace scope of its own: Phase 11 pins every Log Analytics tile to the deployment workspace at publish' {
+    It 'ships no workspace scope of its own: Phase 11 pins every Log Analytics tile and hidden switch to the deployment workspace at publish' {
         $la.Count | Should -BeGreaterThan 0
         foreach ($item in $la) { $item.content.PSObject.Properties.Name | Should -Not -Contain 'crossComponentResources' -Because $item.name }
+        foreach ($parameter in @($parameters | Where-Object { $_.queryType -eq 0 })) { $parameter.PSObject.Properties.Name | Should -Not -Contain 'crossComponentResources' -Because $parameter.name }
         $book.PSObject.Properties.Name | Should -Not -Contain 'fallbackResourceIds'
         $raw | Should -Not -Match '/subscriptions/'
         $raw | Should -Not -Match '(?i)law-[a-z0-9-]+'
@@ -193,17 +194,21 @@ Describe 'SQL Estate Dashboard renders cleanly in the portal' {
         $query = ($la | Where-Object name -eq 'workload-latency').content.query
         $query | Should -Match 'make-series Slowest = max\(Elapsed\)'
         $query | Should -Not -Match 'Average'
-        ($la | Where-Object name -eq 'workload-latency').content.chartSettings.showLegend | Should -BeFalse
+        @(($la | Where-Object name -eq 'workload-latency').content.chartSettings.seriesLabelSettings).Count | Should -Be 1
     }
 
-    It 'labels every series with a short name that fits the legend, and shows a legend only where there are several series' {
+    It 'gives every workload chart a short title and a short legend below it, so nothing is cut at one third of the page width' {
         foreach ($name in 'workload-commits', 'workload-latency', 'workload-locks') {
-            $chart = ($la | Where-Object name -eq $name).content.chartSettings
-            foreach ($series in $chart.seriesLabelSettings) { $series.label.Length | Should -BeLessOrEqual 30 -Because "$name $($series.seriesName)" }
+            $item = $la | Where-Object name -eq $name
+            $item.customWidth | Should -Be '33' -Because $name
+            $item.content.title.Length | Should -BeLessOrEqual 28 -Because "$name '$($item.content.title)' is cut off at 33% width"
+            $chart = $item.content.chartSettings
+            $chart.showLegend | Should -BeTrue -Because $name
+            $chart.simpleLegendSettings.position | Should -Be 'bottom' -Because $name
+            @($chart.seriesLabelSettings).Count | Should -BeGreaterThan 0 -Because $name
+            foreach ($series in $chart.seriesLabelSettings) { $series.label.Length | Should -BeLessOrEqual 22 -Because "$name $($series.seriesName)" }
         }
         $locks = ($la | Where-Object name -eq 'workload-locks').content.chartSettings
-        $locks.showLegend | Should -BeTrue
-        $locks.simpleLegendSettings.position | Should -Be 'bottom'
         ($locks.seriesLabelSettings | Where-Object seriesName -like 'Lock timeout*').color | Should -Be 'redBright'
     }
 
@@ -227,44 +232,102 @@ Describe 'SQL Estate Dashboard renders cleanly in the portal' {
     }
 
     It 'formats every date and time column as a readable local date instead of a raw ISO string' {
-        foreach ($pair in @(@('inventory-instances', 'LastInventory'), @('workload-incidents', 'Detected'), @('workload-alerts', 'Raised'), @('workload-alerts', 'Resolved'))) {
+        foreach ($pair in @(@('workload-incidents', 'Detected'), @('workload-alerts', 'Raised'))) {
             $item = $queries | Where-Object name -eq $pair[0]
             $formatter = $item.content.gridSettings.formatters | Where-Object columnMatch -eq $pair[1]
             $formatter.formatter | Should -Be 6 -Because "$($pair[0]) $($pair[1])"
             $formatter.dateFormat.formatName | Should -Be 'shortDateTimeNoMsPattern' -Because "$($pair[0]) $($pair[1])"
+            $formatter.dateFormat.showUtcTime | Should -BeNullOrEmpty -Because "$($pair[0]) $($pair[1]): null means local time"
         }
     }
 
-    It 'reports the latest alert as a relative age like every other tile, not a UTC clock time' {
+    It 'reports the latest alert and the resolution as relative ages like every other tile, not UTC clock times' {
         $query = ($arg | Where-Object name -eq 'glance-alerts').content.query
         $query | Should -Match "strcat\('latest ', RaisedText\)"
         $query | Should -Not -Match 'UTC|format_datetime'
+        ($arg | Where-Object name -eq 'workload-alerts').content.query | Should -Match "ResolvedAge = iff\(isnull\(ResolvedAt\), ''"
     }
 
-    It 'sizes every grid column so its header and its status chip are not cut' {
+    It 'shows one state on the latest-alert tile, never two states side by side' {
+        $query = ($arg | Where-Object name -eq 'glance-alerts').content.query
+        $query | Should -Match "pack\('Label', 'Latest alert', 'Value', Condition, 'Note', Sev, 'Order', 2\)"
+        $query | Should -Not -Match "strcat\(AlertState"
+    }
+
+    It 'sizes every grid column in proportional fr units that fit any container, with no header or status chip cut' {
         foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'table' })) {
             $labels = @{}
             foreach ($label in @($item.content.gridSettings.labelSettings)) { $labels[$label.columnId] = $label.label }
+            $budget = if ($item.customWidth -and [int]$item.customWidth -le 50) { 58 } else { 115 }
+            $sum = 0
             foreach ($formatter in @($item.content.gridSettings.formatters)) {
                 $width = [string]$formatter.formatOptions.customColumnWidthSetting
-                if ($width -notmatch '^(\d+)ch$') { continue }
-                $chars = [int]$Matches[1]
+                $width | Should -Match '^\d+fr$' -Because "$($item.name): $($formatter.columnMatch) needs an fr width, because fixed ch widths overflow a narrow container and push columns off screen"
+                $fr = [int]($width -replace 'fr$', '')
                 $header = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { [string]$formatter.columnMatch }
-                $chars | Should -BeGreaterOrEqual ($header.Length + 4) -Because "$($item.name) header '$header'"
+                $fr | Should -BeGreaterOrEqual ($header.Length + 5) -Because "$($item.name): header '$header' is cut off at $width"
                 if ($formatter.formatter -eq 18) {
                     $longest = ($formatter.formatOptions.thresholdsGrid | Where-Object { $_.thresholdValue } | ForEach-Object { ([string]$_.thresholdValue).Length } | Measure-Object -Maximum).Maximum
-                    $chars | Should -BeGreaterOrEqual ($longest + 6) -Because "$($item.name) chip $($formatter.columnMatch)"
+                    $fr | Should -BeGreaterOrEqual ($longest + 6) -Because "$($item.name) chip $($formatter.columnMatch)"
                 }
+                if ($formatter.formatter -eq 6) { $fr | Should -BeGreaterOrEqual 26 -Because "$($item.name): 26 characters keep the AM/PM of a 12-hour clock from being clipped" }
+                $sum += $fr
             }
+            $sum | Should -BeLessOrEqual $budget -Because "$($item.name): the column widths add up to $sum characters"
         }
     }
 
-    It 'keeps the incident grid within one full-width row: few columns, no identifiers that only widen it' {
-        $grid = ($la | Where-Object name -eq 'workload-incidents').content.gridSettings
-        @($grid.formatters).Count | Should -BeLessOrEqual 8
+    It 'gives every projected grid column an explicit width, so no column is left to auto-size and widen the grid past its tile' {
+        foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'table' })) {
+            $columns = Get-ProjectedColumn $item.content.query
+            if (-not $columns) { continue }
+            $formatted = @($item.content.gridSettings.formatters | ForEach-Object { [string]$_.columnMatch })
+            foreach ($column in $columns) { $formatted | Should -Contain $column -Because "$($item.name) column $column" }
+        }
+    }
+
+    It 'keeps the incident grid to one full-width row without the identifier columns that only widen it' {
+        $item = $la | Where-Object name -eq 'workload-incidents'
+        $item.PSObject.Properties.Name | Should -Not -Contain 'customWidth'
+        @($item.content.gridSettings.formatters).Count | Should -BeLessOrEqual 8
         $raw | Should -Not -Match '"columnMatch":\s*"IncidentId"'
-        $total = 0
-        foreach ($formatter in $grid.formatters) { if ([string]$formatter.formatOptions.customColumnWidthSetting -match '^(\d+)ch$') { $total += [int]$Matches[1] } }
-        $total | Should -BeLessOrEqual 135
+    }
+
+    It 'keeps the instance grid to the columns that matter, labelling the Defender value as the one Arc reports' {
+        $item = $arg | Where-Object name -eq 'inventory-instances'
+        @($item.content.gridSettings.formatters | ForEach-Object { $_.columnMatch }) | Should -Be @('Instance', 'Version', 'Edition', 'Licence', 'Status', 'Defender', 'InventoryAge')
+    }
+}
+
+Describe 'SQL Estate Dashboard shows no empty assessment tiles while assessment is not enabled' {
+    It 'derives a hidden switch from a guarded read of the assessment table for the time range' {
+        $switch = $parameters | Where-Object name -eq 'BpaMode'
+        $switch.type | Should -Be 2
+        $switch.isHiddenWhenLocked | Should -BeTrue
+        $switch.isRequired | Should -BeTrue
+        $switch.queryType | Should -Be 0
+        $switch.resourceType | Should -Be 'microsoft.operationalinsights/workspaces'
+        $switch.timeContextFromParameter | Should -Be 'TimeRange'
+        $switch.PSObject.Properties.Name | Should -Not -Contain 'crossComponentResources'
+        $switch.query | Should -Match 'union isfuzzy=true SqlAssessment_CL'
+        ([regex]::Matches($switch.query, 'SqlAssessment_CL')).Count | Should -Be 1
+        $switch.query | Should -Match '\| summarize Rows = count\(\)'
+        $switch.query | Should -Match "'data'.+'none'"
+        $switch.query | Should -Match 'selected = true'
+    }
+
+    It 'shows the assessment charts only when assessment data exists and an info note explaining why not otherwise' {
+        foreach ($name in 'bpa-severity', 'bpa-top') {
+            $item = $items | Where-Object name -eq $name
+            $item.conditionalVisibility.parameterName | Should -Be 'BpaMode' -Because $name
+            $item.conditionalVisibility.value | Should -Be 'data' -Because $name
+        }
+        $off = $items | Where-Object name -eq 'bpa-off'
+        $off.conditionalVisibility.parameterName | Should -Be 'BpaMode'
+        $off.conditionalVisibility.value | Should -Be 'none'
+        $off.content.style | Should -Be 'info'
+        $off.content.json | Should -Match 'not enabled in this lab'
+        $off.content.json | Should -Match 'SqlAssessment_CL'
+        ($items | Where-Object name -eq 'bpa-on').conditionalVisibility.value | Should -Be 'data'
     }
 }
