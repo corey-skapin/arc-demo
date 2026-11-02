@@ -25,10 +25,11 @@ Describe 'Arc asset inventory workbook (rebuilt, repo-native)' {
         foreach ($parameter in $parameters) { $parameter.value | Should -Not -BeNullOrEmpty -Because $parameter.name }
     }
 
-    It 'pins every Log Analytics tile to the workspace placeholder and Resource Graph tiles to all subscriptions' {
-        @($book.fallbackResourceIds) | Should -Be @('__WORKSPACE__')
+    It 'leaves the Log Analytics scope to Phase 11 and scopes Resource Graph tiles to all subscriptions' {
+        $raw | Should -Not -Match '__WORKSPACE__'
+        @($book.fallbackResourceIds).Count | Should -Be 0
         foreach ($item in $queries) {
-            if ($item.content.queryType -eq 0) { @($item.content.crossComponentResources) | Should -Be @('__WORKSPACE__') -Because $item.content.title }
+            if ($item.content.queryType -eq 0) { @($item.content.crossComponentResources).Count | Should -Be 0 -Because $item.content.title }
             else { @($item.content.crossComponentResources) | Should -Be @('value::all') -Because $item.content.title }
         }
     }

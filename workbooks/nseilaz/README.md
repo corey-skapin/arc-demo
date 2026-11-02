@@ -30,9 +30,11 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
 - Asset Inventory is no longer deployed from this folder. It is rebuilt in
   `workbooks/arc-asset-inventory.workbook.json` (queries adapted from the upstream file, attribution
   kept in its header); the upstream file stays here unchanged as the attribution snapshot.
-- Log Analytics tiles are pinned to this deployment's workspace through the `__WORKSPACE__` placeholder that
-  Phase 11 binds at publish. The upstream workspace pickers resolved in the portal to a second workspace
-  without the Change Tracking tables and showed "Failed to resolve table" errors.
+- Log Analytics items (tiles, parameters and group members) are pinned to this deployment's workspace by
+  Phase 11 at publish (`Set-WorkbookWorkspaceDefaults`), whatever the repo JSON says. The upstream workspace
+  pickers resolved in the portal to a second workspace without the Change Tracking tables and showed
+  "Failed to resolve table" errors; `tests/WorkbookWorkspaceScope.Tests.ps1` publishes all five upstream-derived
+  workbooks with a fake workspace and checks the pin.
 - Subscription pickers (Asset Inventory, Compliance, Governance) default to
   **All** (`value::all`), so tiles populate when the workbook opens.
 - Tag queries (Asset Inventory, Governance) also read the lab's `costcenter`,

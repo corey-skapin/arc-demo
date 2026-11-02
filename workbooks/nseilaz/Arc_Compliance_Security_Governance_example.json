@@ -439,9 +439,7 @@
               "size": 3,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "crossComponentResources": [
-                "__WORKSPACE__"
-              ],
+              "crossComponentResources": [],
               "visualization": "tiles",
               "tileSettings": {
                 "titleContent": {
@@ -468,9 +466,7 @@
               "size": 0,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "crossComponentResources": [
-                "__WORKSPACE__"
-              ],
+              "crossComponentResources": [],
               "visualization": "table",
               "gridSettings": {
                 "formatters": [
@@ -543,9 +539,7 @@
               "size": 0,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "crossComponentResources": [
-                "__WORKSPACE__"
-              ],
+              "crossComponentResources": [],
               "visualization": "table",
               "gridSettings": {
                 "formatters": [

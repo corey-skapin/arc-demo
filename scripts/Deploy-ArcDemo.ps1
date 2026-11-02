@@ -1019,8 +1019,6 @@ function Set-WorkbookWorkspaceDefaults {
         [string]$DefaultWorkspaceId
     )
 
-    # Repo JSON carries only the placeholder; pin Log Analytics scope to this deployment's workspace.
-    $SerializedData = $SerializedData.Replace('__WORKSPACE__', $DefaultWorkspaceId)
     $workbook = $SerializedData | ConvertFrom-Json -Depth 100
     foreach ($item in @($workbook.items)) {
         if ($item.type -ne 9 -or -not $item.content -or -not $item.content.parameters) {
@@ -1046,6 +1044,37 @@ function Set-WorkbookWorkspaceDefaults {
             $parameter | Add-Member -NotePropertyName value -NotePropertyValue $DefaultWorkspaceId -Force
         }
     }
+
+    # Pin every Log Analytics query (items and LA-backed parameters, groups included) to the one deployment workspace.
+    # A picker or subscription scope can resolve to a second workspace in the subscription, which has none of these tables.
+    $pinned = [string[]]@($DefaultWorkspaceId)
+    $isWorkspaceQuery = {
+        param($Node)
+        $resourceType = [string]$Node.resourceType
+        $Node.queryType -eq 0 -and (-not $resourceType -or $resourceType -eq 'microsoft.operationalinsights/workspaces')
+    }
+    $pinWorkspaceScope = {
+        param($Items)
+        foreach ($entry in @($Items)) {
+            if (-not $entry.content) { continue }
+            if ($entry.type -eq 12 -and $entry.content.items) {
+                & $pinWorkspaceScope $entry.content.items
+                continue
+            }
+            if ($entry.type -in 3, 9 -and (& $isWorkspaceQuery $entry.content)) {
+                $entry.content | Add-Member -NotePropertyName crossComponentResources -NotePropertyValue $pinned -Force
+            }
+            if ($entry.type -eq 9) {
+                foreach ($parameter in @($entry.content.parameters)) {
+                    if (& $isWorkspaceQuery $parameter) {
+                        $parameter | Add-Member -NotePropertyName crossComponentResources -NotePropertyValue $pinned -Force
+                    }
+                }
+            }
+        }
+    }
+    & $pinWorkspaceScope $workbook.items
+    $workbook | Add-Member -NotePropertyName fallbackResourceIds -NotePropertyValue $pinned -Force
 
     return ($workbook | ConvertTo-Json -Depth 100)
 }

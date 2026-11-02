@@ -116,9 +116,7 @@
         "noDataMessageStyle": 5,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "__WORKSPACE__"
-        ],
+        "crossComponentResources": [],
         "visualization": "tiles",
         "timeContextFromParameter": "TimeRange",
         "tileSettings": {
@@ -569,9 +567,7 @@
         "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "__WORKSPACE__"
-        ],
+        "crossComponentResources": [],
         "visualization": "table",
         "timeContextFromParameter": "TimeRange",
         "gridSettings": {
@@ -616,9 +612,7 @@
         "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "__WORKSPACE__"
-        ],
+        "crossComponentResources": [],
         "visualization": "table",
         "timeContextFromParameter": "TimeRange",
         "gridSettings": {
@@ -656,9 +650,7 @@
         "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "__WORKSPACE__"
-        ],
+        "crossComponentResources": [],
         "visualization": "table",
         "timeContextFromParameter": "TimeRange",
         "gridSettings": {
@@ -700,9 +692,7 @@
         "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "__WORKSPACE__"
-        ],
+        "crossComponentResources": [],
         "visualization": "table",
         "timeContextFromParameter": "TimeRange",
         "gridSettings": {
@@ -738,9 +728,7 @@
         "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "__WORKSPACE__"
-        ],
+        "crossComponentResources": [],
         "visualization": "table",
         "timeContextFromParameter": "TimeRange",
         "gridSettings": {
@@ -789,9 +777,7 @@
         "noDataMessageStyle": 5,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "__WORKSPACE__"
-        ],
+        "crossComponentResources": [],
         "visualization": "table",
         "timeContextFromParameter": "TimeRange",
         "gridSettings": {
@@ -856,8 +842,6 @@
     }
   ],
   "isLocked": false,
-  "fallbackResourceIds": [
-    "__WORKSPACE__"
-  ],
+  "fallbackResourceIds": [],
   "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
 }
