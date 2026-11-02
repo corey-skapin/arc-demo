@@ -113,6 +113,21 @@ Describe 'Compliance patch tiles use real Update Manager data' {
         (& $common $scorecard) | Should -Be (& $common $table)
     }
 
+    It 'shows Fully Patched % as a number on a red-to-green scale, never green at 0%' {
+        $scorecard | Should -Match "\['Fully Patched %'\] = FullyPatchedPct,"
+        $scorecard | Should -Not -Match "strcat\(tostring\(FullyPatchedPct\)"
+        $tile = Get-WorkbookQuery $book | Where-Object { $_.content.query -match 'FullyPatchedPct' }
+        $tile.content.tileSettings.titleContent.columnMatch | Should -Be 'Fully Patched %'
+        $tile.content.tileSettings.titleContent.formatOptions.palette | Should -Be 'redGreen'
+    }
+
+    It 'keeps the tile label and subtitle short and counts servers, not updates' {
+        $scorecard | Should -MatchExactly "SecurityPending > 0, 'UPDATES PENDING'"
+        $scorecard | Should -Not -MatchExactly 'SECURITY UPDATES PENDING'
+        $scorecard | Should -Match "servers need updates"
+        $scorecard | Should -Not -Match "security pending;"
+    }
+
     It 'never reports a failed or unassessed machine as fully patched' {
         $scorecard | Should -Match "isempty\(AssessmentStatus\), 'Not assessed'"
         $scorecard | Should -Match "'Assessment failed'"
