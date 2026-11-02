@@ -136,7 +136,7 @@ while ($true) {
         }
         'CrashOnProcessing' {
             $incidentId = if ($config.PSObject.Properties['IncidentId']) { $config.IncidentId } else { 'manual' }
-            $message = "Fatal order-processing fault induced for T11. incidentId=$incidentId cycle=$cycle $context"
+            $message = "Fatal order-processing error. incidentId=$incidentId cycle=$cycle $context"
             Write-AppLog -Level 'ERROR' -Message $message
             Write-AppEvent -Config $config -EventId 4100 -EntryType Error -Message $message
             exit 42

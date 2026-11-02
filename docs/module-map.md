@@ -8,7 +8,7 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 ## Infrastructure
 
 | Surface | Responsibility |
-|---|---|
+| --- | --- |
 | `bicep/main.bicep` | Subscription entry point; two resource groups, data-driven onPremFleet, independent optional-workload flags, resource/manifest outputs including AKS cluster IDs |
 | `bicep/modules/vm.bicep` | Caller-defined Windows/Linux VM, system identity, NIC, DevTestLab shutdown schedule |
 | `bicep/modules/azure-vms.bicep` | Optional Azure-native Windows VM, native AMA/Dependency Agent; never Arc-onboarded |
@@ -31,7 +31,7 @@ the customer-facing Arc records and observability plane are in the other group.
 ## Operations
 
 | Entry point | Responsibility |
-|---|---|
+| --- | --- |
 | `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions/baseline provider checks |
 | `scripts/New-NestedSqlDemoGuest.ps1`, `Connect-NestedSqlDemoGuest.ps1`, `Install-NestedSqlDemoEngine.ps1` | Primary scratch Windows/SQL/Arc guest build; private credentials and approved media |
 | `scripts/New-NestedSqlDemo.ps1`, `Invoke-NestedSqlDemoStep.ps1`, `scripts/lib/NestedSqlDemo.psm1` | Working build sequence, protected parent-side step transport and retained Windows answer-file generator; no retired V1-V3 controller layers |
@@ -48,8 +48,9 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, `@file` guest-script transport/markers, capacity/quota, readiness checks |
 | `Get-DemoNestedSqlGuestConfig`, `Invoke-DemoNestedSqlGuest`, `Wait-DemoNestedSqlArcConnected` in `Common.psm1`, `tests/NestedSqlLifecycle.Tests.ps1` | One skin-defined nested guest, normal graceful shutdown/start and bounded Arc connection wait across Activate/Hibernate/Remove |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
-| `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved ISO/hash/terms, isolated local instance, bounded database/startup, phase-specific terminal errors and hash-checked worker ownership; no Arc SQL or automatic reboot/repair; independent policy-deployed Defender is not removed or disabled |
-| `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; SQL incident uses owned sessions/probe, rollback and transaction-derived events, not synthetic SQL proof or SRE remediation |
+| `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved media/terms, bounded startup and hash ownership; guarded emitter-only update preserves normal worker functions and migrates the owned checkpoint with rollback/backups; no Arc SQL, automatic reboot/repair or Defender changes |
+| `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; v2 actual error/wait/session evidence, bounded rollback and independently gated recovery, not synthetic proof or SRE remediation |
+| `scripts/Set-ArcWorkloadAlertDescription.ps1` | Narrow existing-canonical SQL/LOB description-only PATCH/readback; preserves titles, queries, settings, scopes, routes and tags; no DCR, guest or receiver changes |
 | `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1` | Default read-only preview/scoped approved publication; exact Arc roster, optional declared topology, ownership guards, hypothetical one-resource decimal scenario, no lifecycle/collection actions |
 
 All four lifecycle/deployment scripts require explicit subscription/tenant and
@@ -69,7 +70,7 @@ Default fleet: five Windows Server 2016/2019/2022 hosts and three Ubuntu 22.04
 hosts. Capability booleans, not names/counts, determine payloads.
 
 | Fleet subset | Extension path | DCRA scope |
-|---|---|---|
+| --- | --- | --- |
 | Supported Arc Windows | Arc AMA, Windows Dependency Agent, Windows CT | Arc machine ID |
 | Supported lab Linux | Azure VM AMA and CT; no Dependency Agent/map | Arc machine ID |
 | Optional native Windows | Azure VM AMA/Dependency Agent | Azure VM ID |

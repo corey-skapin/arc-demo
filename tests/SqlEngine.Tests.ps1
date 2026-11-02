@@ -24,10 +24,11 @@ BeforeAll {
         $wait = [pscustomobject]@{ Completes = -not $CleanupTimeout }
         $wait | Add-Member ScriptMethod WaitOne { param($milliseconds) return $this.Completes }
         $command = [pscustomobject]@{
-            Role = $Role; CommandText = ''; CommandTimeout = 0; Disposed = $false
+            Role = $Role; CommandText = ''; TimeoutSql = ''; LockTimeout = 5000; CommandTimeout = 0; Disposed = $false
             Async = [pscustomobject]@{ IsCompleted = $true; AsyncWaitHandle = $wait }
         }
         $command | Add-Member ScriptMethod BeginExecuteNonQuery { return $this.Async }
+        $command | Add-Member ScriptMethod ExecuteScalar { $this.TimeoutSql = $this.CommandText; return $this.LockTimeout }
         $command | Add-Member ScriptMethod EndExecuteNonQuery {
             param($async)
             if ($this.Role -eq 'Victim') { throw [InvalidOperationException]::new('Fixture SQL exception; not a real database result.') }
@@ -513,11 +514,16 @@ Describe 'Real SQL incident with mocked sessions' {
         $blockerFixture.Command.CommandText | Should -Match "WAITFOR DELAY '00:00:12'"
         $blockerFixture.Command.CommandText | Should -Match 'sp_getapplock'
         $blockerFixture.Command.CommandText | Should -Not -Match 'COMMIT|dbo.Orders|KILL'
-        $victimFixture.Command.CommandText | Should -Match 'SET LOCK_TIMEOUT 5000'
+        $victimFixture.Command.TimeoutSql | Should -Match 'SET LOCK_TIMEOUT 5000; SELECT @@LOCK_TIMEOUT'
+        $victimFixture.Command.CommandText | Should -Not -Match 'SET LOCK_TIMEOUT'
+        $victimFixture.Command.CommandText | Should -Match 'dbo.OrderProcessingCheckpoint'
         $victimFixture.Command.CommandText | Should -Match 'ROLLBACK TRANSACTION'
         Should -Invoke Write-EventLog -Times 1 -ParameterFilter {
             $EventId -eq 6201 -and $Source -eq 'ArcSqlEngineDemo' -and $EntryType -eq 'Error' -and
-            ($Message | ConvertFrom-Json).sqlErrorNumber -eq 1222 -and ($Message | ConvertFrom-Json).state -eq 'detected'
+            ($Message | ConvertFrom-Json).sqlErrorNumber -eq 1222 -and ($Message | ConvertFrom-Json).state -eq 'detected' -and
+            ($Message | ConvertFrom-Json).schemaVersion -eq 2 -and ($Message | ConvertFrom-Json).lockTimeoutMs -eq 5000 -and
+            ((($Message | ConvertFrom-Json).PSObject.Properties.Name | Sort-Object) -join ',') -eq
+            'blockerSessionId,database,incidentId,instance,lockTimeoutMs,observedAtUtc,schemaVersion,sqlErrorNumber,state,victimSessionId,waitResource,waitType'
         }
         Should -Invoke Write-EventLog -Times 1 -ParameterFilter { $EventId -eq 6001 -and $EntryType -eq 'Information' -and ($Message | ConvertFrom-Json).state -eq 'recovered' }
         Should -Invoke Get-DemoSqlStatus -Times 2
@@ -528,6 +534,14 @@ Describe 'Real SQL incident with mocked sessions' {
         { Invoke-DemoSqlIncident } | Should -Throw '*must be healthy*'
         Should -Invoke New-DemoIncidentConnection -Times 0
         Should -Invoke Write-EventLog -Times 0
+    }
+
+    It 'does not emit configured timeout metadata when the actual session timeout differs' {
+        $victimFixture.Command.LockTimeout = 1000
+        { Invoke-DemoSqlIncident } | Should -Throw '*Actual victim lock timeout*'
+        Should -Invoke Write-EventLog -Times 0
+        $blockerFixture.Disposed | Should -BeTrue
+        $victimFixture.Disposed | Should -BeTrue
     }
 
     It 'does not invent a lock incident without DMV wait evidence and still disposes its sessions' {
@@ -568,6 +582,140 @@ Describe 'Real SQL incident with mocked sessions' {
         }
         { Invoke-DemoSqlIncident } | Should -Throw '*Orders worker is no longer*'
         Should -Invoke Write-EventLog -Times 0 -ParameterFilter { $EventId -eq 6001 }
+    }
+}
+
+Describe 'Owned incident-emitter update without worker restart' {
+    BeforeEach {
+        $root = Join-Path $TestDrive ('emitter-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root | Out-Null
+        $manifestPath = Join-Path $root 'manifest.json'
+        $installedScript = Join-Path $root 'SqlEngineDemo.ps1'
+        $sourcePath = $guestPath
+        $instance = 'ARCDEMO'
+        $database = 'ArcDemoOrders'
+        $oldSource = $source.Replace('schemaVersion = 2; incidentId', 'schemaVersion = 1; incidentId')
+        [IO.File]::WriteAllText($installedScript, $oldSource)
+        $oldHash = (Get-FileHash $installedScript -Algorithm SHA256).Hash
+        @{ schemaVersion = 1; instance = $instance; database = $database; phase = 'ready'; scriptSha256 = $oldHash } |
+            ConvertTo-Json | Set-Content $manifestPath
+        $updateTransaction = [pscustomobject]@{ Committed = $false; RolledBack = $false; FailCommit = $false; Disposed = $false }
+        $updateTransaction | Add-Member ScriptMethod Commit {
+            if ($this.FailCommit) { throw 'Fixture commit outcome unknown.' }
+            $this.Committed = $true
+        }
+        $updateTransaction | Add-Member ScriptMethod Rollback { $this.RolledBack = $true }
+        $updateTransaction | Add-Member ScriptMethod Dispose { $this.Disposed = $true }
+        $updateCommand = [pscustomobject]@{ CommandText = ''; CommandTimeout = 0; Transaction = $null; Fail = $false; Disposed = $false }
+        $updateCommand | Add-Member ScriptMethod ExecuteScalar {
+            if ($this.Fail) { throw 'Fixture checkpoint absent, ambiguous or active.' }
+            return 'dbo.OrderProcessingCheckpoint'
+        }
+        $updateCommand | Add-Member ScriptMethod Dispose { $this.Disposed = $true }
+        $updateConnection = [pscustomobject]@{ Transaction = $updateTransaction; Command = $updateCommand; Disposed = $false }
+        $updateConnection | Add-Member ScriptMethod BeginTransaction { return $this.Transaction }
+        $updateConnection | Add-Member ScriptMethod CreateCommand { return $this.Command }
+        $updateConnection | Add-Member ScriptMethod Dispose { $this.Disposed = $true }
+        Mock New-DemoEmitterUpdateConnection { $updateConnection }
+        Mock Get-DemoSqlStatus { [pscustomobject]@{ status = 'pass'; instance = 'ARCDEMO'; database = 'ArcDemoOrders'; taskState = 'Running' } }
+        Mock Invoke-DemoSqlIncident { throw 'Update must not induce an incident.' }
+    }
+
+    It 'installs a parsed emitter/hash pair and migrates only the owned checkpoint in one guarded transaction' {
+        $result = Update-DemoIncidentEmitter
+        $result.eventSchemaVersion | Should -Be 2
+        $result.checkpointTable | Should -Be 'dbo.OrderProcessingCheckpoint'
+        (Get-Content $installedScript -Raw) | Should -Be $source
+        (Get-DemoManifest).scriptSha256 | Should -Be (Get-FileHash $guestPath -Algorithm SHA256).Hash
+        (Get-FileHash $result.previousScriptPath -Algorithm SHA256).Hash | Should -Be $oldHash
+        (Get-Content $result.previousManifestPath -Raw | ConvertFrom-Json).scriptSha256 | Should -Be $oldHash
+        $updateTransaction.Committed | Should -BeTrue
+        $updateTransaction.RolledBack | Should -BeFalse
+        $updateConnection.Disposed | Should -BeTrue
+        $updateCommand.CommandText | Should -Match "sp_getapplock.*|@Resource=N'ArcDemoSqlIncident-v1'"
+        $updateCommand.CommandText | Should -Match 'sys.dm_exec_sessions'
+        $updateCommand.CommandText | Should -Match '@old IS NOT NULL AND @current IS NOT NULL'
+        $updateCommand.CommandText | Should -Match 'sys.columns'
+        $updateCommand.CommandText | Should -Match "sp_rename N'dbo.IncidentProbe',N'OrderProcessingCheckpoint'"
+        $updateCommand.CommandText | Should -Not -Match 'KILL|UPDATE dbo.Orders|DROP TABLE'
+        @((Get-ChildItem $root -Filter 'emitter-*')).Count | Should -Be 0
+        Should -Invoke Invoke-DemoSqlIncident -Times 0
+        Should -Invoke Get-DemoSqlStatus -Times 2
+    }
+
+    It 'leaves identical installed files alone on a repeated requested update' {
+        Update-DemoIncidentEmitter | Out-Null
+        $count = @(Get-ChildItem $root).Count
+        $result = Update-DemoIncidentEmitter
+        $result.previousScriptPath | Should -BeNullOrEmpty
+        @(Get-ChildItem $root).Count | Should -Be $count
+    }
+
+    It 'fails before SQL or file replacement if a normal worker function changed' {
+        [IO.File]::WriteAllText($installedScript, $oldSource.Replace('19.95', '20.95'))
+        { Update-DemoIncidentEmitter } | Should -Throw "*Normal worker function 'Invoke-DemoOrder' changed*"
+        Should -Invoke New-DemoEmitterUpdateConnection -Times 0
+    }
+
+    It 'accepts diagnostic wording and line endings without relaxing executable worker checks' {
+        $previousText = $oldSource.Replace(
+            "throw 'Installed SQL worker differs from its manifest.'",
+            "throw 'Installed SQL worker differs from the owned manifest; no execution or health claim.'"
+        ).Replace("`r`n", "`n")
+        [IO.File]::WriteAllText($installedScript, $previousText)
+        (Update-DemoIncidentEmitter).status | Should -Be 'pass'
+    }
+
+    It 'preserves executable expressions inside a changed diagnostic message' {
+        $previousText = $oldSource.Replace('$($record.phase)', '$($record.instance)')
+        [IO.File]::WriteAllText($installedScript, $previousText)
+        { Update-DemoIncidentEmitter } | Should -Throw "*Normal worker function 'Get-DemoSqlStatus' changed*"
+        Should -Invoke New-DemoEmitterUpdateConnection -Times 0
+    }
+
+    It 'preserves the startup timeout even when error-message wording is harmless' {
+        [IO.File]::WriteAllText($installedScript, $oldSource.Replace('[int]$TimeoutSeconds = 600', '[int]$TimeoutSeconds = 900'))
+        { Update-DemoIncidentEmitter } | Should -Throw "*Normal worker function 'Wait-DemoSqlReady' changed*"
+        Should -Invoke New-DemoEmitterUpdateConnection -Times 0
+    }
+
+    It 'rejects stale worker health without opening a migration connection' {
+        Mock Get-DemoSqlStatus { @{ status = 'pending' } }
+        { Update-DemoIncidentEmitter } | Should -Throw '*healthy owned orders worker*'
+        Should -Invoke New-DemoEmitterUpdateConnection -Times 0
+    }
+
+    It 'preserves original files and rolls back an absent, ambiguous or active checkpoint' {
+        $updateCommand.Fail = $true
+        { Update-DemoIncidentEmitter } | Should -Throw '*Fixture checkpoint*'
+        (Get-FileHash $installedScript -Algorithm SHA256).Hash | Should -Be $oldHash
+        $updateTransaction.RolledBack | Should -BeTrue
+        $updateTransaction.Committed | Should -BeFalse
+        $updateConnection.Disposed | Should -BeTrue
+        @(Get-ChildItem $root -Filter 'emitter-*').Count | Should -Be 0
+    }
+
+    It 'restores both saved files after a pre-commit readback failure' {
+        $manifestReads = @{ Count = 0 }
+        Mock Get-DemoManifest {
+            $manifestReads.Count++
+            if ($manifestReads.Count -gt 1) { throw 'Fixture manifest readback failure.' }
+            Get-Content $manifestPath -Raw | ConvertFrom-Json
+        }
+        { Update-DemoIncidentEmitter } | Should -Throw '*Fixture manifest readback failure*'
+        (Get-FileHash $installedScript -Algorithm SHA256).Hash | Should -Be $oldHash
+        (Get-Content $manifestPath -Raw | ConvertFrom-Json).scriptSha256 | Should -Be $oldHash
+        $updateTransaction.RolledBack | Should -BeTrue
+        $updateTransaction.Committed | Should -BeFalse
+    }
+
+    It 'reports an ambiguous commit without blindly reverting files or retrying SQL' {
+        $updateTransaction.FailCommit = $true
+        { Update-DemoIncidentEmitter } | Should -Throw '*commit outcome is unknown*'
+        $updateTransaction.RolledBack | Should -BeFalse
+        (Get-DemoManifest).scriptSha256 | Should -Be (Get-FileHash $guestPath -Algorithm SHA256).Hash
+        $updateConnection.Disposed | Should -BeTrue
+        Should -Invoke New-DemoEmitterUpdateConnection -Times 1
     }
 }
 

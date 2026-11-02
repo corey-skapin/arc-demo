@@ -8,7 +8,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [ValidateSet('Install', 'Status', 'Start', 'Stop', 'Incident', 'ProtectArcSql', 'Workload')]
+    [ValidateSet('Install', 'Status', 'Start', 'Stop', 'Incident', 'UpdateIncidentEmitter', 'ProtectArcSql', 'Workload')]
     [string]$Action = 'Status',
     [string]$MediaIsoPath,
     [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$MediaSha256,
@@ -139,11 +139,11 @@ CREATE TABLE dbo.Orders (
     CommittedAtUtc datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
     Amount decimal(10,2) NOT NULL
 );
-CREATE TABLE dbo.IncidentProbe (
+CREATE TABLE dbo.OrderProcessingCheckpoint (
     ProbeId int NOT NULL PRIMARY KEY CHECK (ProbeId=1),
     ProbeValue int NOT NULL CHECK (ProbeValue BETWEEN 0 AND 1)
 );
-INSERT dbo.IncidentProbe(ProbeId, ProbeValue) VALUES (1, 0);
+INSERT dbo.OrderProcessingCheckpoint(ProbeId, ProbeValue) VALUES (1, 0);
 '@ $database -NonQuery | Out-Null
     Invoke-DemoSql @'
 ALTER DATABASE [ArcDemoOrders] SET RECOVERY SIMPLE;
@@ -332,7 +332,7 @@ function Set-DemoSqlExtensionBlock {
 
 function Invoke-DemoSqlIncident {
     if ((Get-DemoSqlStatus).status -ne 'pass') { throw 'The real SQL orders worker must be healthy before an incident.' }
-    $probe = Invoke-DemoSql 'SELECT ProbeValue FROM dbo.IncidentProbe WHERE ProbeId=1;' $database -TimeoutSeconds 3
+    $probe = Invoke-DemoSql 'SELECT ProbeValue FROM dbo.OrderProcessingCheckpoint WHERE ProbeId=1;' $database -TimeoutSeconds 3
     if ($probe.Rows.Count -ne 1 -or $probe.Rows[0].ProbeValue -ne 0) { throw 'Incident probe is absent, changed or already in use; no fault submitted.' }
     $blocker = $null
     $victim = $null
@@ -342,10 +342,10 @@ function Invoke-DemoSqlIncident {
     $failure = $null
     $cleanupFailures = New-Object 'Collections.Generic.List[string]'
     $incident = [ordered]@{
-        schemaVersion = 1; scenario = 'sql-lock-timeout'; incidentId = [guid]::NewGuid().ToString()
+        schemaVersion = 2; incidentId = [guid]::NewGuid().ToString()
         state = 'detected'; instance = $instance; database = $database
         blockerSessionId = 0; victimSessionId = 0; waitType = ''; waitResource = ''
-        sqlErrorNumber = 1222; lockTimeoutMs = 5000; maxBlockSeconds = 12; observedAtUtc = ''
+        sqlErrorNumber = 0; lockTimeoutMs = 0; observedAtUtc = ''
     }
     try {
         $blocker = New-DemoIncidentConnection Blocker
@@ -364,7 +364,7 @@ BEGIN TRY
     EXEC @result=sys.sp_getapplock @Resource=N'ArcDemoSqlIncident-v1',
         @LockMode=N'Exclusive', @LockOwner=N'Transaction', @LockTimeout=0;
     IF @result < 0 THROW 51000, 'Another SQL incident is active.', 1;
-    UPDATE dbo.IncidentProbe WITH (ROWLOCK) SET ProbeValue=1 WHERE ProbeId=1;
+    UPDATE dbo.OrderProcessingCheckpoint WITH (ROWLOCK) SET ProbeValue=1 WHERE ProbeId=1;
     IF @@ROWCOUNT <> 1 THROW 51001, 'Owned incident probe is absent.', 1;
     WAITFOR DELAY '00:00:12';
     ROLLBACK TRANSACTION;
@@ -377,19 +377,21 @@ END CATCH;
         $blockAsync = $blockCommand.BeginExecuteNonQuery()
         $clock = [Diagnostics.Stopwatch]::StartNew()
         do {
-            $locks = Invoke-DemoSql "SELECT COUNT(*) AS LockCount FROM sys.dm_tran_locks WHERE request_session_id=$($incident.blockerSessionId) AND resource_type='KEY' AND request_mode='X' AND request_status='GRANT' AND resource_associated_entity_id IN (SELECT hobt_id FROM sys.partitions WHERE object_id=OBJECT_ID(N'dbo.IncidentProbe'));" $database -TimeoutSeconds 2
+            $locks = Invoke-DemoSql "SELECT COUNT(*) AS LockCount FROM sys.dm_tran_locks WHERE request_session_id=$($incident.blockerSessionId) AND resource_type='KEY' AND request_mode='X' AND request_status='GRANT' AND resource_associated_entity_id IN (SELECT hobt_id FROM sys.partitions WHERE object_id=OBJECT_ID(N'dbo.OrderProcessingCheckpoint'));" $database -TimeoutSeconds 2
             if ($locks.Rows.Count -eq 1 -and $locks.Rows[0].LockCount -gt 0) { break }
             if ($blockAsync.IsCompleted -or $clock.Elapsed.TotalSeconds -ge 2) { throw 'The blocking session did not acquire the probe lock.' }
             Start-Sleep -Milliseconds 100
         } while ($true)
         $victimCommand = $victim.CreateCommand()
         $victimCommand.CommandTimeout = 10
+        $victimCommand.CommandText = 'SET LOCK_TIMEOUT 5000; SELECT @@LOCK_TIMEOUT;'
+        $incident.lockTimeoutMs = [int]$victimCommand.ExecuteScalar()
+        if ($incident.lockTimeoutMs -ne 5000) { throw 'Actual victim lock timeout is not the expected bounded value; no incident event.' }
         $victimCommand.CommandText = @'
 SET XACT_ABORT ON;
-SET LOCK_TIMEOUT 5000;
 BEGIN TRY
     BEGIN TRANSACTION;
-    UPDATE dbo.IncidentProbe SET ProbeValue=1 WHERE ProbeId=1;
+    UPDATE dbo.OrderProcessingCheckpoint SET ProbeValue=1 WHERE ProbeId=1;
     ROLLBACK TRANSACTION;
 END TRY
 BEGIN CATCH
@@ -411,7 +413,9 @@ END CATCH;
         $timedOut = $false
         try { $victimCommand.EndExecuteNonQuery($victimAsync) | Out-Null }
         catch {
-            if ((Get-DemoSqlExceptionNumber $_.Exception) -ne 1222) { throw }
+            $number = Get-DemoSqlExceptionNumber $_.Exception
+            if ($number -ne 1222) { throw }
+            $incident.sqlErrorNumber = $number
             $timedOut = $true
         }
         if (-not $timedOut) { throw 'The victim did not return SQL error 1222; no incident event.' }
@@ -434,7 +438,7 @@ END CATCH;
     }
     if ($cleanupFailures.Count) { throw "SQL incident cleanup failed/unknown: $($cleanupFailures -join '; '). Original failure: $failure. Do not retry or kill unrelated sessions." }
     if ($failure) { throw $failure }
-    $probe = Invoke-DemoSql 'SELECT ProbeValue FROM dbo.IncidentProbe WHERE ProbeId=1;' $database -TimeoutSeconds 3
+    $probe = Invoke-DemoSql 'SELECT ProbeValue FROM dbo.OrderProcessingCheckpoint WHERE ProbeId=1;' $database -TimeoutSeconds 3
     $sessions = Invoke-DemoSql "SELECT COUNT(*) AS Remaining FROM sys.dm_exec_sessions WHERE session_id IN ($($incident.blockerSessionId),$($incident.victimSessionId)) AND program_name IN (N'ArcSqlEngineDemo-IncidentBlocker',N'ArcSqlEngineDemo-IncidentVictim');" $database -TimeoutSeconds 3
     if ($probe.Rows.Count -ne 1 -or $probe.Rows[0].ProbeValue -ne 0 -or $sessions.Rows.Count -ne 1 -or $sessions.Rows[0].Remaining -ne 0) {
         throw 'Rollback/probe/session cleanup is not verified; recovery was not recorded.'
@@ -451,6 +455,140 @@ END CATCH;
         sqlErrorNumber = 1222; waitType = $incident.waitType; waitResource = $incident.waitResource
         dataRetained = $true; ownedSessionsRemaining = 0; ordersWorkerHealthy = $true
     }
+}
+
+function New-DemoEmitterUpdateConnection {
+    $connection = New-Object System.Data.SqlClient.SqlConnection
+    $connection.ConnectionString = 'Data Source=lpc:.\ARCDEMO;Initial Catalog=ArcDemoOrders;Integrated Security=True;Connect Timeout=5;Pooling=False;Application Name=ArcSqlEngineDemo-EmitterUpdate'
+    try { $connection.Open(); return $connection }
+    catch { $connection.Dispose(); throw }
+}
+
+function Get-DemoWorkerFunctionContract {
+    param([Management.Automation.Language.FunctionDefinitionAst]$Definition)
+    $text = $Definition.Extent.Text
+    $throws = $Definition.FindAll({ param($node) $node -is [Management.Automation.Language.ThrowStatementAst] }, $true)
+    foreach ($statement in @($throws | Sort-Object { $_.Extent.StartOffset } -Descending)) {
+        if (-not $statement.Pipeline -or $statement.Pipeline.PipelineElements.Count -ne 1 -or
+            $statement.Pipeline.PipelineElements[0] -isnot [Management.Automation.Language.CommandExpressionAst]) { continue }
+        $expression = $statement.Pipeline.PipelineElements[0].Expression
+        $nested = @()
+        if ($expression -is [Management.Automation.Language.ExpandableStringExpressionAst]) {
+            $nested = @($expression.NestedExpressions | ForEach-Object { $_.Extent.Text })
+        } elseif ($expression -isnot [Management.Automation.Language.StringConstantExpressionAst]) { continue }
+        # Ignore diagnostic wording only; preserve every executable interpolation and all other code.
+        $replacement = 'DIAGNOSTIC:' + (ConvertTo-Json -InputObject $nested -Compress)
+        $offset = $expression.Extent.StartOffset - $Definition.Extent.StartOffset
+        $text = $text.Remove($offset, $expression.Extent.Text.Length).Insert($offset, $replacement)
+    }
+    return $text.Replace("`r`n", "`n")
+}
+
+function Update-DemoIncidentEmitter {
+    $before = Get-DemoSqlStatus
+    if ($before.status -ne 'pass') { throw 'Emitter update requires the healthy owned orders worker; no repair or restart.' }
+    $record = Get-DemoManifest
+    $candidateErrors = $null
+    $candidateTokens = $null
+    $candidate = [Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$candidateTokens, [ref]$candidateErrors)
+    if ($candidateErrors) { throw 'Candidate emitter script does not parse.' }
+    $previous = [Management.Automation.Language.Parser]::ParseFile($installedScript, [ref]$candidateTokens, [ref]$candidateErrors)
+    if ($candidateErrors) { throw 'Installed worker script does not parse; no replacement.' }
+    $functions = $candidate.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)
+    foreach ($old in $previous.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+        if ($old.Name -in @('Initialize-DemoDatabase', 'Invoke-DemoSqlIncident', 'New-DemoEmitterUpdateConnection', 'Get-DemoWorkerFunctionContract', 'Update-DemoIncidentEmitter')) { continue }
+        $replacement = @($functions | Where-Object Name -eq $old.Name)
+        if ($replacement.Count -ne 1 -or
+            (Get-DemoWorkerFunctionContract $replacement[0]) -cne (Get-DemoWorkerFunctionContract $old)) {
+            throw "Normal worker function '$($old.Name)' changed; use the separately reviewed full-worker update procedure."
+        }
+    }
+    $newHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
+    $scriptChanged = $newHash -ne $record.scriptSha256
+    $suffix = [guid]::NewGuid().ToString('N')
+    $stage = Join-Path $root "emitter-$suffix.ps1"
+    $manifestStage = Join-Path $root "emitter-$suffix.json"
+    $backup = Join-Path $root "worker-before-$suffix.ps1"
+    $manifestBackup = Join-Path $root "manifest-before-$suffix.json"
+    $connection = $null
+    $transaction = $null
+    $command = $null
+    $commitAttempted = $false
+    try {
+        Copy-Item -LiteralPath $sourcePath -Destination $stage
+        $record.scriptSha256 = $newHash
+        $record | ConvertTo-Json | Set-Content -LiteralPath $manifestStage -Encoding UTF8
+        if ((Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash -ne $newHash) { throw 'Staged emitter hash mismatch.' }
+        $connection = New-DemoEmitterUpdateConnection
+        $transaction = $connection.BeginTransaction()
+        $command = $connection.CreateCommand()
+        $command.Transaction = $transaction
+        $command.CommandTimeout = 15
+        $command.CommandText = @'
+SET XACT_ABORT ON;
+SET LOCK_TIMEOUT 3000;
+DECLARE @result int;
+EXEC @result=sys.sp_getapplock @Resource=N'ArcDemoSqlIncident-v1',
+    @LockMode=N'Exclusive', @LockOwner=N'Transaction', @LockTimeout=0;
+IF @result < 0 THROW 51000, 'An incident or emitter update is active.', 1;
+IF EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE program_name IN
+    (N'ArcSqlEngineDemo-IncidentBlocker',N'ArcSqlEngineDemo-IncidentVictim'))
+    THROW 51001, 'Owned incident sessions are active.', 1;
+DECLARE @old int=OBJECT_ID(N'dbo.IncidentProbe',N'U'),
+        @current int=OBJECT_ID(N'dbo.OrderProcessingCheckpoint',N'U');
+IF (@old IS NULL AND @current IS NULL) OR (@old IS NOT NULL AND @current IS NOT NULL)
+    THROW 51002, 'Checkpoint table is absent or ambiguous.', 1;
+DECLARE @id int=COALESCE(@current,@old);
+IF (SELECT COUNT(*) FROM sys.columns WHERE object_id=@id) <> 2 OR
+   (SELECT COUNT(*) FROM sys.columns WHERE object_id=@id AND name IN (N'ProbeId',N'ProbeValue')
+       AND system_type_id=56 AND is_nullable=0) <> 2 OR
+   (SELECT COUNT(*) FROM sys.indexes WHERE object_id=@id AND is_primary_key=1) <> 1 OR
+   EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=@id OR referenced_object_id=@id)
+    THROW 51003, 'Checkpoint schema differs from the owned contract.', 1;
+DECLARE @table nvarchar(128)=CASE WHEN @old IS NULL THEN N'dbo.OrderProcessingCheckpoint' ELSE N'dbo.IncidentProbe' END,
+        @sql nvarchar(max), @rows bigint, @rowId int, @value int;
+SET @sql=N'SELECT @rows=COUNT_BIG(*), @rowId=MIN(ProbeId), @value=MIN(ProbeValue) FROM '+@table+N';';
+EXEC sys.sp_executesql @sql, N'@rows bigint OUTPUT,@rowId int OUTPUT,@value int OUTPUT',
+    @rows OUTPUT,@rowId OUTPUT,@value OUTPUT;
+IF @rows<>1 OR @rowId<>1 OR @value<>0 THROW 51004, 'Checkpoint is changed or active.', 1;
+IF @old IS NOT NULL EXEC sys.sp_rename N'dbo.IncidentProbe',N'OrderProcessingCheckpoint',N'OBJECT';
+SELECT OBJECT_SCHEMA_NAME(@id)+N'.'+OBJECT_NAME(@id);
+'@
+        $checkpointTable = [string]$command.ExecuteScalar()
+        if ($checkpointTable -ne 'dbo.OrderProcessingCheckpoint') { throw 'Checkpoint rename/readback is unverified.' }
+        if ($scriptChanged) {
+            [IO.File]::Replace($stage, $installedScript, $backup)
+            [IO.File]::Replace($manifestStage, $manifestPath, $manifestBackup)
+        }
+        if ((Get-FileHash -LiteralPath $installedScript -Algorithm SHA256).Hash -ne $newHash -or
+            (Get-DemoManifest).scriptSha256 -ne $newHash) { throw 'Installed emitter/manifest hash readback failed.' }
+        $commitAttempted = $true
+        $transaction.Commit()
+    } catch {
+        $failure = $_
+        if ($commitAttempted) { throw "Emitter update commit outcome is unknown; inspect checkpoint, installed hashes and retained backups before any retry. $failure" }
+        try {
+            if ($transaction) { $transaction.Rollback() }
+            if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $installedScript -Force }
+            if (Test-Path -LiteralPath $manifestBackup) { Copy-Item -LiteralPath $manifestBackup -Destination $manifestPath -Force }
+        } catch { throw "Emitter update/rollback failed; inspect retained backups. Original: $failure. Rollback: $_" }
+        throw $failure
+    } finally {
+        if ($command) { $command.Dispose() }
+        if ($transaction) { $transaction.Dispose() }
+        if ($connection) { $connection.Dispose() }
+        foreach ($path in @($stage, $manifestStage)) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+        }
+    }
+    $after = Get-DemoSqlStatus
+    if ($after.status -ne 'pass') { throw 'Emitter updated but orders health is not proven; no automatic restart or fault.' }
+    $after | Add-Member NoteProperty eventSchemaVersion 2
+    $after | Add-Member NoteProperty installedScriptSha256 $newHash
+    $after | Add-Member NoteProperty checkpointTable $checkpointTable
+    $after | Add-Member NoteProperty previousScriptPath $(if ($scriptChanged) { $backup } else { $null })
+    $after | Add-Member NoteProperty previousManifestPath $(if ($scriptChanged) { $manifestBackup } else { $null })
+    return $after
 }
 
 function Complete-DemoWorkload {
@@ -564,6 +702,7 @@ $result = switch ($Action) {
     'Install' { Install-DemoEngine -MediaIsoPath $MediaIsoPath -MediaSha256 $MediaSha256 -AcceptDeveloperLicenseTerms:$AcceptDeveloperLicenseTerms -ArcSqlAutoConnectOptOutConfirmed:$ArcSqlAutoConnectOptOutConfirmed }
     'Status' { Get-DemoSqlStatus }
     'Incident' { Invoke-DemoSqlIncident }
+    'UpdateIncidentEmitter' { Update-DemoIncidentEmitter }
     'ProtectArcSql' { Set-DemoSqlExtensionBlock }
     'Start' {
         Get-DemoSqlStatus | Out-Null

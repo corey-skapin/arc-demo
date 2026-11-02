@@ -94,8 +94,35 @@ clear reboot flags and no active installer.
 
 ### Updating an existing owned worker
 
-Repository edits do not update an installed worker. If an update is requested,
-back up the installed script, manifest and task definition/state first.
+For an explicitly requested **incident-emitter-only** update, use
+`Invoke-SqlEngineOnArc.ps1 -Action UpdateIncidentEmitter` with the same explicit
+subscription, tenant, machine and private skin, first with `-WhatIf`.
+This does not run an incident. It requires healthy owned SQL/task/hash evidence
+and refuses executable changes to existing normal-worker functions. Only line
+endings and literal `throw` diagnostic wording may differ; executable string
+interpolations, SQL, conditions and timing remain exact. It keeps the worker
+running: its order-processing behavior is unchanged.
+
+The helper stages/parses/hashes the candidate and holds the same exclusive SQL
+application lock as the incident. With no owned incident sessions and exactly
+one unchanged checkpoint row, it transactionally renames an existing
+`dbo.IncidentProbe` to `dbo.OrderProcessingCheckpoint`; a matching new table is
+accepted, but missing/both tables, incompatible columns or foreign-key references
+fail closed. New installations create only the new name.
+It atomically replaces each owned script/manifest file, retains their previous
+copies in the owned directory and commits the SQL rename only after file/hash
+readback. Pre-commit failure rolls back the rename and restores replaced files.
+An ambiguous commit is an error requiring inspection, not an automatic retry or
+rollback. Post-update Status must pass; verify a subsequent fresh commit/`6000`
+before presentation. This update changes no SQL service, task, credentials,
+policy, monitoring or workload fault setting.
+
+The installation manifest and outer operation result remain schema v1; only
+the structured incident **event payload** moves to v2.
+
+For broader **normal-worker** changes, the emitter-only action is not an upgrade
+shortcut. After separate review/approval, back up the installed script, manifest
+and task definition/state first.
 Verify the task belongs to this workload and no probe is active, then stop only
 that task. Stage and parse the replacement, verify its hash, update the script
 and the manifest's `scriptSha256`, and restore the task's original enabled/running
@@ -105,7 +132,7 @@ files can be restored consistently.
 
 ## Real lock-timeout incident
 
-The approved rehearsals below each proved one real `1222`/`LCK_M_X`, bounded
+The first two approved rehearsals each proved one real `1222`/`LCK_M_X`, bounded
 rollback, ingested detection/recovery events, a Sev2 alert, Action Group execution
 and an automatic Review-only SRE investigation. Times are UTC.
 
@@ -133,6 +160,40 @@ in the audit and absent from message results: full raw-query verification remain
 unproven. Do not equate aggregate rows with sample counts.
 This is self-recovery followed by investigation, not automatic SRE remediation.
 
+On 2 November, v2 preparation was independently verified without another fault:
+the installed source matched the repo, the renamed checkpoint was zero with no
+legacy table or owned incident sessions, and orders/`6000` activity continued.
+Canonical SQL and LOB descriptions were made operational and neutral; the SQL
+v2 predicate readback at 01:39:10Z retained its title, severity, schedule, scope
+and route. That preparation did not exercise a v2 incident.
+The LOB `4100` wording correction is source-only; no LOB worker redeployment or
+fault-mode change was part of this preparation.
+
+A separately approved single v2 run on 2 November then proved the deployed
+event-to-alert path:
+
+| Evidence | UTC |
+| --- | --- |
+| Actual `6201` detection | 01:50:24.539 |
+| Verified cleanup and `6001` recovery | 01:50:31.921 |
+| Both events ingested | 01:50:55.170 |
+| Exact temporary-rule Sev2 alert fired | 01:51:39.324 |
+| Action Group execution recorded | 01:51:40.557 |
+| Independent healthy guest/checkpoint/session check | 01:54:07 |
+
+Both incident payloads contained exactly the agreed twelve v2 fields, with no
+`scenario` or `maxBlockSeconds`; the detected error was `1222`, wait `LCK_M_X`
+and observed session lock timeout `5000` ms. The exact deployed alert KQL matched
+one detection for this incident. Post-recovery checks found a fresh orders
+commit, the worker running/enabled, checkpoint value zero, no owned sessions,
+the legacy table absent and the installed source matching the repo.
+The run used another explicitly approved temporary rule/merge-window exception,
+not default repeated-alert behavior. Its retirement and canonical-route
+restoration belong to the companion procedure after source-event expiry.
+An alert remaining Fired during its lookback is not proof that blocking remains
+active. These checks prove v2 emission, ingestion and alert routing, not SRE
+narrative correctness, email receipt or automatic remediation.
+
 `-Action Incident` requires the healthy orders worker and owned probe table.
 One SQL transaction takes a row lock; another waits and actually returns
 error **1222** with `SET LOCK_TIMEOUT 5000`. The helper captures blocker/victim
@@ -153,9 +214,16 @@ it: that stops the normal orders worker instead.
 | `6201` | Error | Actual 1222 with SQL blocking evidence |
 | `6001` | Information | Rollback/session cleanup and worker health verified |
 
-Incident descriptions are JSON with `scenario=sql-lock-timeout`, `incidentId`,
-state, instance/database, blocker/victim IDs, wait details, SQL error and timestamp.
-A dated event does not establish a currently blocked session.
+Events `6201` and `6001` now carry this exact JSON v2 field set:
+`schemaVersion`, `incidentId`, `state`, `instance`, `database`,
+`blockerSessionId`, `victimSessionId`, `waitType`, `waitResource`,
+`sqlErrorNumber`, `lockTimeoutMs`, `observedAtUtc`.
+The helper reads `lockTimeoutMs` from the actual victim session's
+`@@LOCK_TIMEOUT` and takes the error number from the caught SQL exception;
+it does not emit configured scenario/duration or a promised cleanup outcome.
+Recovery is a separate observed event after the existing cleanup/health gates.
+A dated event does not establish a currently blocked session. The earlier
+rehearsals above used v1; they are not proof that a v2 incident has been fired.
 
 For a requested rehearsal: verify SQL Status and fresh `6000`, deploy only
 `Set-SqlIncidentAlert.ps1` with the existing workspace/Action Group, confirm the
@@ -169,6 +237,16 @@ and has no additional action-muting duration; the companion's incident merge
 window is a separate setting, not a notification-delivery guarantee.
 The probe usually recovers before the alert; the story is evidence correlation,
 not an ongoing outage or automatic SRE remediation.
+
+The v2 alert requires the exact Arc ID, provider `ArcSqlEngineDemo`,
+event `6201`, `schemaVersion=2`, `state=detected` and actual error `1222`;
+there is no scenario-name predicate. Keep its title unchanged because the
+companion routes on it. For an approved description-only correction on an
+existing canonical SQL/LOB rule, use `Set-ArcWorkloadAlertDescription.ps1`
+with explicit subscription/tenant, `-Workload Sql|Lob`, machine and prefix.
+Preview first. It sends only `properties.description`, verifies all other
+configuration/tags and discloses Azure's read-only API-version metadata.
+LOB deployment text is maintained by the companion's alert helper.
 
 ## Park, wake and stop
 
@@ -200,5 +278,8 @@ source does not establish that a live DCR was updated or new events ingested.
 - [Automatic Arc SQL connection](https://learn.microsoft.com/sql/sql-server/azure-arc/manage-autodeploy)
 - [Agent block lists](https://learn.microsoft.com/azure/azure-arc/servers/security-extensions#allow-lists-and-block-lists)
 - [SQL lock timeout](https://learn.microsoft.com/sql/t-sql/statements/set-lock-timeout-transact-sql)
+- [Current session lock timeout](https://learn.microsoft.com/sql/t-sql/functions/lock-timeout-transact-sql)
+- [Rename an owned table](https://learn.microsoft.com/sql/relational-databases/tables/rename-tables-database-engine)
+- [Description-only alert update](https://learn.microsoft.com/rest/api/monitor/scheduled-query-rules/update)
 
 Mocked tests cover behavior, not live SQL setup, ingestion or alert delivery.
