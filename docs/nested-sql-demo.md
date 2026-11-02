@@ -16,11 +16,14 @@ The normal fleet's `MSFT_ARC_TEST=true` simulation is a separate path.
 
 Keep the existing Windows Hyper-V parent, switch/NAT, mounted Windows Server 2022
 and SQL Server 2022 media, and the onboarding application with its approved
-permissions. Each build adds a uniquely named one-day application credential,
-delivers it only through the protected Connect parameter, and removes that
-credential in `finally`, verifying the pre-build key IDs are unchanged. No vault
-or private-endpoint inputs are needed. Do not rotate existing credentials,
-change Defender policy/pricing, or rebuild a retained parent to wake the guest.
+permissions. Each build ensures the application's `Azure Connected Machine
+Onboarding` role at the Arc resource group, adds a uniquely named one-day
+application credential, delivers it only through the protected Connect
+parameter, and removes that credential in `finally`, verifying the pre-build
+key IDs are unchanged (the same `Initialize-DemoOnboardingIdentity` helper
+Deploy uses). No vault or private-endpoint inputs are needed. Do not rotate
+existing credentials, change Defender policy/pricing, or rebuild a retained
+parent to wake the guest.
 The parent needs sufficient memory, nested-virtualization support and space for
 the guest's 64-GiB OS and 32-GiB data disks.
 
@@ -81,7 +84,8 @@ $result = .\scripts\New-NestedSqlDemo.ps1 @build -SkinPath $skinPath -Confirm:$f
 $result | ConvertTo-Json -Depth 12 | Set-Content .local\nested-sql-result.json
 ```
 
-Preview is not creation. The real invocation mints a one-day credential, creates
+Preview is not creation. The real invocation ensures the Arc-group onboarding
+role, mints a one-day credential, creates
 only a new named guest/root, waits for unattended setup, connects Arc, installs
 SQL, enables the SQL extension in LicenseOnly mode, checks local SQL plus Azure
 inventory, then removes the minted credential and verifies the original key IDs.

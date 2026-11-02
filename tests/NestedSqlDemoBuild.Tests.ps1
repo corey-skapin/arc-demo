@@ -25,72 +25,16 @@ Describe 'Scratch build and lifecycle skin agree before dispatch' {
         }
     }
 
-    Describe 'One-build onboarding credential lifecycle' {
-        BeforeAll {
-            $ast = [Management.Automation.Language.Parser]::ParseFile($script:buildScript,[ref]$null,[ref]$null)
-            foreach ($name in @('Invoke-NestedSqlGraphRequest','Get-NestedSqlApplication','Get-NestedSqlCredentialKeyIdSet',
-                'Test-NestedSqlCredentialSet','Invoke-NestedSqlCredentialBuild')) {
-                $functionAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name },$true)
-                . ([scriptblock]::Create($functionAst.Extent.Text))
-            }
-        }
-        BeforeEach {
-            $script:credentialEvents = [Collections.Generic.List[string]]::new()
-            $script:graphGetCount = 0
-            $script:baselineKeyId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
-            $script:mintedKeyId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
-            $script:applicationId = [guid]'44444444-4444-4444-4444-444444444444'
-            Mock Start-Sleep {}
-            Mock Invoke-DemoAz {
-                $urlAt = [array]::IndexOf($Arguments,'--url')
-                $url = $Arguments[$urlAt + 1]
-                if ($url -like '*/addPassword') {
-                    $script:credentialEvents.Add('mint')
-                    return (@{secretText='synthetic-one-build-secret';keyId=$script:mintedKeyId} | ConvertTo-Json -Compress)
-                }
-                if ($url -like '*/removePassword') {
-                    $bodyAt = [array]::IndexOf($Arguments,'--body')
-                    $requestPath = $Arguments[$bodyAt + 1].Substring(1)
-                    $removeBody = Get-Content -LiteralPath $requestPath -Raw | ConvertFrom-Json
-                    if ($removeBody.keyId -ne $script:mintedKeyId -or $removeBody.passwordCredential) {
-                        throw 'removePassword must receive the exact top-level keyId.'
-                    }
-                    $script:credentialEvents.Add('cleanup')
-                    return ''
-                }
-                if ($url -like '*/applications%28*') {
-                    $script:graphGetCount++
-                    $ids = if ($script:graphGetCount -eq 1 -or $script:graphGetCount -ge 3) {
-                        @($script:baselineKeyId)
-                    } else {
-                        @($script:baselineKeyId,$script:mintedKeyId)
-                    }
-                    $credentials = @($ids | ForEach-Object { @{keyId=$_} })
-                    return (@{appId="$($script:applicationId)";passwordCredentials=$credentials} | ConvertTo-Json -Depth 5 -Compress)
-                }
-                throw "Unexpected Graph URL: $url"
-            }
-        }
-        It 'mints, delivers only the secure value to the action, removes it, and preserves original keys' {
-            $action = {
-                param([securestring]$Secret)
-                $script:credentialEvents.Add('deliver')
-                [pscredential]::new('synthetic',$Secret).GetNetworkCredential().Password | Should -Be 'synthetic-one-build-secret'
-                'completed'
-            }
-            $result = Invoke-NestedSqlCredentialBuild -ApplicationId $script:applicationId `
-                -DisplayName 'nested-demo-fixture' -Action $action
-            $result | Should -Be 'completed'
-            ($script:credentialEvents -join ',') | Should -Be 'mint,deliver,cleanup'
-            $script:graphGetCount | Should -Be 3
-        }
-        It 'removes the minted credential when the build action fails' {
-            $action = { param([securestring]$Secret) $script:credentialEvents.Add('deliver'); throw 'synthetic build failure' }
-            { Invoke-NestedSqlCredentialBuild -ApplicationId $script:applicationId `
-                -DisplayName 'nested-demo-failure' -Action $action } | Should -Throw '*synthetic build failure*'
-            ($script:credentialEvents -join ',') | Should -Be 'mint,deliver,cleanup'
-            $script:graphGetCount | Should -Be 3
-        }
+    It 'runs the build through the shared onboarding identity helper for the Arc resource group' {
+        $call = @{}
+        Mock Initialize-DemoOnboardingIdentity { $call.ApplicationId = $ApplicationId; $call.ResourceGroup = $ResourceGroup; $call.DisplayName = $DisplayName; $call.Action = $Action }
+        & $script:buildScript @script:buildArguments -Confirm:$false
+        Should -Invoke Initialize-DemoOnboardingIdentity -Times 1 -Exactly
+        $call.ApplicationId | Should -Be ([guid]'44444444-4444-4444-4444-444444444444')
+        $call.ResourceGroup | Should -Be 'rg-fixture'
+        $call.DisplayName | Should -Match '^nested-DemoNew-\d{8}T\d{6}Z-[0-9a-f]{8}$'
+        @($call.Action.Ast.ParamBlock.Parameters | ForEach-Object { "$($_.Name.VariablePath.UserPath):$($_.StaticType.Name)" }) |
+            Should -Be @('OnboardingApplicationIdValue:String', 'OnboardingSecret:SecureString')
     }
     It 'previews the matched build without dispatching any parent or Azure operation' {
         & $script:buildScript @script:buildArguments -WhatIf

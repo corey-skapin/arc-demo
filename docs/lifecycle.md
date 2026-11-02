@@ -300,15 +300,24 @@ reuse `vm-admin-password` from their existing Key Vault; if that secret was neve
 stored, supply the **current** password as `-AdminPassword` (SecureString).
 Do not supply a new password as a convenience: credential rotation is a separate
 approved operation. Fresh deployments save the generated password to Key Vault.
-For `Deploy-ArcDemo.ps1`, if new Arc onboarding is required and the SP already exists, supply its existing
-secret as `-OnboardingSecret` (SecureString). Never commit or log either secret.
+For `Deploy-ArcDemo.ps1`, new Arc onboarding runs through
+`Initialize-DemoOnboardingIdentity` once the Arc resource group exists. An
+existing `sp-<prefix>-onboard` keeps its credentials: they are never read,
+reset or changed. Deploy re-grants its `Azure Connected Machine Onboarding` role
+at the Arc group (a deleted group takes the old assignment with it), adds a
+one-day credential through Graph, uses it only for onboarding and removes it in
+`finally`, then checks the original key IDs are unchanged. Without an SP, it is
+created with that role as before and its secret is used for that run only.
+`-OnboardingSecret` (SecureString) is an optional override for an operator who
+cannot manage the application's credentials; it skips the one-day credential.
+Never commit or log either secret.
 
 Deploy selects a retained vault using the saved `keyVaultName` deployment output
 and preserves its public-network-access mode. A private-only vault requires the
 current `-AdminPassword`; Deploy does not open it for workstation secret reads.
 This protects the existing estate, not a nested-build prerequisite. The
-[nested build](nested-sql-demo.md) needs neither a vault nor a supplied onboarding
-secret: it creates and removes its own one-day app credential.
+[nested build](nested-sql-demo.md) needs no vault and, like Deploy, no supplied
+onboarding secret: it uses the same one-day credential flow.
 
 Mandatory compute/Arc waits throw on timeout; inspection errors terminate. Native CLI
 failures terminate; authentication/authorization errors are never interpreted as
