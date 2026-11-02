@@ -32,6 +32,11 @@ actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
 | `lobMachineName` (optional) | The separately prepared LOB host; omit if not part of this demo |
 | `sqlMachineResourceId` (optional) | Actual prepared SQL host Arc ID, with adjacent verified `sql-engine-status.json` from [real SQL Status](sql-engine-workload.md); omit until actually prepared |
 | `sqlIncidentAlertResourceId` (optional) | Exact prepared SQL log-alert ID; requires the SQL host/proof above. Adds a concrete alert link, not an alert-delivery or investigation claim |
+| `lobIncidentAlertResourceId` (optional) | Exact prepared LOB log-alert rule ID; requires `lobMachineName`. Adds a concrete alert link, not an alert-delivery or investigation claim |
+| `nestedSqlMachineResourceId` (optional) | Exact Arc machine ID of the nested SQL guest; enables the experimental nested Arc SQL scene. A link, not proof of current state: the presenter judges the scene by the live status and last collected time |
+| `nestedSqlInstanceResourceId`, `nestedSqlParentMachineResourceId` (optional) | The guest's Arc-enabled SQL Server instance and its Hyper-V parent Arc machine; each requires the nested guest above |
+| `dataCollectionRuleResourceId` (optional) | Exact core data collection rule ID, opened read-only in the "how the data gets here" beat |
+| `machineIntelligenceWorkbookResourceId`, `complianceWorkbookResourceId` (optional) | Exact IDs of the original Machine Intelligence Center and Compliance, Security and Governance workbooks, used as optional one-minute beats |
 | `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview or draft IDs. Adds optional links, not current-health or savings proof |
 | `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
 
@@ -45,6 +50,9 @@ $context | ConvertTo-Json -Depth 4 | Set-Content .\.local\demo-context.json
 ```
 
 No sign-in, Azure read/write, guest command or health check occurs in generation.
+Pass `-AbsoluteLocalLinks` when the generated guide will be copied away from the
+repository: the companion-guide and saved SQL-proof links then become absolute file
+links instead of paths relative to `.local`.
 Missing/foreign/malformed IDs fail explicitly before replacing the output.
 The context timestamp is printed prominently: old evidence is not current health.
 The generator does not read a credential store, copy a whole deployment manifest
@@ -59,8 +67,8 @@ broken or guessed relative path.
 
 ## Optional capacity and optimisation workbooks
 
-These are optional read-only engineer surfaces after setup, not additional
-workload infrastructure or more required minutes in the 20-30 minute tour.
+These are optional read-only engineer surfaces after setup, scenes 4 and 5 of the
+25-30 minute presenter path rather than additional workload infrastructure.
 They reuse existing `Perf`/`InsightsMetrics` and Arc inventory; the views make no
 guest, SQL, extension, power, price or schedule changes. The one collection change
 is the explicitly approved Linux memory and disk counters in the core DCR, which
@@ -359,7 +367,7 @@ The approved diagnostics found healthy/licensed sensors in passive mode with
 real-time protection disabled, and retained an extension/direct-health
 event-provider discrepancy. A Monitor pass is not active AV or full EDR proof.
 
-Rehearse the [20-30 minute Arc/Monitor story](runsheet.md). The optional companion
+Rehearse the [25-30 minute Arc path](runsheet.md). The optional companion
 SRE repo consumes these existing alerts; it does not replace the standalone Arc
 operations plane. Reset/induce faults only as separately authorized scenario
 actions. Do not claim Arc SQL validation; see [SQL stance](sql-arc-spike.md).

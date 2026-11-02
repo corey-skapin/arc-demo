@@ -43,7 +43,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Prepare-NestedSqlParent.ps1`, `scripts/guest/Initialize-NestedSqlParentHost.ps1`, `tests/NestedSqlParentPrepare.Tests.ps1` | One idempotent, `-WhatIf`-capable run that prepares the nested SQL parent once Deploy has declared its size and data disk: Size, Disk, Volume (`D:`; the empty virtual DVD-ROM that a size without a temp disk puts there moves to `Z:`), HyperV (restart issued from Azure), Network (internal switch and NAT), Media (through `Stage-DemoMedia.ps1`) and a Verify that writes the build input for `New-NestedSqlDemo.ps1`. Refuses any other `D:` holder, an overlapping range, Trusted Launch, a running nested guest and any unsafe disk change. Tested against a simulated Azure/guest world and rehearsed end to end, with a park/wake check, on a scratch `Standard_D4s_v5` (not yet through Deploy or on an Arc-onboarded parent) |
 | `.github/workflows/lint.yml` Windows job | Executes nested guest and real SQL regressions with mocked Windows APIs |
 | `scripts/Deploy-ArcDemo.ps1` | Selected-provider/CLI-extension and per-size SKU/quota checks (one `-Requirements` call covers every size); refuses to resize a retained VM or detach/convert its data disks; declares the nested parent's size and disk from the skin; stale-manifest handling after Remove; Bicep preview/create with allocation-failure guidance (never a size/region switch); retrying Key Vault secret write; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness (waits up to 20 minutes for Windows Heartbeats) |
-| `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL from the single tracked `docs/runsheet.md` template; no Azure calls or lifecycle changes |
+| `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL (including the optional nested guest, LOB alert, data collection rule and original-workbook links) from the single tracked `docs/runsheet.md` template; no Azure calls or lifecycle changes |
 | `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads, one shared Heartbeat/Arc/ARM wait with a single global deadline (no Run Command host checks by default; opt-in `-GuestChecks`), concurrent nested-guest start, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness |
 | `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; bounded nested-guest stop that warns and continues; optional identity/Defender changes, `-ForceDeleteWorkspace` (first, irreversible) and `-PruneDeploymentHistory` (own manifest records only) |
@@ -102,7 +102,9 @@ intentional sample names; lifecycle follows IDs rather than guessing those names
 
 `workbooks/arc-demo-overview.workbook.json` and the vendored `workbooks/nseilaz`
 collection provide the presenter surfaces. `docs/runsheet.md` keeps the
-20-30 minute standalone Arc/Monitor story. SRE Agent is an optional later layer
+25-30 minute standalone Arc/Monitor path (estate, one view of Windows, Linux and SQL
+including the experimental nested Arc SQL scene, the two engineer workbooks, the
+alert scenes and the three engineer tasks). SRE Agent is an optional later layer
 consuming the same alerts, not a prerequisite or replacement.
 `tests/OriginalWorkbooks.Tests.ps1` keeps those six original workbooks valid and
 demo-ready offline: JSON and title checks, subscription-picker defaults, the lab's

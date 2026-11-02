@@ -1,8 +1,8 @@
 # Capacity and optimisation workbooks
 
 Optional, read-only engineer views built only from telemetry the lab already collects
-and from Arc inventory. They are **not** extra required minutes in the 20-30 minute
-tour and they never act on a machine. The operator procedure (preview, draft, publish,
+and from Arc inventory. They are scenes 4 and 5 of the 25-30 minute presenter path
+and they never act on a machine. The operator procedure (preview, draft, publish,
 remove) is in the [runbook](runbook.md#optional-capacity-and-optimisation-workbooks);
 this page says what each view shows and the rules behind it.
 
