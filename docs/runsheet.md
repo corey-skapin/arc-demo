@@ -38,15 +38,23 @@ Open [the estate workbook]({{workbookUrl}}).
 **Say:** "We want one operational view of servers outside Azure: what is
 connected, how it is performing, what changed, and what needs attention."
 
-Show **Estate connectivity (last 15m)**, **Hosts beating over time (24h)** and
-**Per-host CPU utilisation (24h)**. Then show **Configuration changes (24h)**,
-**Linux syslog activity (24h)** and **Tagging hygiene (Arc machines)**.
-**Estate connectivity** counts the hosts that send a heartbeat: a parked machine,
-or one with no monitoring agent (the nested SQL guest in scene 3 is one), is not in
-that count, and the Arc list in scene 2 is the full inventory. A parked period
-reads as no hosts beating, which is expected and is not continuous uptime. If
-**Tagging hygiene** lists an untagged machine, say why it is untagged. If a tile is
-empty, say so and use the [fallback queries](#fallback-queries).
+Start with the **Estate** tiles, then **Hosts reporting over time (zero when
+parked)** and **CPU average by machine**. **Arc machines** is the full Arc
+inventory; **Reporting now** counts the machines that sent a heartbeat in the last
+15 minutes. A machine with no monitoring agent (the nested SQL guest in scene 3 is
+one) is in the Arc count but not in the reporting count, and the grid says so in its
+note. A parked period reads as zero hosts reporting, which is expected and is not
+continuous uptime.
+
+Scroll to the **Arc machines** grid: one row per machine with its connection,
+telemetry, last heartbeat, load and update state. Select a row to open **Machine
+detail** for that machine. Then open the tabs as time allows: **Events and logs**
+(Windows errors and warnings, Linux syslog with errors first), **Changes and
+software** and **Posture**. **Updates pending** and the **Posture** tab read the
+latest Update Manager assessments: a failed or never-run assessment is shown as
+such and is never counted as patched. If **Tagged** is below 100, say why a machine
+is untagged; the **Posture** tab lists it. If a tile is empty, read its message, say
+so and use the [fallback queries](#fallback-queries).
 
 This lab simulates on-premises servers using Azure VMs and `MSFT_ARC_TEST=true`.
 It is a demo, not a hardened production architecture or blanket feature validation.

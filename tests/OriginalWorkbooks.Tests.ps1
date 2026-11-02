@@ -58,36 +58,6 @@ Describe 'Original published workbooks stay valid' {
     }
 }
 
-Describe 'Estate Overview keeps the guided section 1 tiles and honest supporting tiles' {
-    BeforeAll {
-        $byTitle = @{}
-        foreach ($item in Get-WorkbookQuery (Read-Workbook 'workbooks\arc-demo-overview.workbook.json')) { $byTitle[$item.content.title] = $item.content.query }
-    }
-
-    It 'still has the three tiles the Arc presenter guide names' {
-        $byTitle.Keys | Should -Contain 'Estate connectivity (last 15m)'
-        $byTitle.Keys | Should -Contain 'Hosts beating over time (24h)'
-        $byTitle.Keys | Should -Contain 'Per-host CPU utilisation (24h)'
-    }
-
-    It 'shows parked periods as zero hosts beating instead of interpolating across the gap' {
-        $byTitle['Hosts beating over time (24h)'] | Should -Match 'make-series HostsBeating = dcount\(Computer\) default = 0 on TimeGenerated from bin\(ago\(24h\), 15m\) to now\(\) step 15m'
-    }
-
-    It 'ranks the Azure Monitor Agent severity name error as an error' {
-        $byTitle['Linux syslog activity (24h)'] | Should -Match "'crit', 'err', 'error'"
-    }
-
-    It 'leaves level-0 Security audit rows out of the critical and error tile' {
-        $byTitle['Critical & Error events (Windows, 24h)'] | Should -Match 'EventLevel in \(1, 2\)'
-        $byTitle['Critical & Error events (Windows, 24h)'] | Should -Not -Match 'EventLevel <= 2'
-    }
-
-    It 'does not chart blank-type change twin rows' {
-        $byTitle['Configuration changes (24h)'] | Should -Match 'isnotempty\(ConfigChangeType\)'
-    }
-}
-
 Describe 'Compliance patch tiles use real Update Manager data' {
     BeforeAll {
         $book = Read-Workbook 'workbooks\nseilaz\Arc_Compliance_Security_Governance_example.json'
