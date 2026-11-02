@@ -32,20 +32,20 @@ the customer-facing Arc records and observability plane are in the other group.
 
 | Entry point | Responsibility |
 | --- | --- |
-| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions/baseline provider checks |
+| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions/baseline provider checks and required CLI extension (`connectedmachine`) presence; reports every gap in one error, installs/registers nothing |
 | `scripts/New-NestedSqlDemoGuest.ps1`, `Connect-NestedSqlDemoGuest.ps1`, `Install-NestedSqlDemoEngine.ps1` | Primary scratch Windows/SQL/Arc guest build; private credentials and approved media |
 | `scripts/New-NestedSqlDemo.ps1`, `Invoke-NestedSqlDemoStep.ps1`, `scripts/lib/NestedSqlDemo.psm1` | Working build sequence, protected parent-side step transport and retained Windows answer-file generator; no retired V1-V3 controller layers |
 | `scripts/Test-NestedSqlDemoGuest.ps1`, `Enable-NestedSqlDemoExtension.ps1`, `Remove-NestedSqlDemoGuest.ps1` | Actual guest/SQL checks, Arc SQL extension and explicit scratch-guest teardown |
 | `scripts/Install-ArcSqlDemoExtension.ps1`, `Test-ArcSqlDemoInventory.ps1`, `Remove-NestedSqlDemo.ps1` | LicenseOnly extension, actual Azure SQL/database inventory and exact guest/Arc/SQL teardown |
 | `scripts/Set-NestedSqlDemoState.ps1` | Optional parent/guest-only park/wake, using the same skin and Common guest helper; retains shared network and other workloads |
 | `.github/workflows/lint.yml` Windows job | Executes nested guest and real SQL regressions with mocked Windows APIs |
-| `scripts/Deploy-ArcDemo.ps1` | Selected-provider and SKU/quota checks; Bicep preview/create; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness |
+| `scripts/Deploy-ArcDemo.ps1` | Selected-provider/CLI-extension and SKU/quota checks; stale-manifest handling after Remove; Bicep preview/create with allocation-failure guidance (never a size/region switch); retrying Key Vault secret write; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness (waits up to 20 minutes for Windows Heartbeats) |
 | `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL from the single tracked `docs/runsheet.md` template; no Azure calls or lifecycle changes |
 | `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads, one shared Heartbeat/Arc/ARM wait with a single global deadline (no Run Command host checks by default; opt-in `-GuestChecks`), concurrent nested-guest start, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness |
 | `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
-| `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; optional identity/Defender changes |
+| `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; bounded nested-guest stop that warns and continues; optional identity/Defender changes, `-ForceDeleteWorkspace` (first, irreversible) and `-PruneDeploymentHistory` (own manifest records only) |
 | `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table; Active (Ready alias), compute-only Hibernated with network cost diagnostics, Removed; bounded retries, exit 0/1/2 |
-| `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota, readiness checks |
+| `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning, tenant-only directory guards and CLI 2.91 not-found text, retained inventory, bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota (CLI string quotas read as numbers; `-Requirements` adds several sizes per family), allocation guidance, retrying Key Vault secret write, stale-manifest selection, readiness checks |
 | `Get-DemoNestedSqlGuestConfig`, `Invoke-DemoNestedSqlGuest`, `Wait-DemoNestedSqlArcConnected` in `Common.psm1`, `tests/NestedSqlLifecycle.Tests.ps1` | One skin-defined nested guest, normal graceful shutdown/start and bounded Arc connection wait across Activate/Hibernate/Remove |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
 | `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved media/terms, bounded startup and hash ownership; guarded emitter-only update preserves normal worker functions and migrates the owned checkpoint with rollback/backups; no Arc SQL, automatic reboot/repair or Defender changes |
@@ -115,6 +115,10 @@ failures and the JSON/exit-code contract without a cloud deployment.
 clock: all-fresh Heartbeats with Updating extensions, one pending host, deadline
 bounds for nine hosts, no Run Command by default, opt-in checks, the nested guest
 budget and the soft extension readiness rows.
+`tests/DeployRemoveHardening.Tests.ps1` covers, with CLI-2.91-shaped string
+fixtures and mocked Azure, the capacity check, extension/provider preflight,
+CLI not-found text, clean-subscription and stale-manifest Deploy, Key Vault write
+retry, allocation guidance and the Remove workspace/history options.
 Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
 conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile

@@ -97,9 +97,11 @@ Hyper-V guest without restarting a Running guest, then waits for the guest's
 Arc connection. Hibernate uses normal `Stop-VM` (not `-Shutdown`, `-TurnOff` or
 forced power-off), waits for Off, then deallocates compute. If guest shutdown
 fails, it warns and still attempts spend-reducing parking of all targeted compute;
-that is not a guest-data-consistency claim. Remove gracefully stops a running
-guest before removing the two groups. A parked parent needs no guest boot for
-removal. Definitions/disks/credentials are retained on park/wake, not recreated.
+that is not a guest-data-consistency claim. Remove makes one bounded (ten-minute)
+graceful stop of a running guest; if that stop fails it warns and continues,
+because the parent, its disks and the guest are deleted with the group anyway. A
+parked parent needs no guest boot for removal. Definitions/disks/credentials are
+retained on park/wake, not recreated.
 
 Readiness remains read-only. For Active it checks the configured Arc guest's
 connection; actual SQL query and extension startup are checked by
@@ -115,7 +117,16 @@ manifest, filtered by the exact Arc resource group. A later optional-workload-on
 deployment can have an empty `vmFleet`; it does **not** delete the earlier Arc
 fleet. Lifecycle discovery uses the latest nonempty Arc fleet and retained
 native-VM/Container-App IDs. Older AKS manifests are supplemented only by tagged
-clusters in the demo infra group. Preserve deployment history. Missing manifests,
+clusters in the demo infra group. Preserve deployment history while the estate
+exists. A manifest whose infra group no longer exists (after `Remove-ArcDemo`) is
+stale: `Deploy-ArcDemo.ps1` ignores it, builds a fresh Key Vault and writes a new
+manifest. While the infra group exists the vault guard is unchanged: the manifest
+vault must be in it, or Deploy refuses. Optional `Remove-ArcDemo.ps1
+-PruneDeploymentHistory` deletes this demo's own finished `arc-demo-<timestamp>`
+records for the removed Arc group once removal is verified, so a same-prefix rebuild
+starts from a clean list (otherwise lifecycle discovery also reads the old
+estate's native-VM, Container App and AKS IDs); policy, SRE and other deployment
+records are never touched. Missing manifests,
 unknown VMs, OS mismatch and IDs outside the demo infra group are errors, not
 reasons to guess which VMs to start or delete. For an unused alternative parent,
 the private skin can explicitly set `operations.keepParkedVmNames` to an array
@@ -267,7 +278,10 @@ billable. See [AKS stop/start](https://learn.microsoft.com/azure/aks/start-stop-
 and [Container App revision management](https://learn.microsoft.com/azure/container-apps/revisions-manage).
 
 Removal waits for both resource groups **and** named subscription policies/budget
-to disappear; a rerun skips already-absent objects. `Removed` read-only verification
+to disappear; a rerun skips already-absent objects. Optional `-ForceDeleteWorkspace`
+first permanently deletes `law-<prefix>` (irreversible, under its own confirmation):
+without it the workspace is only soft-deleted for 14 days and re-creating the same
+name recovers its old data. `Removed` read-only verification
 needs no deployment history, VM inventory or directory lookup. Its mandatory
 boundary is those Azure-owned objects, not tenant-wide cleanup. Subscription-wide Defender
 pricing is **preserved by default**; only `-DisableDefender` changes it, and this
@@ -298,7 +312,10 @@ secret: it creates and removes its own one-day app credential.
 
 Mandatory compute/Arc waits throw on timeout; inspection errors terminate. Native CLI
 failures terminate; authentication/authorization errors are never interpreted as
-resource absence. Extension jobs must complete successfully; guest commands need
+resource absence. The one retried write is the first Key Vault save of the generated
+password: it retries `Forbidden`/transient errors for up to ten minutes while the
+deployer's new role assignment propagates, and any other error stops at once.
+Extension jobs must complete successfully; guest commands need
 an exact completion marker as well as a nonfailed provisioning result. Only the
 activation AMA wait permits the explicit `ARC_DEMO_PENDING` stdout marker;
 other guest operations cannot use it to bypass completion. Temporary
@@ -320,8 +337,8 @@ $LASTEXITCODE
 
 `-DesiredState` is `Active`, `Ready` (compatible alias/default), `Hibernated` or
 `Removed`; `-OutputFormat` is `Json` or `Table`. The supplied state name is echoed.
-Default timeout is zero (one snapshot); 0-600 seconds bounds eventual-consistency
-retries. Individual CLI reads and service response times still contribute to total
+Default timeout is zero (one snapshot); 0-1800 seconds bounds eventual-consistency
+retries (Deploy's final check waits up to 1200 for Windows Heartbeats). Individual CLI reads and service response times still contribute to total
 wall time. A hard failure stops retries. There is no fault induction or repair.
 
 One JSON object is written to stdout:

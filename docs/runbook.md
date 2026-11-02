@@ -193,11 +193,16 @@ Relative fleet paths resolve against the repo root.
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 ```
 
-Preflight does not register providers or change context. Resolve any missing
-provider with separate operator authorization, using the exact providers reported
+Preflight does not register providers, install CLI extensions or change context.
+It reports every unregistered provider and every missing CLI extension (`connectedmachine`,
+plus `containerapp` for Container Apps) in one error with the exact fix, for example
+`az extension add --name connectedmachine --yes`; resolve missing providers with
+separate operator authorization, using the exact providers reported
 by deployment preflight for the selected workloads. Supplying
 `-DeployerPrincipalId <OBJECT_ID>` bypasses only Graph user discovery, not RBAC.
-SKU restriction and regional/family vCPU quota checks do not guarantee capacity.
+SKU restriction and regional/family vCPU quota checks do not guarantee capacity. If Azure still
+refuses allocation, Deploy prints the options and never switches VM size or
+region on its own; re-running the same command resumes.
 Review [cost assumptions](cost.md) before agreeing to a budget.
 
 ## 3. Deploy (approved creation/reconciliation)
@@ -229,7 +234,10 @@ rather than printing a false success.
 
 Do not deploy over an in-use estate just to test a code change. First collect
 read-only readiness and propose the exact required reconciliation.
-Preserve subscription deployment history: it is the lifecycle manifest.
+Preserve subscription deployment history while the estate exists: it is the
+lifecycle manifest. After `Remove-ArcDemo` the infra group is gone, so Deploy ignores
+the stale manifest and builds a fresh Key Vault; `Remove-ArcDemo.ps1
+-PruneDeploymentHistory` (opt-in) deletes this demo's own old records.
 Incremental optional-only deployments do not delete earlier Arc hosts.
 
 `Deploy-ArcDemo.ps1` does not regenerate VM credentials on a routine redeploy. Reuse the existing
@@ -335,7 +343,12 @@ pause/restore of their previous enabled state.
 ```
 
 This deletes both demo groups and named policies/budget and verifies all their
-absence. Defender pricing is preserved unless `-DisableDefender` is explicitly
+absence. A running nested parent gets one bounded graceful guest stop that warns
+and continues if it fails. Two opt-in switches serve an intended clean same-prefix
+rebuild: `-ForceDeleteWorkspace` first permanently deletes `law-<prefix>` (irreversible;
+otherwise re-creating that name within 14 days recovers the old workspace and its
+data) and `-PruneDeploymentHistory` deletes this demo's own old `arc-demo-<timestamp>`
+deployment records after removal is verified. Defender pricing is preserved unless `-DisableDefender` is explicitly
 requested. `-RemoveOnboardingIdentity` is separately opt-in and rejects shared or
 ambiguous identities. Inspect remaining subscription/tenant resources and delayed
 billing; do not promise zero charges just because group deletion completed.

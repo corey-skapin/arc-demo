@@ -52,6 +52,7 @@
 - Preserve VM definitions/NICs/disks/Arc identities while parked; never delete/reconstruct VMs as a cost shortcut.
 - Managed Run Command is limited to 25 saved commands per VM. Preserve useful failures; remove only completed demo-owned commands through the working helper, not unrelated commands or an in-flight operation.
 - Keep Defender pricing unchanged on default removal; require separate `-DisableDefender` / `-RemoveOnboardingIdentity` consent.
+- Keep Remove's `-ForceDeleteWorkspace` (irreversible log deletion) and `-PruneDeploymentHistory` (own `arc-demo-<timestamp>` records only) opt-in; use them only for an intended clean same-prefix rebuild. A failed nested-guest stop warns and removal continues.
 - Verify both groups and named subscription policies/budget absent for Removed; disclose tenant/shared/soft-delete exceptions without purging or claiming zero bill.
 
 ## Activation and readiness
@@ -92,9 +93,9 @@
 ## Deployment preflight only
 
 1. Verify the explicitly requested tenant/subscription and effective inherited/group Owner, or Contributor plus User Access Administrator; do not bypass permissions with a supplied principal ID.
-2. Run `Test-Prerequisites` for PowerShell 7.4+, CLI 2.60+ and Bicep; stop on failure rather than workaround.
+2. Run `Test-Prerequisites` for PowerShell 7.4+, CLI 2.60+, Bicep and the `connectedmachine` CLI extension (plus `containerapp` for Container Apps); stop on failure rather than workaround. It reports all gaps at once and installs/registers nothing.
 3. Check needed providers, including DevTestLab and optional AKS dependencies; obtain approval separately for registration.
-4. Check exact SKU restrictions and regional/family vCPU quota; never claim listings, what-if or validation guarantee allocation, especially B-series in AU regions.
+4. Check exact SKU restrictions and regional/family vCPU quota for every VM size; never claim listings, what-if or validation guarantee allocation, especially B-series in AU regions. On an allocation failure report the options; never switch size or region silently.
 
 ## Code, tests and documentation
 

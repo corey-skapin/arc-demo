@@ -15,7 +15,7 @@ param(
     [string]$SkinPath = '',
     [ValidateSet('Active', 'Ready', 'Hibernated', 'Removed')][string]$DesiredState = 'Ready',
     [ValidateSet('Json', 'Table')][string]$OutputFormat = 'Table',
-    [ValidateRange(0, 600)][int]$TimeoutSeconds = 0
+    [ValidateRange(0, 1800)][int]$TimeoutSeconds = 0
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force

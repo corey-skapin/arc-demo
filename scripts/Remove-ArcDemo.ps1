@@ -5,6 +5,12 @@
     Explicit subscription/tenant required. -WhatIf makes no Azure changes.
     Defender subscription pricing is preserved unless -DisableDefender is passed.
     Identity deletion is separately opt-in; shared/ambiguous identities are refused.
+    A running nested SQL parent gets one bounded graceful guest stop; if that fails the
+    removal warns and continues, because the parent and its guest are deleted anyway.
+    -ForceDeleteWorkspace first permanently deletes the Log Analytics workspace; without it
+    the workspace is only soft-deleted for 14 days and re-creating the same name recovers its old data.
+    -PruneDeploymentHistory deletes this demo's own Deploy-ArcDemo subscription deployment
+    records after removal is verified; policy, SRE and other deployment records are never touched.
     Successful completion verifies both groups and named policies/budget absent.
     Retained tenant identities, soft-deleted vaults and shared/subscription services
     are not deleted by this command and may still incur costs.
@@ -17,7 +23,9 @@ param(
     [string]$SkinPath = '',
     [switch]$KeepDefender,
     [switch]$DisableDefender,
-    [switch]$RemoveOnboardingIdentity
+    [switch]$RemoveOnboardingIdentity,
+    [switch]$ForceDeleteWorkspace,
+    [switch]$PruneDeploymentHistory
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
@@ -38,7 +46,18 @@ if ($RemoveOnboardingIdentity) {
         if (@($roles | Where-Object { $_.scope -ne "$scope/resourceGroups/rg-$NamePrefix" }).Count) { throw 'Onboarding identity has permissions outside this demo; refusing to delete a potentially shared identity.' }
     }
 }
-if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", "Delete $($groups -join ', '), named policies and budget; identity deletion=$RemoveOnboardingIdentity; disable subscription Defender=$DisableDefender")) { return }
+$deleteWorkspace = $ForceDeleteWorkspace -and $PSCmdlet.ShouldProcess("law-$NamePrefix in rg-$NamePrefix", 'Permanently delete the Log Analytics workspace and its data (force; skips the 14-day soft-delete recovery)')
+if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", "Delete $($groups -join ', '), named policies and budget; identity deletion=$RemoveOnboardingIdentity; disable subscription Defender=$DisableDefender; force-delete workspace=$ForceDeleteWorkspace; prune deployment history=$PruneDeploymentHistory")) { return }
+if ($deleteWorkspace) {
+    # Must run before the group delete: afterwards the workspace is only soft-deleted and has to be recovered before it can be forced.
+    $workspace = Invoke-DemoAz -Arguments @('monitor', 'log-analytics', 'workspace', 'show', '-g', "rg-$NamePrefix", '-n', "law-$NamePrefix", '-o', 'json') -AllowNotFound
+    if ($workspace) {
+        Invoke-DemoAz -Arguments @('monitor', 'log-analytics', 'workspace', 'delete', '-g', "rg-$NamePrefix", '-n', "law-$NamePrefix", '--force', 'true', '--yes') | Out-Null
+        Write-Ok "Log Analytics workspace law-$NamePrefix permanently deleted"
+    } else {
+        Write-Step "Log Analytics workspace law-$NamePrefix is already absent"
+    }
+}
 if ($nestedSqlGuest) {
     $raw = Invoke-DemoAz -Arguments @('vm', 'show', '-d', '-g', "rg-$NamePrefix-infra", '-n', $nestedSqlGuest.ParentVmName, '-o', 'json') -AllowNotFound
     if ($raw) {
@@ -46,8 +65,12 @@ if ($nestedSqlGuest) {
         $expectedId = "/subscriptions/$SubscriptionId/resourceGroups/rg-$NamePrefix-infra/providers/Microsoft.Compute/virtualMachines/$($nestedSqlGuest.ParentVmName)"
         if ($parent.id -ne $expectedId -or $parent.storageProfile.osDisk.osType -ne 'Windows') { throw 'Configured nested SQL parent identity/OS is unexpected; refusing removal.' }
         if ($parent.powerState -eq 'VM running') {
-            Invoke-DemoNestedSqlGuest -ParentMachine ([pscustomobject]@{ Name = $parent.name; Id = $parent.id; OsType = 'Windows' }) `
-                -GuestVmName $nestedSqlGuest.GuestVmName -Action Stop
+            try {
+                Invoke-DemoNestedSqlGuest -ParentMachine ([pscustomobject]@{ Name = $parent.name; Id = $parent.id; OsType = 'Windows' }) `
+                    -GuestVmName $nestedSqlGuest.GuestVmName -Action Stop -TimeoutSeconds 600
+            } catch {
+                Write-Warn "Nested SQL guest did not stop gracefully ($($_.Exception.Message)). Continuing: the parent VM, its disks and the guest are deleted with rg-$NamePrefix-infra anyway."
+            }
         } elseif ($parent.powerState -notin @('VM deallocated', 'VM deallocating')) {
             throw "Nested SQL parent is in $($parent.powerState); retry removal after the transition settles."
         }
@@ -79,6 +102,13 @@ Wait-Until -TimeoutSeconds 1800 -IntervalSeconds 20 -Message 'demo groups, named
     $checks = @(Get-DemoRemovalChecks -NamePrefix $NamePrefix)
     @($checks | Where-Object { $_.required -and $_.status -ne 'pass' }).Count -eq 0
 } | Out-Null
+if ($PruneDeploymentHistory) {
+    $manifests = Get-DemoStaleManifestDeployments -Deployments @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '-o', 'json') | ConvertFrom-Json) -ArcResourceGroup "rg-$NamePrefix"
+    foreach ($manifest in $manifests) {
+        Invoke-DemoAz -Arguments @('deployment', 'sub', 'delete', '--name', $manifest.name) | Out-Null
+    }
+    Write-Ok "Pruned $(@($manifests).Count) Deploy-ArcDemo deployment record(s) for rg-$NamePrefix; no other deployment records were touched."
+}
 if ($DisableDefender) {
     Invoke-DemoAz -Arguments @('security', 'pricing', 'create', '--name', 'VirtualMachines', '--tier', 'Free', '-o', 'none') | Out-Null
 }
