@@ -88,6 +88,22 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
         $formatter.formatter | Should -Be 6
     }
 
+    It '<Name>: lets small grids fit their rows (size 3, capped at 25 rows) and keeps long lists at the fixed size' -ForEach $books {
+        $longLists = 'Most widely installed software', 'Software by publisher', 'Recent software changes'
+        foreach ($query in Read-Queries $Path | Where-Object { $_.content.visualization -eq 'table' }) {
+            $title = $query.content.title
+            if ($title -in $longLists) {
+                $query.content.size | Should -Be 0 -Because "$title is a long list and keeps the fixed height so the page does not balloon"
+                continue
+            }
+            $query.content.size | Should -Be 3 -Because "${title}: a Small grid reserves about 330 px even with one row, which leaves a blank band"
+            $limit = $query.content.gridSettings.rowLimit
+            $take = [regex]::Matches($query.content.query, '\|\s*take\s+(\d+)') | Select-Object -Last 1
+            $capped = ($null -ne $limit -and $limit -le 25) -or ($null -ne $take -and [int]$take.Groups[1].Value -le 25)
+            $capped | Should -BeTrue -Because "$title fits its rows, so it must be capped at 25 rows by a take or a rowLimit"
+        }
+    }
+
     It '<Name>: names the category column of any grouped bar chart' -ForEach $books {
         foreach ($query in Read-Queries $Path | Where-Object { $_.content.visualization -eq 'barchart' -and $_.content.chartSettings.group }) {
             $query.content.chartSettings.xAxis | Should -Not -BeNullOrEmpty -Because $query.content.title

@@ -298,6 +298,12 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
         ($alerts.gridSettings.labelSettings | Where-Object columnId -eq 'Fired').label | Should -Match 'local'
     }
 
+    It 'gives every table the Full size so a short table leaves no blank band' {
+        $tables = @($script:Queries | Where-Object { $_.content.visualization -eq 'table' })
+        $tables.Count | Should -BeGreaterOrEqual 11
+        foreach ($table in $tables) { $table.content.size | Should -Be 3 -Because "$($table.name) reserves a fixed height when it is Small or Medium" }
+    }
+
     It 'keeps tile labels short and the subtitles bounded' {
         $labels = [regex]::Matches((Get-Query 'kpi'), "'l', '([^']+)'") | ForEach-Object { $_.Groups[1].Value }
         $labels.Count | Should -Be 8
