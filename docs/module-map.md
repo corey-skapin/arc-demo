@@ -19,7 +19,7 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 | `bicep/modules/workspace.bicep` | Log Analytics and VMInsights/ChangeTracking solutions |
 | `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; `New-CoreDcrBody` in the deploy wrapper owns selectors, including the source/event-specific LOB informational heartbeat |
 | `bicep/modules/alerts.bicep` | Action Group and missing-Heartbeat alert |
-| `bicep/modules/defender.bicep` | Subscription Defender for Servers P2 |
+| `bicep/modules/defender.bicep`, `tests/DefenderPlan.Tests.ps1` | Subscription Defender for Servers P2, deployed only while the live plan is not already Standard (`deployDefenderVmPlan`, set by Deploy); an enabled plan and its extensions are never re-PUT |
 | `bicep/modules/policy.bicep` | Named MCSB/NIST assignments |
 | `bicep/modules/budget.bicep` | Named budget filtered to demo RGs, notification thresholds |
 | `bicep/modules/operational-workbook.bicep` | Optional standalone shared workbook only; existing workspace, deterministic owned ID, no workload/telemetry changes |

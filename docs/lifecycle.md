@@ -70,6 +70,15 @@ an arbitrary subscription. AKS node capacity is additional to backing VMs.
 credentials, repair resources or run guest commands. Deployment preview uses
 ARM what-if and a temporary parameter file removed in `finally`.
 
+Deploy reads the live Defender for Servers plan (`az security pricing show`,
+read-only, also during `-WhatIf`) and enables Plan 2 only when its tier is not
+`Standard`: a fresh subscription, or one where `Remove-ArcDemo -DisableDefender`
+set the plan to Free. An enabled plan keeps its tier, subPlan and extensions
+(for example AgentlessVmScanning) because the template is not applied to it: the
+module declares no `extensions`, so ARM what-if would report
+`Delete properties.extensions`. A plan other than P2 is preserved, not upgraded;
+an unreadable or unknown tier stops Deploy.
+
 ## Nested SQL guest
 
 The [nested SQL runbook](nested-sql-demo.md) is the single build/park/wake/remove

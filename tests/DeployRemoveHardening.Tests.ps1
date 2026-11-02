@@ -347,6 +347,7 @@ Describe 'Deploy against retained deployment manifests' {
             # A missing resource group makes Invoke-DemoAz -AllowNotFound return $null, not an empty list.
             if ($Arguments[0] -eq 'vm') { return $(if ($state.groupExists -eq 'true') { '[]' }) }
             if ($Arguments[0] -in @('network', 'consumption')) { return $null }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') {
                 $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
@@ -401,6 +402,7 @@ Describe 'Deploy hardening wiring' {
             param($Arguments)
             # On a clean subscription the infra group does not exist: every -AllowNotFound read returns $null.
             if ($Arguments[0] -in @('keyvault', 'network', 'consumption', 'aks', 'containerapp', 'vm')) { return $null }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return }
@@ -499,6 +501,7 @@ Describe 'Remove-ArcDemo workspace and deployment-history options' {
             if ($Arguments[0] -in @('policy', 'consumption')) { return $null }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return $state.history }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'delete') { $state.events.Add("deployment-delete:$($Arguments[4])"); return }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'create') { $state.events.Add("defender-pricing:$($Arguments[4]):$($Arguments[6])"); return }
             throw "Unexpected cleanup operation: $($Arguments -join ' ')"
         }
     }
@@ -506,6 +509,13 @@ Describe 'Remove-ArcDemo workspace and deployment-history options' {
         & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -Confirm:$false
         $state.events | Should -Be @('group-delete:rg-fixture', 'group-delete:rg-fixture-infra')
         Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -in @('monitor', 'deployment') }
+    }
+    It 'leaves Defender pricing unchanged by default; only -DisableDefender sets the plan to Free' {
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -Confirm:$false
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'security' }
+        $state.events.Clear()
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -DisableDefender -Confirm:$false
+        $state.events | Should -Be @('group-delete:rg-fixture', 'group-delete:rg-fixture-infra', 'defender-pricing:VirtualMachines:Free')
     }
     It 'force-deletes the workspace before either group is deleted' {
         & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -ForceDeleteWorkspace -Confirm:$false

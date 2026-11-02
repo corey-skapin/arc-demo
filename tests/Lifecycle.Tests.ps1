@@ -430,6 +430,7 @@ Describe 'WhatIf lifecycle safety' {
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -in @('keyvault', 'network', 'consumption')) { return $null }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             throw "Unexpected preview operation: $($Arguments[0..1] -join ' ')"
         }
         & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -AdminEmail 'test@example.com' -WhatIf
@@ -447,6 +448,7 @@ Describe 'WhatIf lifecycle safety' {
                 $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
                 $global:ArcDiskPreview = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
         }
         try {
@@ -492,6 +494,7 @@ Describe 'WhatIf lifecycle safety' {
                 $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
                 $global:ArcPreviewParameters = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
             }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
         }
         try {
@@ -527,6 +530,7 @@ Describe 'Retained vault deployment selection' {
                 $global:ArcVaultPreview = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
                 return
             }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             throw 'Unexpected operation in vault selection preview.'
         }
     }
