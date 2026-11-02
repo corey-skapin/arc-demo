@@ -1,0 +1,8 @@
+// include: series
+// Selected machine: 95th percentile CPU per interval, as columns. Absent intervals stay null, so parked time is blank, never zero.
+Samples
+| where Metric == "CPU percent" and isnotnull(Value)
+| lookup kind=inner (Machines | project ResourceId, Machine) on ResourceId
+| where Machine == '{SelectedHost}'
+| make-series P95 = percentile(Value, 95) default = real(null) on TimeGenerated from bin(WindowStart, DetailStep) to bin(WindowEnd, DetailStep) + DetailStep step DetailStep
+| project TimeGenerated, P95

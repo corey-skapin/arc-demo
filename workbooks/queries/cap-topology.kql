@@ -5,5 +5,4 @@ Hosts
 | where Layer in ("parent", "guest")
 | extend Group = iff(Layer == "guest", ParentMachine, Machine), RoleOrder = iff(Layer == "parent", 0, 1)
 | sort by Group asc, RoleOrder asc
-| project Group, Role = Layer, Machine, State = ReportingState, Assessment, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0),
-    MemP95 = round(MemP95, 1), FreePct = round(DiskFreeNowPct, 1), Evidence = EvidenceState, LastSample = HostLastSeen
+| project Role = Layer, Machine, Assessment, Evidence = EvidenceState, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 1), MemP95 = round(MemP95, 1)

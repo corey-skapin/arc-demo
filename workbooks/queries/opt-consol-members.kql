@@ -4,5 +4,5 @@
 Candidates
 | where UnderState == "Flagged" and Layer != "guest"
 | sort by Application asc, Os asc, CpuP95 asc
-| project Application, Os, Machine, SizeContext, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0), MemP95 = round(MemP95, 1), FreePct = round(DiskFreeNowPct, 1),
-    ObservedHours = CpuObservedHours, Evidence = EvidenceState, Consolidation = ConsolidationState
+| project Application, Os, Machine, Size = iff(Vcpu > 0, strcat(tostring(Vcpu), " vCPU / ", Num(MemoryGb, 0), " GB"), "not reported"),
+    CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 1), MemP95 = round(MemP95, 1), Consolidation = ConsolidationState

@@ -6,5 +6,4 @@ Hosts
 | where ResourceId == SelId or (isnotempty(SelParent) and ResourceId == SelParent) or ParentResourceId == SelId
 | extend Relation = case(ResourceId == SelId, "selected", ResourceId == SelParent, "its parent", "its guest")
 | sort by Relation asc, Machine asc
-| project Relation, Machine, Topology, State = ReportingState, Assessment, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0),
-    MemP95 = round(MemP95, 1), FreePct = round(DiskFreeNowPct, 1), Evidence = EvidenceState
+| project Relation, Machine, Assessment, Evidence = EvidenceState, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 1), MemP95 = round(MemP95, 1)

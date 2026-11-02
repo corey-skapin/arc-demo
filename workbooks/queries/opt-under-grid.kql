@@ -2,12 +2,11 @@
 // Underutilisation review. Low CPU alone never makes a candidate: memory evidence and its history must also support it.
 Candidates
 | extend Reading = case(
-    UnderState == "Flagged", strcat("Low CPU (P95 ", Num(CpuP95, 1), "% < ", tostring(LowCpuP95), "%) with memory in use P95 ", Num(MemP95, 1), "% < 50%."),
-    not(AnyTelemetry), "No telemetry: unknown, not zero use.",
-    UnderState == "Needs evidence", strcat("Needs: ", EvidenceGaps, "."),
-    CpuP95 >= LowCpuP95, strcat("CPU P95 ", Num(CpuP95, 1), "% is not below ", tostring(LowCpuP95), "%."),
-    "Memory in use or a pressure signal argues against a candidate.")
+    UnderState == "Flagged", strcat("Low CPU and memory (P95 ", Num(CpuP95, 1), "%)"),
+    not(AnyTelemetry), "No telemetry: unknown",
+    UnderState == "Needs evidence", strcat("Needs ", replace_string(EvidenceGaps, " (not in the parent's own counters)", "")),
+    CpuP95 >= LowCpuP95, strcat("CPU P95 ", Num(CpuP95, 1), "% is not below ", tostring(LowCpuP95), "%"),
+    "Memory or pressure argues against")
 | sort by (UnderState == "Flagged") desc, (UnderState == "Needs evidence") desc, CpuP95 asc, Machine asc
-| project Machine, Topology, Os, Application, SizeContext, Status = UnderState, CpuMean = round(CpuMean, 1), CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0),
-    Pattern, MemBasis = case(tostring(MemSources) has "Committed", "Committed bytes (Windows)", tostring(MemSources) has "Used Memory", "Used memory (Linux)", "not reported"),
-    MemP95 = round(MemP95, 1), FreePct = round(DiskFreeNowPct, 1), ObservedHours = CpuObservedHours, Evidence = EvidenceState, Reading
+| project Machine, Status = UnderState, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 1), MemP95 = round(MemP95, 1),
+    Size = iff(Vcpu > 0, strcat(tostring(Vcpu), " vCPU / ", Num(MemoryGb, 0), " GB"), "not reported"), Reading

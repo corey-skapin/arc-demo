@@ -1,24 +1,25 @@
 // include: hosts
-// Estate capacity summary: mutually exclusive assessment counts. Together they equal the machines in scope (first tile row, Scope and evidence quality).
+// Estate capacity summary, first row: the machines that have enough evidence to be assessed. The second row (evidence gaps) holds the rest;
+// together the five tiles equal the machines in scope (Scope and evidence quality). Tile text stays short: the full list is in the table below.
 let Counts = Hosts
-| summarize Pressure = countif(Assessment == "Pressure observed"), PressureNames = strcat_array(make_list_if(Machine, Assessment == "Pressure observed", 5), ", "),
-    Headroom = countif(Assessment == "Apparent headroom"), HeadroomNames = strcat_array(make_list_if(Machine, Assessment == "Apparent headroom", 5), ", "),
-    Within = countif(Assessment == "Within thresholds"), WithinNames = strcat_array(make_list_if(Machine, Assessment == "Within thresholds", 5), ", "),
-    Insufficient = countif(Assessment == "Insufficient evidence"), InsufficientNames = strcat_array(make_list_if(Machine, Assessment == "Insufficient evidence", 5), ", "),
-    NoTelemetry = countif(Assessment == "No telemetry"), NoTelemetryNames = strcat_array(make_list_if(Machine, Assessment == "No telemetry", 5), ", ")
+| summarize Pressure = countif(Assessment == "Pressure observed"), PressureList = make_list_if(Machine, Assessment == "Pressure observed", 50),
+    Headroom = countif(Assessment == "Apparent headroom"), HeadroomList = make_list_if(Machine, Assessment == "Apparent headroom", 50),
+    Within = countif(Assessment == "Within thresholds"), WithinList = make_list_if(Machine, Assessment == "Within thresholds", 50)
 | extend K = 1;
+let ShortList = (names:dynamic) {
+    let sorted = array_sort_asc(names);
+    let n = array_length(sorted);
+    let both = strcat_array(sorted, ", ");
+    case(n == 0, "none", n == 1, tostring(sorted[0]), n == 2 and strlen(both) <= 20, both, strcat(tostring(sorted[0]), " +", tostring(n - 1)))
+};
 datatable(SortKey:long, Label:string)[
     1, "🔴 Pressure observed",
     2, "🟢 Apparent headroom",
-    3, "🔵 Within thresholds",
-    4, "🟠 Insufficient evidence",
-    5, "⚪ No telemetry"]
+    3, "🔵 Within thresholds"]
 | extend K = 1
 | join kind=inner Counts on K
 | project SortKey, Label,
-    Machines = case(SortKey == 1, Pressure, SortKey == 2, Headroom, SortKey == 3, Within, SortKey == 4, Insufficient, NoTelemetry),
-    Names = case(SortKey == 1, PressureNames, SortKey == 2, HeadroomNames, SortKey == 3, WithinNames,
-        SortKey == 4, InsufficientNames, NoTelemetryNames)
-| extend Names = iff(isempty(Names), "none", Names)
+    Value = case(SortKey == 1, Pressure, SortKey == 2, Headroom, Within),
+    Note = case(SortKey == 1, ShortList(PressureList), SortKey == 2, ShortList(HeadroomList), ShortList(WithinList))
 | sort by SortKey asc
-| project Label, Machines, Names
+| project Label, Value, Note

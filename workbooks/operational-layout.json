@@ -1,0 +1,320 @@
+{
+  "schemaVersion": 1,
+  "description": "Portal layout for the Capacity and Optimisation workbooks, applied by the generator after the query tokens are resolved. Grids: every column is a proportional fr width (the sum stays at 115 or less) and a header never needs more than its width. Tables of up to 50 rows use the Full size so a short table leaves no blank band. Charts: column charts with null gaps (parked time is blank, never zero) and no legend totals. Tiles: no palette colour, at most four per row. status columns reuse the colour rules of the template.",
+  "capacity": {
+    "scope-tiles": { "tiles": { "value": "text" } },
+    "overview-tiles": { "tiles": { "value": "number" } },
+    "overview-tiles-gaps": { "tiles": { "value": "number" } },
+    "overview-hosts": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Assessment", "kind": "status", "width": 20 },
+          { "name": "Evidence", "kind": "status", "width": 30 },
+          { "name": "CpuP95", "kind": "pct", "palette": "greenRed", "label": "CPU P95", "width": 12 },
+          { "name": "CpuPeak", "kind": "pct", "palette": "greenRed", "label": "CPU peak", "width": 13 },
+          { "name": "MemP95", "kind": "pct", "palette": "greenRed", "label": "Mem P95", "width": 12 },
+          { "name": "FreePct", "kind": "pct", "palette": "redGreen", "label": "Disk free", "width": 14 }
+        ]
+      }
+    },
+    "overview-topology": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Role", "kind": "text", "width": 10 },
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Assessment", "kind": "status", "width": 20 },
+          { "name": "Evidence", "kind": "status", "width": 28 },
+          { "name": "CpuP95", "kind": "pct", "palette": "greenRed", "label": "CPU P95", "width": 12 },
+          { "name": "CpuPeak", "kind": "pct", "palette": "greenRed", "label": "CPU peak", "width": 13 },
+          { "name": "MemP95", "kind": "pct", "palette": "greenRed", "label": "Mem P95", "width": 12 }
+        ]
+      }
+    },
+    "cpu-p95": { "customWidth": "50", "chart": { "visualization": "unstackedbar", "axis": "percent", "threshold": "{CpuHigh}", "legend": true } },
+    "cpu-peak": { "customWidth": "50", "chart": { "visualization": "unstackedbar", "axis": "percent", "threshold": "{CpuHigh}", "legend": true } },
+    "cpu-pattern": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Pattern", "kind": "status", "width": 20 },
+          { "name": "Mean", "kind": "pct", "palette": "greenRed", "width": 9 },
+          { "name": "P95", "kind": "pct", "palette": "greenRed", "width": 8 },
+          { "name": "Peak", "kind": "pct", "palette": "greenRed", "width": 9 },
+          { "name": "SharePct", "kind": "pct", "palette": "greenRed", "label": "Time over", "width": 14 },
+          { "name": "LongestRunMin", "kind": "num", "decimals": 0, "label": "Run (min)", "width": 14 },
+          { "name": "P95Trend", "kind": "spark", "label": "P95 trend", "width": 14 },
+          { "name": "PeakTrend", "kind": "spark", "label": "Peak trend", "width": 15 }
+        ]
+      }
+    },
+    "mem-pct": { "customWidth": "50", "chart": { "visualization": "unstackedbar", "axis": "percent", "threshold": "{MemHigh}", "legend": true } },
+    "mem-avail": { "customWidth": "50", "chart": { "visualization": "unstackedbar", "axis": "number", "legend": true } },
+    "mem-grid": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Basis", "kind": "text", "width": 24 },
+          { "name": "State", "kind": "status", "width": 20 },
+          { "name": "Mean", "kind": "pct", "palette": "greenRed", "width": 9 },
+          { "name": "P95", "kind": "pct", "palette": "greenRed", "width": 8 },
+          { "name": "Peak", "kind": "pct", "palette": "greenRed", "width": 9 },
+          { "name": "MemTrend", "kind": "spark", "label": "P95 trend", "width": 14 },
+          { "name": "LowestAvailableMB", "kind": "num", "decimals": 0, "label": "Lowest MB", "width": 14 }
+        ]
+      }
+    },
+    "disk-chart": { "chart": { "visualization": "unstackedbar", "axis": "percent", "threshold": "{DiskLow}", "legend": true } },
+    "disk-volumes": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Volume", "kind": "text", "width": 11 },
+          { "name": "Level", "kind": "status", "width": 22 },
+          { "name": "FreeNowPct", "kind": "pct", "palette": "redGreen", "label": "Free now", "width": 13 },
+          { "name": "FreeGb", "kind": "num", "decimals": 1, "label": "Free GB", "width": 12 },
+          { "name": "SizeGb", "kind": "num", "decimals": 1, "label": "Size GB", "width": 12 },
+          { "name": "SizeBasis", "kind": "text", "label": "Size basis", "width": 15 },
+          { "name": "FreeTrend", "kind": "spark", "label": "Free trend", "width": 15 }
+        ]
+      }
+    },
+    "detail-tiles": { "tiles": { "value": "text", "size": "auto" } },
+    "detail-why": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Assessment", "kind": "text", "width": 22 },
+          { "name": "Why", "kind": "text", "width": 93 }
+        ]
+      }
+    },
+    "detail-cpu-p95": { "customWidth": "50", "chart": { "visualization": "barchart", "axis": "percent", "threshold": "{CpuHigh}", "legend": false, "series": [ { "name": "P95", "label": "95th percentile CPU %", "color": "blue" } ] } },
+    "detail-cpu-peak": { "customWidth": "50", "chart": { "visualization": "barchart", "axis": "percent", "threshold": "{CpuHigh}", "legend": false, "series": [ { "name": "Peak", "label": "Peak CPU %", "color": "orange" } ] } },
+    "detail-mem-pct": { "customWidth": "50", "chart": { "visualization": "barchart", "axis": "percent", "threshold": "{MemHigh}", "legend": false, "series": [ { "name": "P95", "label": "Memory in use % (95th percentile)", "color": "blue" } ] } },
+    "detail-mem-avail": { "customWidth": "50", "chart": { "visualization": "barchart", "axis": "number", "legend": false, "series": [ { "name": "Lowest", "label": "Lowest available MB", "color": "orange" } ] } },
+    "detail-disk": { "chart": { "visualization": "unstackedbar", "axis": "percent", "threshold": "{DiskLow}", "legend": true } },
+    "detail-related": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Relation", "kind": "text", "width": 13 },
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Assessment", "kind": "status", "width": 20 },
+          { "name": "Evidence", "kind": "status", "width": 28 },
+          { "name": "CpuP95", "kind": "pct", "palette": "greenRed", "label": "CPU P95", "width": 12 },
+          { "name": "CpuPeak", "kind": "pct", "palette": "greenRed", "label": "CPU peak", "width": 13 },
+          { "name": "MemP95", "kind": "pct", "palette": "greenRed", "label": "Mem P95", "width": 12 }
+        ]
+      }
+    },
+    "detail-evidence": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Metric", "kind": "text", "width": 16 },
+          { "name": "Instance", "kind": "text", "width": 13 },
+          { "name": "Evidence", "kind": "status", "width": 22 },
+          { "name": "ObservedHours", "kind": "num", "decimals": 1, "label": "Hours", "width": 10 },
+          { "name": "SamplingPct", "kind": "pct", "palette": "redGreen", "label": "Sampling", "width": 13 },
+          { "name": "Samples", "kind": "num", "decimals": 0, "width": 12 },
+          { "name": "LastSample", "kind": "date", "label": "Last sample", "width": 26 }
+        ]
+      }
+    },
+    "method-matrix": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Os", "kind": "text", "label": "OS", "width": 9 },
+          { "name": "Layer", "kind": "text", "width": 13 },
+          { "name": "CPU", "kind": "status", "width": 11 },
+          { "name": "Memory", "kind": "status", "width": 11 },
+          { "name": "AvailableMemory", "kind": "status", "label": "Available", "width": 14 },
+          { "name": "DiskFree", "kind": "status", "label": "Disk free", "width": 14 }
+        ]
+      }
+    },
+    "method-sources": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Os", "kind": "text", "label": "OS", "width": 9 },
+          { "name": "Metric", "kind": "text", "width": 18 },
+          { "name": "Source", "kind": "text", "width": 38 },
+          { "name": "Samples", "kind": "num", "decimals": 0, "width": 12 },
+          { "name": "InvalidSamples", "kind": "num", "decimals": 0, "label": "Invalid", "width": 12 },
+          { "name": "FirstSample", "kind": "date", "label": "First sample", "width": 26 }
+        ]
+      }
+    },
+    "arc-status": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "ArcStatus", "kind": "status", "label": "Arc status", "width": 16 },
+          { "name": "LastStatusChange", "kind": "date", "label": "Last status change", "width": 26 },
+          { "name": "OsSku", "kind": "text", "label": "OS", "width": 30 },
+          { "name": "Vcpu", "kind": "num", "decimals": 0, "label": "vCPU", "width": 9 },
+          { "name": "MemoryGb", "kind": "num", "decimals": 0, "label": "Memory GB", "width": 14 }
+        ]
+      }
+    }
+  },
+  "optimisation": {
+    "summary-tiles": { "tiles": { "value": "number" } },
+    "summary-tiles-hygiene": { "tiles": { "value": "number" } },
+    "summary-evidence": { "chart": { "keep": true } },
+    "candidates": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Reasons", "kind": "text", "label": "Reasons flagged", "width": 36 },
+          {
+            "name": "Evidence",
+            "kind": "status",
+            "width": 14,
+            "options": "colors",
+            "rules": [
+              { "value": "Adequate", "representation": "green" },
+              { "value": "Limited", "representation": "orange" },
+              { "value": "No telemetry", "representation": "gray" }
+            ],
+            "default": "gray"
+          },
+          { "name": "Needs", "kind": "text", "label": "Evidence still needed", "width": 26 },
+          { "name": "CpuP95", "kind": "pct", "palette": "blue", "label": "CPU P95", "width": 12 },
+          { "name": "MemP95", "kind": "pct", "palette": "blue", "label": "Mem P95", "width": 12 }
+        ]
+      }
+    },
+    "under-grid": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Status", "kind": "status", "width": 16 },
+          { "name": "CpuP95", "kind": "pct", "palette": "blue", "label": "CPU P95", "width": 12 },
+          { "name": "CpuPeak", "kind": "pct", "palette": "blue", "label": "CPU peak", "width": 13 },
+          { "name": "MemP95", "kind": "pct", "palette": "blue", "label": "Mem P95", "width": 12 },
+          { "name": "Size", "kind": "text", "width": 16 },
+          { "name": "Reading", "kind": "text", "width": 34 }
+        ]
+      }
+    },
+    "sched-heatmap": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 14 },
+          { "name": "IdleSharePct", "kind": "pct", "palette": "blueDark", "label": "Idle hours", "width": 15 },
+          { "repeat": { "from": 0, "to": 23, "name": "H{0:00}", "label": "{0:00}" }, "kind": "heat", "palette": "blue", "width": 3 }
+        ]
+      }
+    },
+    "sched-window": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Environment", "kind": "text", "width": 20 },
+          { "name": "ProposedOffHoursPerWeek", "kind": "num", "decimals": 0, "label": "Off h/week", "width": 15 },
+          { "name": "OffWindowAvgCpu", "kind": "pct", "palette": "blue", "label": "Window avg", "width": 15 },
+          { "name": "OffWindowPeakCpu", "kind": "pct", "palette": "blue", "label": "Window peak", "width": 16 },
+          { "name": "Reading", "kind": "text", "width": 37 }
+        ]
+      }
+    },
+    "scenario-tiles": { "tiles": { "value": "text", "size": "auto" } },
+    "own-grid": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Ownership", "kind": "status", "width": 30 },
+          { "name": "Owner", "kind": "text", "width": 10 },
+          { "name": "CostCentre", "kind": "text", "label": "Cost centre", "width": 16 },
+          { "name": "Environment", "kind": "text", "width": 16 },
+          { "name": "Application", "kind": "text", "width": 16 },
+          { "name": "ArcStatus", "kind": "status", "label": "Arc status", "width": 15 }
+        ]
+      }
+    },
+    "stale-grid": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "State", "kind": "status", "width": 16 },
+          { "name": "SilentFor", "kind": "text", "label": "Silent for", "width": 20 },
+          { "name": "LastSample", "kind": "date", "label": "Last sample", "width": 26 },
+          { "name": "Reading", "kind": "text", "width": 40 }
+        ]
+      }
+    },
+    "consol-groups": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Application", "kind": "text", "width": 16 },
+          { "name": "Os", "kind": "text", "label": "OS", "width": 9 },
+          { "name": "Machines", "kind": "num", "decimals": 0, "width": 13 },
+          { "name": "LowUtilisation", "kind": "num", "decimals": 0, "label": "Low use", "width": 12 },
+          { "name": "LowUtilisationNames", "kind": "text", "label": "Which", "width": 30 },
+          { "name": "HighestCpuPeak", "kind": "pct", "palette": "blue", "label": "Top peak", "width": 13 },
+          { "name": "HighestMemP95", "kind": "pct", "palette": "blue", "label": "Top Mem P95", "width": 16 }
+        ]
+      }
+    },
+    "consol-members": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Application", "kind": "text", "width": 16 },
+          { "name": "Os", "kind": "text", "label": "OS", "width": 9 },
+          { "name": "Machine", "kind": "text", "width": 12 },
+          { "name": "Size", "kind": "text", "width": 16 },
+          { "name": "CpuP95", "kind": "pct", "palette": "blue", "label": "CPU P95", "width": 12 },
+          { "name": "CpuPeak", "kind": "pct", "palette": "blue", "label": "CPU peak", "width": 13 },
+          { "name": "MemP95", "kind": "pct", "palette": "blue", "label": "Mem P95", "width": 12 },
+          { "name": "Consolidation", "kind": "status", "width": 18 }
+        ]
+      }
+    },
+    "detail-card": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Aspect", "kind": "text", "width": 22 },
+          { "name": "Detail", "kind": "text", "width": 93 }
+        ]
+      }
+    },
+    "detail-cpu-p95": { "customWidth": "50", "chart": { "visualization": "barchart", "axis": "percent", "threshold": "{CpuHigh}", "legend": false, "series": [ { "name": "P95", "label": "95th percentile CPU %", "color": "blue" } ] } },
+    "detail-cpu-peak": { "customWidth": "50", "chart": { "visualization": "barchart", "axis": "percent", "threshold": "{CpuHigh}", "legend": false, "series": [ { "name": "Peak", "label": "Peak CPU %", "color": "orange" } ] } },
+    "detail-mem-pct": { "customWidth": "50", "chart": { "visualization": "barchart", "axis": "percent", "threshold": "{MemHigh}", "legend": false, "series": [ { "name": "P95", "label": "Memory in use % (95th percentile)", "color": "blue" } ] } },
+    "detail-disk": { "customWidth": "50", "chart": { "visualization": "unstackedbar", "axis": "percent", "threshold": "{DiskLow}", "legend": true } },
+    "detail-evidence": {
+      "table": {
+        "size": 3,
+        "columns": [
+          { "name": "Metric", "kind": "text", "width": 16 },
+          { "name": "Instance", "kind": "text", "width": 13 },
+          { "name": "Evidence", "kind": "status", "width": 22 },
+          { "name": "ObservedHours", "kind": "num", "decimals": 1, "label": "Hours", "width": 10 },
+          { "name": "SamplingPct", "kind": "pct", "palette": "redGreen", "label": "Sampling", "width": 13 },
+          { "name": "Samples", "kind": "num", "decimals": 0, "width": 12 },
+          { "name": "LastSample", "kind": "date", "label": "Last sample", "width": 26 }
+        ]
+      }
+    }
+  }
+}

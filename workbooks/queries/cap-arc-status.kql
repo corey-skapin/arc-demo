@@ -12,7 +12,7 @@ Resources
 | where (array_length(dynamic([{OsFilter}])) == 0 or set_has_element(dynamic([{OsFilter}]), 'value::all') or set_has_element(dynamic([{OsFilter}]), '*') or set_has_element(dynamic([{OsFilter}]), Os))
     and (array_length(dynamic([{EnvironmentFilter}])) == 0 or set_has_element(dynamic([{EnvironmentFilter}]), 'value::all') or set_has_element(dynamic([{EnvironmentFilter}]), '*') or set_has_element(dynamic([{EnvironmentFilter}]), EnvironmentTag))
     and (array_length(dynamic([{ApplicationFilter}])) == 0 or set_has_element(dynamic([{ApplicationFilter}]), 'value::all') or set_has_element(dynamic([{ApplicationFilter}]), '*') or set_has_element(dynamic([{ApplicationFilter}]), ApplicationTag))
-| project Machine = name, ArcStatus = tostring(properties.status), LastStatusChange = todatetime(properties.lastStatusChange), Os,
+| project Machine = name, ArcStatus = tostring(properties.status), LastStatusChange = todatetime(properties.lastStatusChange),
     OsSku = tostring(properties.osSku), Vcpu = toint(properties.detectedProperties.logicalCoreCount),
-    MemoryGb = toint(properties.detectedProperties.totalPhysicalMemoryInGigabytes), AgentVersion = tostring(properties.agentVersion)
+    MemoryGb = toint(properties.detectedProperties.totalPhysicalMemoryInGigabytes)
 | order by ArcStatus asc, Machine asc

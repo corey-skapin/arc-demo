@@ -5,3 +5,4 @@ Samples
 | summarize Machines = dcount(Machine), Samples = countif(isnotnull(Value)), InvalidSamples = countif(Invalid),
     FirstSample = min(TimeGenerated), LastSample = max(TimeGenerated) by Os, Metric, Source
 | sort by Os asc, Metric asc, Source asc
+| project Os, Metric, Source, Samples, InvalidSamples, FirstSample

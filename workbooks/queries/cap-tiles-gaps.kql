@@ -1,0 +1,23 @@
+// include: hosts
+// Estate capacity summary, second row: the machines whose evidence is not enough to assess (thin, partial, a parent whose counters exclude its guest,
+// or no telemetry at all). Mutually exclusive with the first row; together the five tiles equal the machines in scope.
+let Counts = Hosts
+| summarize Insufficient = countif(Assessment == "Insufficient evidence"), InsufficientList = make_list_if(Machine, Assessment == "Insufficient evidence", 50),
+    NoTelemetry = countif(Assessment == "No telemetry"), NoTelemetryList = make_list_if(Machine, Assessment == "No telemetry", 50)
+| extend K = 1;
+let ShortList = (names:dynamic) {
+    let sorted = array_sort_asc(names);
+    let n = array_length(sorted);
+    let both = strcat_array(sorted, ", ");
+    case(n == 0, "none", n == 1, tostring(sorted[0]), n == 2 and strlen(both) <= 20, both, strcat(tostring(sorted[0]), " +", tostring(n - 1)))
+};
+datatable(SortKey:long, Label:string)[
+    4, "🟠 Insufficient evidence",
+    5, "⚪ No telemetry"]
+| extend K = 1
+| join kind=inner Counts on K
+| project SortKey, Label,
+    Value = case(SortKey == 4, Insufficient, NoTelemetry),
+    Note = case(SortKey == 4, ShortList(InsufficientList), ShortList(NoTelemetryList))
+| sort by SortKey asc
+| project Label, Value, Note

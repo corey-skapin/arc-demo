@@ -10,11 +10,10 @@ let Evaluated = Samples
 Candidates
 | lookup kind=leftouter Evaluated on ResourceId
 | extend Reading = case(
-    not(ScheduleSet or WeekendsOff), "Set a proposed off-window above to compare it with observed activity.",
-    not(AnyTelemetry), "No telemetry: unknown, not idle.",
-    coalesce(OffMinutes, long(0)) == 0, "No samples inside the proposed off-window yet.",
-    OffActive == 0, "No sample at or above 10% CPU inside the proposed off-window. The owner still decides.",
-    strcat("Activity at or above 10% CPU in ", Num(100.0 * OffActive / OffMinutes, 1), "% of observed off-window minutes: confirm with the owner first."))
+    not(ScheduleSet or WeekendsOff), "Set a window above",
+    not(AnyTelemetry), "No telemetry: unknown",
+    coalesce(OffMinutes, long(0)) == 0, "No samples in the window yet",
+    OffActive == 0, "No sample at or above 10% CPU",
+    strcat(Num(100.0 * OffActive / OffMinutes, 1), "% of minutes at or above 10%"))
 | sort by (EnvironmentClass == "Non-production (tag)") desc, Machine asc
-| project Machine, Environment = EnvironmentClass, ProposedOffHoursPerWeek = WeeklyOffHours, ObservedOffWindowHours = round(OffMinutes / 60.0, 1),
-    OffWindowAvgCpu = round(OffAvg, 1), OffWindowP95Cpu = round(OffP95, 1), OffWindowPeakCpu = round(OffPeak, 0), OutsideWindowAvgCpu = round(OnAvg, 1), Reading
+| project Machine, Environment = EnvironmentClass, ProposedOffHoursPerWeek = WeeklyOffHours, OffWindowAvgCpu = round(OffAvg, 1), OffWindowPeakCpu = round(OffPeak, 1), Reading

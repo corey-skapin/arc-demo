@@ -1,15 +1,7 @@
 // include: hosts
 // Estate status and evidence grid: one row per machine in scope, worst first. Selecting a row drives the resource detail.
-// The trend keeps only observed intervals (parked gaps are removed, never drawn as zero).
-let Trend = Samples
-| where Metric == "CPU percent" and isnotnull(Value)
-| summarize P95 = percentile(Value, 95) by ResourceId, Bin = bin(TimeGenerated, Step)
-| sort by ResourceId asc, Bin asc
-| summarize CpuTrend = make_list(round(P95, 1)) by ResourceId;
+// Kept to the columns an engineer reads first; the explanation for the selected machine is under Resource detail, in full sentences.
 Hosts
-| lookup kind=leftouter Trend on ResourceId
 | sort by Rank asc, Machine asc
-| project Machine, Topology, Os, Application, Environment, State = ReportingState, Assessment, Evidence = EvidenceState,
-    CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0), Pattern, CpuTrend,
-    MemP95 = round(MemP95, 1), MemPeak = round(MemMax, 1), AvailMbMin = round(AvailMbMin, 0), FreePct = round(DiskFreeNowPct, 1), Volume = DiskWorstVolume,
-    History = EvidenceNote, LastSample = HostLastSeen, AgeMinutes, Reason
+| project Machine, Assessment, Evidence = EvidenceState, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 1),
+    MemP95 = round(MemP95, 1), FreePct = round(DiskFreeNowPct, 1)

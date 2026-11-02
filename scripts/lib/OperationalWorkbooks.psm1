@@ -222,6 +222,9 @@ let LowCpuP95 = {LowCpuP95};
 let MinObservedHours = {MinObservedHours};
 let WindowSpan = WindowEnd - WindowStart;
 let Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);
+// Column charts need fewer, wider intervals than a line: BarStep for several machines side by side, DetailStep for one machine.
+let BarStep = case(WindowSpan <= 6h, 30m, WindowSpan <= 2d, 2h, WindowSpan <= 8d, 12h, WindowSpan <= 16d, 1d, 2d);
+let DetailStep = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);
 let Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @"\.0+`$", "") };
 
 "@
@@ -382,6 +385,177 @@ function Update-DemoTemplateQuery {
     }
 }
 
+function Get-DemoTemplateQueryItem {
+    # Every query item of a workbook template, including the ones inside tab groups.
+    param($Items)
+    foreach ($item in @($Items)) {
+        if ($item.type -eq 3) { $item }
+        elseif ($item.type -eq 12) { Get-DemoTemplateQueryItem $item.content.items }
+    }
+}
+
+function Set-DemoJsonProperty {
+    param($Object, [string]$Name, $Value)
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+}
+
+function New-DemoGridColumn {
+    # One grid column formatter. Every width is a proportional fr unit, so a grid fits any container instead of pushing columns off screen.
+    param([Parameter(Mandatory)]$Column, [Parameter(Mandatory)][string]$Name, $TemplateFormatter)
+    $width = "$([int]$Column.width)fr"
+    $percent = [ordered]@{ unit = 1; options = [ordered]@{ style = 'decimal'; maximumFractionDigits = 1 } }
+    switch ($Column.kind) {
+        'text' {
+            [ordered]@{ columnMatch = $Name; formatter = 1; formatOptions = [ordered]@{ customColumnWidthSetting = $width } }
+        }
+        'num' {
+            $digits = [int]$Column.decimals
+            [ordered]@{
+                columnMatch = $Name; formatter = 1; formatOptions = [ordered]@{ customColumnWidthSetting = $width }
+                numberFormat = [ordered]@{ unit = 17; options = [ordered]@{ style = 'decimal'; minimumFractionDigits = $digits; maximumFractionDigits = $digits } }
+            }
+        }
+        'pct' {
+            [ordered]@{
+                columnMatch = $Name; formatter = 8
+                formatOptions = [ordered]@{ palette = [string]$Column.palette; min = 0; max = 100; customColumnWidthSetting = $width }
+                numberFormat = $percent
+            }
+        }
+        'heat' {
+            [ordered]@{ columnMatch = $Name; formatter = 8; formatOptions = [ordered]@{ palette = [string]$Column.palette; min = 0; max = 100; customColumnWidthSetting = $width } }
+        }
+        'spark' {
+            [ordered]@{ columnMatch = $Name; formatter = 10; formatOptions = [ordered]@{ palette = 'blue'; customColumnWidthSetting = $width } }
+        }
+        'date' {
+            if ([int]$Column.width -lt 26) { throw "Date column $Name needs at least 26fr so the clock is not clipped." }
+            [ordered]@{
+                columnMatch = $Name; formatter = 6; formatOptions = [ordered]@{ customColumnWidthSetting = $width }
+                dateFormat = [ordered]@{ showUtcTime = $null; formatName = 'shortDateTimeNoMsPattern' }
+            }
+        }
+        'status' {
+            if ($Column.PSObject.Properties.Name -contains 'rules') {
+                $grid = @(foreach ($rule in $Column.rules) { [ordered]@{ operator = '=='; thresholdValue = [string]$rule.value; representation = [string]$rule.representation; text = '{0}{1}' } }) +
+                    [ordered]@{ operator = 'Default'; thresholdValue = $null; representation = [string]$Column.default; text = '{0}{1}' }
+                [ordered]@{
+                    columnMatch = $Name; formatter = 18
+                    formatOptions = [ordered]@{ thresholdsOptions = [string]$Column.options; thresholdsGrid = $grid; customColumnWidthSetting = $width }
+                }
+            } else {
+                if (-not $TemplateFormatter) { throw "Status column $Name has neither colour rules in the layout nor a threshold formatter in the template." }
+                Set-DemoJsonProperty $TemplateFormatter.formatOptions 'customColumnWidthSetting' $width
+                $TemplateFormatter
+            }
+        }
+        default { throw "Unknown grid column kind '$($Column.kind)' for $Name." }
+    }
+}
+
+function Set-DemoTableLayout {
+    param([Parameter(Mandatory)]$Content, [Parameter(Mandatory)]$Table)
+    $old = $Content.PSObject.Properties['gridSettings']
+    $grid = if ($old -and $old.Value) { $old.Value } else { [pscustomobject]@{} }
+    $thresholds = @{}
+    $existing = $grid.PSObject.Properties['formatters']
+    foreach ($formatter in $(if ($existing) { @($existing.Value) } else { @() })) {
+        if ($formatter -and $formatter.formatter -eq 18) { $thresholds[[string]$formatter.columnMatch] = $formatter }
+    }
+    $formatters = [System.Collections.Generic.List[object]]::new()
+    $labels = [System.Collections.Generic.List[object]]::new()
+    foreach ($column in $Table.columns) {
+        $hasRepeat = $column.PSObject.Properties.Name -contains 'repeat'
+        $expanded = if ($hasRepeat) {
+            @($column.repeat.from..$column.repeat.to | ForEach-Object { @{ Name = [string]::Format($column.repeat.name, $_); Label = [string]::Format($column.repeat.label, $_) } })
+        } else {
+            @(@{ Name = [string]$column.name; Label = $(if ($column.PSObject.Properties.Name -contains 'label') { [string]$column.label } else { '' }) })
+        }
+        foreach ($entry in $expanded) {
+            $formatters.Add((New-DemoGridColumn -Column $column -Name $entry.Name -TemplateFormatter $thresholds[$entry.Name]))
+            if ($entry.Label) { $labels.Add([ordered]@{ columnId = $entry.Name; label = $entry.Label }) }
+        }
+    }
+    $filter = if ($grid.PSObject.Properties['filter']) { $grid.filter } else { $false }
+    Set-DemoJsonProperty $grid 'formatters' $formatters.ToArray()
+    Set-DemoJsonProperty $grid 'filter' $filter
+    Set-DemoJsonProperty $grid 'labelSettings' $labels.ToArray()
+    Set-DemoJsonProperty $Content 'gridSettings' $grid
+    Set-DemoJsonProperty $Content 'visualization' 'table'
+    Set-DemoJsonProperty $Content 'size' ([int]$Table.size)
+}
+
+function Set-DemoChartLayout {
+    # Column charts for time series: an interval with no samples is a blank column, never a zero or an interpolated line, and the legend carries no (Sum) totals.
+    param([Parameter(Mandatory)]$Content, [Parameter(Mandatory)]$Chart)
+    if ($Chart.PSObject.Properties.Name -contains 'keep') {
+        Set-DemoJsonProperty $Content.chartSettings 'showMetrics' $false
+        return
+    }
+    $y = [ordered]@{ min = 0 }
+    if ($Chart.axis -eq 'percent') {
+        $y.max = 100
+        $y.numberFormatSettings = [ordered]@{ unit = 1; options = [ordered]@{ style = 'decimal'; useGrouping = $true; maximumFractionDigits = 1 } }
+    } else {
+        $y.numberFormatSettings = [ordered]@{ unit = 0; options = [ordered]@{ style = 'decimal'; useGrouping = $true; maximumFractionDigits = 0 } }
+    }
+    $settings = [ordered]@{ showLegend = [bool]$Chart.legend; showMetrics = $false }
+    if ($Chart.PSObject.Properties.Name -contains 'series') {
+        $settings.seriesLabelSettings = @(foreach ($series in $Chart.series) { [ordered]@{ seriesName = [string]$series.name; label = [string]$series.label; color = [string]$series.color } })
+    }
+    $settings.ySettings = $y
+    if ($Chart.PSObject.Properties.Name -contains 'threshold') {
+        $settings.customThresholdLine = [string]$Chart.threshold
+        $settings.customThresholdLineStyle = 1
+    }
+    Set-DemoJsonProperty $Content 'visualization' ([string]$Chart.visualization)
+    Set-DemoJsonProperty $Content 'chartSettings' ([pscustomobject]$settings)
+}
+
+function Set-DemoTileLayout {
+    # Count tiles carry no palette colour (a bar colour must mean something); text-valued tiles show their value as text.
+    param([Parameter(Mandatory)]$Content, [Parameter(Mandatory)]$Tiles)
+    $left = if ($Tiles.value -eq 'number') { [ordered]@{ columnMatch = 'Value'; formatter = 12; formatOptions = [ordered]@{ palette = 'none' } } } else { [ordered]@{ columnMatch = 'Value'; formatter = 1 } }
+    $settings = [ordered]@{
+        titleContent = [ordered]@{ columnMatch = 'Label'; formatter = 1 }
+        leftContent = $left
+        secondaryContent = [ordered]@{ columnMatch = 'Note'; formatter = 1 }
+        showBorder = $true
+    }
+    if ($Tiles.PSObject.Properties.Name -contains 'size') { $settings.size = [string]$Tiles.size }
+    Set-DemoJsonProperty $Content 'visualization' 'tiles'
+    Set-DemoJsonProperty $Content 'tileSettings' ([pscustomobject]$settings)
+}
+
+function Set-DemoOperationalLayout {
+    <#
+    .SYNOPSIS
+        Applies the portal layout (workbooks/operational-layout.json) to a loaded workbook template: grid widths and formats, sizes, charts and tiles.
+    .DESCRIPTION
+        Every query item must have exactly one layout entry and every entry must name a query item, so a new tile cannot ship without a layout.
+        Status columns keep the colour rules written in the template.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Items, [Parameter(Mandatory)]$Layout)
+    $queryItems = @(Get-DemoTemplateQueryItem $Items)
+    $duplicate = $queryItems | Group-Object name | Where-Object Count -gt 1 | Select-Object -First 1
+    if ($duplicate) { throw "Workbook item name is not unique: $($duplicate.Name)." }
+    $byName = @{}
+    foreach ($item in $queryItems) { $byName[[string]$item.name] = $item }
+    $entries = @($Layout.PSObject.Properties | ForEach-Object Name)
+    foreach ($name in $byName.Keys) { if ($name -notin $entries) { throw "Layout has no entry for workbook item $name." } }
+    foreach ($name in $entries) {
+        if (-not $byName.ContainsKey($name)) { throw "Layout entry $name is not a query item of this workbook." }
+        $item = $byName[$name]
+        $entry = $Layout.$name
+        $keys = @($entry.PSObject.Properties.Name)
+        if ('customWidth' -in $keys) { Set-DemoJsonProperty $item 'customWidth' ([string]$entry.customWidth) }
+        if ('table' -in $keys) { Set-DemoTableLayout -Content $item.content -Table $entry.table }
+        if ('chart' -in $keys) { Set-DemoChartLayout -Content $item.content -Chart $entry.chart }
+        if ('tiles' -in $keys) { Set-DemoTileLayout -Content $item.content -Tiles $entry.tiles }
+    }
+}
+
 function Get-DemoOperationalWorkbookIdentity {
     <#
     .SYNOPSIS
@@ -427,6 +601,18 @@ function Get-DemoOperationalWorkbookLink {
     ($root + $target.ResourceId + '/workbook').Replace('(', '%28').Replace(')', '%29')
 }
 
+function Get-DemoUtcOffsetLabel {
+    <#
+    .SYNOPSIS
+        Text label for a display offset in hours: UTC, UTC+10:30, UTC-5.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][decimal]$Hours)
+    if ($Hours -eq 0) { return 'UTC' }
+    $span = [timespan]::FromHours([double][math]::Abs($Hours))
+    'UTC' + $(if ($Hours -gt 0) { '+' } else { '-' }) + $(if ($span.Minutes) { $span.ToString('h\:mm') } else { $span.Hours.ToString() })
+}
+
 function Get-DemoOperationalWorkbook {
     [CmdletBinding()]
     param(
@@ -444,7 +630,7 @@ function Get-DemoOperationalWorkbook {
     $root = Join-Path $PSScriptRoot '..\..\workbooks'
     $file = if ($Purpose -eq 'capacity') { 'capacity-headroom.workbook.json' } else { 'optimisation-opportunities.workbook.json' }
     $book = Get-Content -LiteralPath (Join-Path $root $file) -Raw | ConvertFrom-Json -Depth 100
-    $prepared = [datetime]::UtcNow.ToString('yyyy-MM-dd HH:mm') + ' UTC'
+    $prepared = [datetime]::UtcNow.AddHours([double]$DisplayUtcOffsetHours).ToString('yyyy-MM-dd HH:mm', [cultureinfo]::InvariantCulture) + ' (' + (Get-DemoUtcOffsetLabel -Hours $DisplayUtcOffsetHours) + ')'
     $guests = @($roster | Where-Object layer -eq 'guest').Count
     $note = "Roster and tags published $prepared for $($roster.Count) exact Arc IDs in this resource group ($guests declared guest(s)). Refresh by republishing to add hosts or pick up tag changes. Topology is operator-declared; undeclared machines stay unclassified. Parent and guest rows are separate observations and never hardware totals. Check telemetry timestamps before relying on any figure."
     $defaults = [ordered]@{}
@@ -463,6 +649,8 @@ function Get-DemoOperationalWorkbook {
         $book.items = @($book.items | Where-Object { $_.name -ne 'draft-banner' })
     }
     Update-DemoTemplateNode $book.items $context
+    $layout = (Get-Content -LiteralPath (Join-Path $root 'operational-layout.json') -Raw | ConvertFrom-Json -Depth 20).$Purpose
+    Set-DemoOperationalLayout -Items $book.items -Layout $layout
     $book.fallbackResourceIds = @($WorkspaceResourceId.ToLowerInvariant())
     $serialized = $book | ConvertTo-Json -Depth 100 -Compress
     if ($serialized -match '__(QUERY|OPTIONS|DEFAULT|SCOPE|PREPARED|ROSTER|LINK)[A-Z_]*(:[A-Za-z0-9_.-]+)?__') { throw 'Unresolved workbook token; no deployment.' }
@@ -477,4 +665,4 @@ function Get-DemoOperationalWorkbook {
 }
 
 Export-ModuleMember -Function Get-DemoOperationalWorkbook, Get-DemoOperationalWorkbookIdentity, Get-DemoOperationalWorkbookLink, Get-DemoOperationalScenario, Get-DemoOperationalRoster,
-    ConvertTo-DemoNestedTopology, Get-DemoOperationalQuery, Get-DemoOperationalArgQuery, Expand-DemoOperationalQuery
+    ConvertTo-DemoNestedTopology, Get-DemoOperationalQuery, Get-DemoOperationalArgQuery, Expand-DemoOperationalQuery, Get-DemoUtcOffsetLabel

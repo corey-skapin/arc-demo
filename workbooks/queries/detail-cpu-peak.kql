@@ -1,0 +1,8 @@
+// include: series
+// Selected machine: peak CPU per interval, as columns, so a spike stays visible instead of hiding behind a percentile. Gaps stay null (parked time is blank).
+Samples
+| where Metric == "CPU percent" and isnotnull(Value)
+| lookup kind=inner (Machines | project ResourceId, Machine) on ResourceId
+| where Machine == '{SelectedHost}'
+| make-series Peak = max(Value) default = real(null) on TimeGenerated from bin(WindowStart, DetailStep) to bin(WindowEnd, DetailStep) + DetailStep step DetailStep
+| project TimeGenerated, Peak

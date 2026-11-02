@@ -1,29 +1,29 @@
 // include: candidates
-// Opportunity summary: counts of machines flagged per review reason. These are conversation starters, not approved savings.
+// Opportunity summary, first row: machines reviewed and the three review reasons that are conversations about the machine itself.
+// These are conversation starters, not approved savings. Tile text stays short; the candidates table lists every machine.
 let Counts = Candidates
-| summarize Total = count(), Guests = countif(Layer == "guest"), GuestNames = strcat_array(make_list_if(Machine, Layer == "guest", 3), ", "),
-    Under = countif(UnderState == "Flagged"), UnderNames = strcat_array(make_list_if(Machine, UnderState == "Flagged", 5), ", "),
-    Scheduling = countif(SchedulingState == "Flagged"), SchedulingNames = strcat_array(make_list_if(Machine, SchedulingState == "Flagged", 5), ", "),
-    Consolidation = countif(ConsolidationState == "Flagged"), ConsolidationNames = strcat_array(make_list_if(Machine, ConsolidationState == "Flagged", 5), ", "),
-    Ownership = countif(OwnershipState == "Flagged"), OwnershipNames = strcat_array(make_list_if(Machine, OwnershipState == "Flagged", 5), ", "),
-    Stale = countif(StaleState == "Flagged"), StaleNames = strcat_array(make_list_if(Machine, StaleState == "Flagged", 5), ", ")
+| summarize Total = count(), Guests = countif(Layer == "guest"),
+    Under = countif(UnderState == "Flagged"), UnderList = make_list_if(Machine, UnderState == "Flagged", 50),
+    Scheduling = countif(SchedulingState == "Flagged"), SchedulingList = make_list_if(Machine, SchedulingState == "Flagged", 50),
+    Consolidation = countif(ConsolidationState == "Flagged"), ConsolidationList = make_list_if(Machine, ConsolidationState == "Flagged", 50)
 | extend K = 1;
+let ShortList = (names:dynamic) {
+    let sorted = array_sort_asc(names);
+    let n = array_length(sorted);
+    let both = strcat_array(sorted, ", ");
+    case(n == 0, "none", n == 1, tostring(sorted[0]), n == 2 and strlen(both) <= 20, both, strcat(tostring(sorted[0]), " +", tostring(n - 1)))
+};
 datatable(SortKey:long, Label:string)[
     0, "🖥️ Machines reviewed",
-    1, "📉 Low observed utilisation",
-    2, "🕒 Scheduling conversation",
-    3, "🧩 Consolidation conversation",
-    4, "🏷️ Ownership gaps",
-    5, "📡 Not reporting"]
+    1, "📉 Low utilisation",
+    2, "🕒 Scheduling",
+    3, "🧩 Consolidation"]
 | extend K = 1
 | join kind=inner Counts on K
 | project SortKey, Label,
-    Machines = case(SortKey == 0, Total, SortKey == 1, Under, SortKey == 2, Scheduling, SortKey == 3, Consolidation, SortKey == 4, Ownership, Stale),
-    Names = case(SortKey == 0, iff(Guests > 0,
-            strcat(tostring(Total - Guests), " independent + ", tostring(Guests), " declared guest (", GuestNames, "), counted once and never as extra capacity"),
-            strcat(tostring(Total), " independent machines")),
-        SortKey == 1, UnderNames, SortKey == 2, SchedulingNames, SortKey == 3, ConsolidationNames,
-        SortKey == 4, OwnershipNames, StaleNames)
-| extend Names = iff(isempty(Names), "none", Names)
+    Value = case(SortKey == 0, Total, SortKey == 1, Under, SortKey == 2, Scheduling, Consolidation),
+    Note = case(
+        SortKey == 0, iff(Guests > 0, strcat(tostring(Guests), iff(Guests == 1, " guest", " guests"), ", counted once"), "all independent"),
+        SortKey == 1, ShortList(UnderList), SortKey == 2, ShortList(SchedulingList), ShortList(ConsolidationList))
 | sort by SortKey asc
-| project Label, Machines, Names
+| project Label, Value, Note

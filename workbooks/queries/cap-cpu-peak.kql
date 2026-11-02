@@ -3,4 +3,4 @@
 Samples
 | where Metric == "CPU percent" and isnotnull(Value)
 | lookup kind=inner (Machines | project ResourceId, Machine) on ResourceId
-| make-series Peak = max(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Machine
+| make-series Peak = max(Value) default = real(null) on TimeGenerated from bin(WindowStart, BarStep) to bin(WindowEnd, BarStep) + BarStep step BarStep by Machine

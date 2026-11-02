@@ -28,5 +28,5 @@ Summary
     Level = case(Instance == "_Total (aggregate)", "Aggregate only - not per-volume", VolumeState == "No longer reported", "No longer reported",
         LastValue < DiskLow, "Low free space", "Within threshold")
 | sort by (VolumeState == "No longer reported") asc, LastValue asc, Machine asc
-| project Machine, Volume = Instance, Level, FreeNowPct = round(LastValue, 1), FreeGb = round(FreeMbNow / 1024.0, 1), SizeGb = round(SizeMbBest / 1024.0, 1), SizeBasis,
-    MinPct = round(Minimum, 1), ChangePts = Delta, FreeTrend, ObservedHours, Evidence, LastSample = LastSeen
+| take 50
+| project Machine, Volume = Instance, Level, FreeNowPct = round(LastValue, 1), FreeGb = round(FreeMbNow / 1024.0, 1), SizeGb = round(SizeMbBest / 1024.0, 1), SizeBasis, FreeTrend

@@ -1,0 +1,8 @@
+// include: hosts
+// Selected machine: why it carries its assessment, as readable lines. A grid cell cuts a long sentence off, so the explanation is wrapped here.
+Hosts
+| where Machine == '{SelectedHost}'
+| extend Lines = extract_all(@"(.{1,95})(?:\s+|$)", dynamic([1]), Reason)
+| mv-expand with_itemindex=LineNo Lines
+| sort by LineNo asc
+| project Assessment = iff(LineNo == 0, Assessment, ""), Why = tostring(Lines)

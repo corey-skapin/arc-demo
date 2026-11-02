@@ -21,7 +21,8 @@ tiles, then the status or candidate table, then select a row for the per-machine
 ## Guardrails
 
 - Missing is never zero. No samples is shown as *No telemetry*, not as an idle or healthy machine.
-- Parked gaps are unknown time, not idle headroom. Charts omit absent intervals instead of drawing zero.
+- Parked gaps are unknown time, not idle headroom. Charts are column charts and an interval with no samples is a blank
+  column, never a zero or an interpolated line.
 - Evidence quality is shown beside every status: observed hours per counter, sampling while
   active, last sample, invalid samples ignored (never clamped or zero-filled).
 - Thresholds are illustrative triage values, not an approved service objective or sizing advice.
@@ -117,20 +118,21 @@ environment and application/role, plus the threshold selectors.
 
 | Section | Shows |
 |---|---|
-| Scope and evidence quality tiles | Can this view be relied on? Machines in scope (with the guest caption), reporting now, minutes or hours since the latest sample, adequate evidence, limited evidence (named) and median window coverage. Coverage counts only machines with CPU samples and is parked time, not idle time |
-| Estate capacity summary tiles | The five assessments, which add up to the machines in scope |
-| Status and evidence table | One row per machine, worst first: state, assessment, evidence, CPU P95 and peak, pattern, observed trend, memory, free space, history hours, reason. Selecting a row drives *Resource detail* |
+| Scope and evidence quality tiles | Can this view be relied on? Four tiles: **Machines in scope** (with the guest caption), **Reporting now**, **Latest sample** (minutes, hours or days since the newest sample) and **Adequate evidence** (with the median window coverage, which counts only machines with CPU samples and is parked time, not idle time) |
+| Estate capacity summary tiles | The five assessments on two rows (**Pressure observed**, **Apparent headroom**, **Within thresholds**; then **Insufficient evidence**, **No telemetry**), which add up to the machines in scope. Count tiles carry no colour; each names up to two machines |
+| Status and evidence table | One row per machine, worst first: assessment, evidence, CPU P95 and peak, memory P95 and lowest free space. Selecting a row drives *Resource detail* |
 | Declared parent and guest | The pair side by side, never summed |
-| CPU tab | P95 and peak charts with the threshold line; sustained-versus-brief table |
-| Memory tab | Memory in use P95, lowest available MB, per-machine evidence with the basis |
-| Disk tab | Lowest free space over time; per-volume table with size, change and state |
-| Resource detail tab | Seven tiles (assessment, reporting, evidence, CPU, memory, tightest volume and the application context: application, environment, owner, cost centre, size), CPU, memory, available memory, per-volume disk, parent/guest context, every counter's evidence |
+| CPU tab | P95 and peak column charts by machine with the threshold line; sustained-versus-brief table (mean, P95, peak, share of time over the threshold, longest run, trends) |
+| Memory tab | Memory in use P95 and lowest available MB by machine, per-machine evidence with the basis |
+| Disk tab | Lowest free space over time; per-volume table (lowest free space first) with size, change and state |
+| Resource detail tab | Seven tiles (assessment, reporting, evidence, CPU, memory, tightest volume and the application context), a *Why this assessment* table that wraps the explanation into readable lines, paired P95 and peak CPU columns, memory in use and lowest available memory for the one machine, per-volume disk, parent/guest context and every counter's evidence |
 | Evidence and method tab | How figures are built, rules and constants, coverage matrix, counters by OS, live Arc inventory |
 
-*Reporting now* means a sample within 15 minutes of the window end; for a custom past range the tile says
-*at the window end*. With every machine parked it reads 0 and says the figures below describe the last observed data.
-When no machine in scope has sent any telemetry it says so instead and treats the result as unknown, not zero, with no
-latest sample and no coverage figure; with a mix it says that only the silent machines have observed data.
+*Reporting now* means a sample within 15 minutes of the window end; for a custom past range the tile reads
+*Reporting at end*. With every machine parked it reads 0 with the caption *parked or silent*, and *Latest sample* gives the
+age of the newest sample, which is the data the figures below describe. When no machine in scope has sent any telemetry the
+caption reads *no telemetry in window*, *Latest sample* reads *none* and there is no coverage figure: unknown, not zero.
+A mix of reporting and silent machines reads *N not reporting*; the table below names each one.
 
 ## Optimisation opportunities
 
@@ -145,10 +147,13 @@ measurement is never read as a clean result.
 | Ownership gap | The published tags lack an owner, cost centre, environment or application/role; evidence gap, not proof that nobody owns it |
 | Not reporting | No telemetry, or silent for more than 24 hours; stale does not mean redundant or safe to delete |
 
-Sections: opportunity tiles, reasons by evidence quality, candidate matrix (select a row), *Underutilisation*,
+Sections: opportunity tiles (**Machines reviewed**, **Low utilisation**, **Scheduling**, **Consolidation**; then
+**Ownership gaps** and **Not reporting**), reasons by evidence quality, candidate matrix (select a row), *Underutilisation*,
 *Scheduling and scenario*, *Ownership and hygiene* (live Resource Graph tags and the not-reporting list),
 *Consolidation*, *Review detail* (every flagged reason, evidence window, what is still needed, published owner tags,
-size context, the next human decision and what the workbook never does) and *Evidence and method*.
+size context, the next human decision and what the workbook never does, as a Full-size card that wraps long sentences
+into lines) and *Evidence and method*. The review detail charts the selected machine's CPU 95th percentile and peak, memory
+in use and free space as column charts.
 
 The **optional cost scenario** is arithmetic on figures typed into the workbook for one selected workload:
 `baseline x eligible share x hours off / 168`. It is not billing, a price, realised or guaranteed savings, a safe
@@ -207,6 +212,33 @@ absent result is itself a finding (no CPU samples, no Arc machines for the roste
 news. Status icons and colours use only the documented grid icon names and the colour and palette names of the
 official sample workbooks; an offline test enforces that, because an unknown name renders as nothing.
 
+### Portal layout
+
+The layout of every query item lives in one place, `workbooks/operational-layout.json`, and
+`Set-DemoOperationalLayout` in the module applies it after the query tokens are resolved. Every query item needs an entry and
+every entry must name an item, so a new tile cannot ship without a layout. In the two template files a grid's own settings
+matter only for its status colour rules; the layout replaces every other grid, chart and tile setting when the workbook is
+rendered. The rules, each enforced by `tests/OperationalWorkbooksLayout.Tests.ps1`:
+
+- **Tables** use the Full size so a short table leaves no blank band (a Small or Medium grid reserves a fixed height), and
+  are bounded: one row per machine of the 50-machine roster, or an explicit `take`. Every column is a proportional `fr`
+  width, so a grid fits any container instead of pushing columns off screen; the widths add up to at most 115, each header
+  fits its column, and one long column takes the room. Status columns keep the colour rules written in the template.
+- **Numbers** are one format per column: percentages are bars on a fixed 0 to 100 scale that print one decimal. In
+  *Capacity and headroom* load runs green to red and free space red to green; in *Optimisation opportunities* the bars are a
+  neutral blue, because low utilisation is the flag there and not a health signal. Plain numbers pad to one decimal or none.
+- **Times** are the viewer's local time in a date renderer wide enough for the clock; text that must name a time states the
+  display offset (for example *UTC+10:30*), never a bare UTC clock.
+- **Charts** are column charts. A missing interval is a null, so parked time is blank rather than zero or a line across the
+  gap. Charts by machine are clustered, not stacked, so percentages are never added; a single-machine chart has one series.
+  Legends carry no summed totals.
+- **Tiles** carry no palette colour (a left-bar colour must mean something, and the status dot already does), show at most
+  four per row, and keep a short label and a short caption: a fixed tile is about 160 px wide, so a caption names one machine
+  and a count (*lnx-app-01 +2*), never a list. The five assessments and the six review reasons are split over two rows.
+  Detail and scenario tiles size to their content.
+- **Explanations** that are longer than a cell are wrapped into lines by the query (the *Why this assessment* table and the
+  *Review card*), because a grid cell cuts a long sentence off.
+
 ## Publish, review and promote
 
 Preview is the default and writes nothing. Publication is a separate approved operation with the same explicit
@@ -224,6 +256,9 @@ tag changes or a newly onboarded nested guest.
 
 - Offline Pester (`tests/OperationalWorkbooks.Tests.ps1`) covers rendering, scoping, roster and topology rules, size bounds,
   draft handling, sibling links, the documented icon, colour and palette names, empty-state styles and scenario arithmetic.
+- `tests/OperationalWorkbooksLayout.Tests.ps1` guards the portal layout offline: fr widths and headers that fit, Full-size
+  bounded tables, percentage and number formats with the right colour direction, local times, column charts with null gaps and
+  no legend totals, colourless tiles with at most four per row, the layout pass's refusals and the display-offset label.
 - `tests/OperationalWorkbookQueries.Tests.ps1` is explicit opt-in and read-only. It runs the production item queries against
   deterministic literal tables (spike versus sustained, missing counters, thin history, parked gaps, invalid samples, Linux
   names and pseudo mounts, parent/guest, tags, scenario arithmetic) with the telemetry sources swapped inside the query text.
