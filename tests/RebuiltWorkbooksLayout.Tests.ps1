@@ -57,14 +57,19 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
         }
     }
 
-    It '<Name>: prints percentage bars as percentages on a fixed 0 to 100 red-to-green scale' -ForEach $books {
-        foreach ($query in Read-Queries $Path) {
-            foreach ($formatter in Get-Formatter $query | Where-Object { $_.formatter -eq 8 -and $_.formatOptions.palette -in 'redGreen', 'greenRed' }) {
-                $formatter.formatOptions.palette | Should -Be 'redGreen' -Because $query.content.title
-                $formatter.formatOptions.min | Should -Be 0 -Because $query.content.title
-                $formatter.formatOptions.max | Should -Be 100 -Because $query.content.title
-                $formatter.numberFormat.unit | Should -Be 1 -Because "$($query.content.title): a bar without a number format prints 7.100"
-                $formatter.numberFormat.options.maximumFractionDigits | Should -Be 1 -Because $query.content.title
+    It '<Name>: shows percentage columns as solid red, amber and green cells with a percent sign, never as a heat map' -ForEach $books {
+        foreach ($query in Read-Queries $Path | Where-Object { $_.content.visualization -eq 'table' }) {
+            foreach ($formatter in Get-Formatter $query) {
+                ($formatter.formatter -eq 8 -and $formatter.formatOptions.palette -in 'redGreen', 'greenRed') | Should -BeFalse -Because "$($query.content.title): a heat-map cell paints the lowest values dark red under dark text, which cannot be read when projected"
+            }
+            foreach ($formatter in Get-Formatter $query | Where-Object { $_.columnMatch -match 'Pct$|Percent$|^PolicyCompliance$' }) {
+                $formatter.formatter | Should -Be 18 -Because $query.content.title
+                $formatter.formatOptions.thresholdsOptions | Should -Be 'colors' -Because $query.content.title
+                $rows = @($formatter.formatOptions.thresholdsGrid)
+                $rows.Count | Should -Be 3 -Because $query.content.title
+                @($rows | ForEach-Object { $_.representation }) | Should -Be @('redBright', 'orange', 'green') -Because "$($query.content.title): low is red and high is green, never the other way round"
+                @($rows | ForEach-Object { $_.thresholdValue }) | Should -Be @('50', '80', $null) -Because $query.content.title
+                foreach ($row in $rows) { $row.text | Should -Be '{0}%' -Because "$($query.content.title): the unit belongs in the text, otherwise the cell prints 21.600" }
             }
         }
     }

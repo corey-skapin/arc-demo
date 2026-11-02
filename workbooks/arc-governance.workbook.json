@@ -152,19 +152,30 @@
             },
             {
               "columnMatch": "CompliancePercent",
-              "formatter": 8,
+              "formatter": 18,
               "formatOptions": {
-                "palette": "redGreen",
-                "min": 0,
-                "max": 100,
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "<",
+                    "thresholdValue": "50",
+                    "representation": "redBright",
+                    "text": "{0}%"
+                  },
+                  {
+                    "operator": "<",
+                    "thresholdValue": "80",
+                    "representation": "orange",
+                    "text": "{0}%"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "green",
+                    "text": "{0}%"
+                  }
+                ],
                 "customColumnWidthSetting": "20fr"
-              },
-              "numberFormat": {
-                "unit": 1,
-                "options": {
-                  "style": "decimal",
-                  "maximumFractionDigits": 1
-                }
               }
             }
           ],

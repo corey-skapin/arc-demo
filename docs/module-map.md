@@ -129,7 +129,7 @@ the workbooks it publishes to the deployment workspace, so the repo JSON carries
 `tests/RebuiltWorkbooksLayout.Tests.ps1` guards what only shows in the portal (grid columns in proportional `fr`
 widths that add up to at most 115 characters, so a grid fits its container instead of pushing columns off
 screen, with each header fitting its column; date/time columns in local time and wide enough for the AM/PM;
-percentage bars printed as percentages; small grids that fit their rows instead of reserving a fixed 330 px
+percentage columns as solid red, amber and green cells printed with a % sign (a heat-map cell puts dark text on dark red); small grids that fit their rows instead of reserving a fixed 330 px
 band; grouped bar charts that name their category column; percentage charts on a 0 to 100 axis with a % unit;
 chart legends without the `(Sum)` totals that page through the categories; a positive empty state in the info
 style instead of the amber warning box). Count tiles in the three rebuilt workbooks carry no palette colour,
