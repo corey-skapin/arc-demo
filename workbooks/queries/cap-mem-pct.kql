@@ -1,0 +1,6 @@
+// include: series
+// Memory in use (Windows: committed bytes in use; Linux: used memory) 95th percentile per machine. Gaps stay null.
+Samples
+| where Metric == "Memory percent" and isnotnull(Value)
+| lookup kind=inner (Machines | project ResourceId, Machine) on ResourceId
+| make-series P95 = percentile(Value, 95) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Machine

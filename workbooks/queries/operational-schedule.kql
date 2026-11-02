@@ -1,0 +1,9 @@
+// Proposed schedule evaluation helpers. The schedule is entered by the viewer; nothing is guessed or enforced.
+// Needs workbook parameters UtcOffsetHours, SchedStartHour, SchedEndHour (0-23, blank = not set) and SchedWeekendsOff (Yes/No).
+let UtcOffset = 1h * {UtcOffsetHours};
+let SchedStart = toint('{SchedStartHour}');
+let SchedEnd = toint('{SchedEndHour}');
+let WeekendsOff = '{SchedWeekendsOff}' == 'Yes';
+let ScheduleSet = isnotnull(SchedStart) and isnotnull(SchedEnd) and SchedStart != SchedEnd;
+let DailyOffHours = iff(ScheduleSet, iff(SchedEnd > SchedStart, SchedEnd - SchedStart, 24 - SchedStart + SchedEnd), 0);
+let WeeklyOffHours = iff(ScheduleSet or WeekendsOff, iff(WeekendsOff, 5 * DailyOffHours + 48, 7 * DailyOffHours), 0);

@@ -1,17 +1,25 @@
-let WindowEnd = now();
-let WindowStart = WindowEnd - Lookback;
+// Canonical samples shared by both operational workbooks.
+// Needs: Machines, WindowStart, WindowEnd, CpuHigh, MemHigh, DiskLow (declared by the generated preamble).
+// One source per host/metric across the window; never summed across hosts, never zero-filled.
 let PerfRows = Perf
 | where TimeGenerated between (WindowStart .. WindowEnd)
 | extend ResourceId = tolower(_ResourceId)
 | where ResourceId in (Machines | project ResourceId)
 | extend Metric = case(
     ObjectName in ("Processor Information", "Processor") and CounterName == "% Processor Time" and InstanceName in ("_Total", "total"), "CPU percent",
-    ObjectName == "Memory" and CounterName == "Available MBytes", "Available MB",
-    ObjectName == "Memory" and CounterName == "% Committed Bytes In Use", "Committed percent",
-    ObjectName == "LogicalDisk" and CounterName == "% Free Space" and InstanceName == "_Total", "Disk free percent", "")
+    ObjectName == "Memory" and CounterName in ("Available MBytes", "Available MBytes Memory"), "Available MB",
+    ObjectName == "Memory" and CounterName in ("% Committed Bytes In Use", "% Used Memory"), "Memory percent",
+    ObjectName in ("LogicalDisk", "Logical Disk") and CounterName == "% Free Space", "Disk free percent",
+    ObjectName in ("LogicalDisk", "Logical Disk") and CounterName == "Free Megabytes", "Disk free MB", "")
 | where Metric != ""
-| extend Instance = iff(Metric == "Disk free percent", "_Total (aggregate)", ""),
-    Priority = case(ObjectName == "Processor Information", 0, Metric == "Disk free percent", 2, 1),
+| extend IsAggregate = InstanceName in ("_Total", "total")
+// Linux reports pseudo mounts (snap squashfs at 0% free, tmpfs, devices); they are not capacity evidence.
+| where not(Metric startswith "Disk" and not(IsAggregate) and (InstanceName startswith "/snap/" or InstanceName startswith "/run"
+    or InstanceName startswith "/dev" or InstanceName startswith "/sys" or InstanceName startswith "/proc"
+    or InstanceName startswith "/var/lib/snapd" or InstanceName startswith "/var/snap"))
+| where not(Metric == "Disk free MB" and IsAggregate)
+| extend Instance = iff(Metric startswith "Disk", iff(IsAggregate, "_Total (aggregate)", InstanceName), ""),
+    Priority = case(ObjectName == "Processor Information", 0, Metric startswith "Disk", iff(IsAggregate, 2, 0), 1),
     Value = todouble(CounterValue), Source = strcat("Perf/", ObjectName, "/", CounterName)
 | project TimeGenerated, ResourceId, Metric, Instance, Priority, Value, Source;
 let InsightsRows = InsightsMetrics
@@ -20,18 +28,27 @@ let InsightsRows = InsightsMetrics
 | where ResourceId in (Machines | project ResourceId)
 | extend Metric = case(Namespace == "Processor" and Name == "UtilizationPercentage", "CPU percent",
     Namespace == "Memory" and Name == "AvailableMB", "Available MB",
-    Namespace == "LogicalDisk" and Name == "FreeSpacePercentage", "Disk free percent", "")
+    Namespace == "LogicalDisk" and Name == "FreeSpacePercentage", "Disk free percent",
+    Namespace == "LogicalDisk" and Name == "FreeSpaceMB", "Disk free MB", "")
 | where Metric != ""
-| extend Instance = iff(Metric == "Disk free percent", tostring(todynamic(Tags)["vm.azm.ms/mountId"]), ""),
-    Priority = iff(Metric == "Disk free percent", 0, 3),
+| extend Instance = iff(Metric startswith "Disk", tostring(todynamic(Tags)["vm.azm.ms/mountId"]), ""),
+    Priority = iff(Metric startswith "Disk", 0, 3),
     Value = todouble(Val), Source = strcat("InsightsMetrics/", Namespace, "/", Name)
-| where Metric != "Disk free percent" or isnotempty(Instance)
+| where Metric !startswith "Disk" or isnotempty(Instance)
 | project TimeGenerated, ResourceId, Metric, Instance, Priority, Value, Source;
-let AllSamples = union PerfRows, InsightsRows;
+let AllSamples = materialize(union PerfRows, InsightsRows);
 // Choose one canonical source per host/metric across the window, not per core or parent/guest sum.
 let Preferred = AllSamples | summarize Priority = min(Priority) by ResourceId, Metric;
-let Samples = AllSamples
+let Samples = materialize(AllSamples
 | join kind=inner Preferred on ResourceId, Metric, Priority
-| extend Invalid = isnull(Value) or isnan(Value) or isinf(Value) or Value < 0 or (Metric != "Available MB" and Value > 100)
+| extend Invalid = isnull(Value) or isnan(Value) or isinf(Value) or Value < 0
+    or (Metric in ("CPU percent", "Memory percent", "Disk free percent") and Value > 100)
 | extend Value = iff(Invalid, real(null), Value)
-| project TimeGenerated, ResourceId, Metric, Instance, Value, Source, Invalid;
+| extend Breach = case(
+    isnull(Value), bool(null),
+    Metric == "CPU percent", Value >= CpuHigh,
+    Metric == "Memory percent", Value >= MemHigh,
+    Metric == "Disk free percent", Value < DiskLow,
+    Metric == "Available MB", Value < 512.0,
+    bool(null))
+| project TimeGenerated, ResourceId, Metric, Instance, Value, Source, Invalid, Breach);

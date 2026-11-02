@@ -1,0 +1,84 @@
+// include: hosts
+// Review candidates, evidence first. Every reason is a conversation starter for a human decision: never a saving, never an action.
+// Reason states: Flagged, Needs evidence, Not flagged. Missing evidence is shown as missing, not as a clean result.
+let NonProduction = dynamic(["dev", "development", "test", "testing", "uat", "qa", "stage", "staging", "sandbox", "demo", "lab", "poc", "nonprod", "non-prod", "non-production", "preprod"]);
+let LowMemoryP95 = 50.0;
+let IdleHourCpu = 5.0;
+let IdleShareNeeded = 50.0;
+let StaleHours = 24;
+let IdleShare = Samples
+| where Metric == "CPU percent" and isnotnull(Value)
+| summarize HourAvg = avg(Value), N = count() by ResourceId, Hour = bin(TimeGenerated, 1h)
+| where N >= 30
+| summarize FullHours = count(), IdleHours = countif(HourAvg < IdleHourCpu) by ResourceId
+| project ResourceId, FullHours, IdleSharePct = round(100.0 * IdleHours / FullHours, 0);
+let CandidateBase = materialize(Hosts
+| lookup kind=leftouter IdleShare on ResourceId
+| extend CpuAdequate = HasCpu and CpuObservedHours >= MinObservedHours and SamplingPct >= 80,
+    MemAdequate = HasMem and MemObservedHours >= MinObservedHours,
+    EnvironmentClass = case(Environment == "(untagged)", "Unclassified", tolower(Environment) in (NonProduction), "Non-production (tag)", "Other (tag)"),
+    MissingTags = array_concat(iff(isempty(Owner), dynamic(["owner"]), dynamic([])), iff(isempty(CostCentre), dynamic(["cost centre"]), dynamic([])),
+        iff(Environment == "(untagged)", dynamic(["environment"]), dynamic([])), iff(Application == "(untagged)", dynamic(["application or role"]), dynamic([]))),
+    SilentHours = datetime_diff("hour", WindowEnd, HostLastSeen)
+// A parent's own counters exclude its guest's load, so a low reading on a parent is never a candidate by itself.
+| extend UnderState = case(
+        not(AnyTelemetry) or not(CpuAdequate), "Needs evidence",
+        CpuP95 >= LowCpuP95, "Not flagged",
+        Layer == "parent", "Needs evidence",
+        not(MemAdequate), "Needs evidence",
+        MemP95 >= LowMemoryP95 or CpuSustained or MemSustained or DiskPressure or LowAvailable, "Not flagged",
+        "Flagged"),
+    SchedulingState = case(
+        EnvironmentClass == "Unclassified", "Needs evidence",
+        EnvironmentClass != "Non-production (tag)", "Not flagged",
+        Layer == "parent", "Needs evidence",
+        not(CpuAdequate) or isnull(IdleSharePct), "Needs evidence",
+        IdleSharePct >= IdleShareNeeded, "Flagged",
+        "Not flagged"),
+    OwnershipState = iff(array_length(MissingTags) > 0, "Flagged", "Not flagged"),
+    StaleState = iff(not(AnyTelemetry) or coalesce(SilentHours, 0) > StaleHours, "Flagged", "Not flagged"));
+let ConsolidationGroups = CandidateBase
+| where UnderState == "Flagged" and Layer != "guest"
+| summarize GroupCandidates = count(), GroupMachines = strcat_array(make_list(Machine, 6), ", ") by Application, Os;
+let Candidates = materialize(CandidateBase
+| lookup kind=leftouter ConsolidationGroups on Application, Os
+| extend ConsolidationState = iff(Layer != "guest" and UnderState == "Flagged" and coalesce(GroupCandidates, long(0)) >= 2, "Flagged", "Not flagged")
+| extend Reasons = array_concat(
+        iff(StaleState == "Flagged", dynamic(["Not reporting"]), dynamic([])),
+        iff(OwnershipState == "Flagged", dynamic(["Ownership gap"]), dynamic([])),
+        iff(UnderState == "Flagged", dynamic(["Low utilisation"]), dynamic([])),
+        iff(SchedulingState == "Flagged", dynamic(["Scheduling"]), dynamic([])),
+        iff(ConsolidationState == "Flagged", dynamic(["Consolidation"]), dynamic([]))),
+    EvidenceGaps = strcat_array(array_concat(
+        iff(not(AnyTelemetry), dynamic(["telemetry"]), dynamic([])),
+        iff(AnyTelemetry and not(CpuAdequate), dynamic(["CPU history"]), dynamic([])),
+        iff(AnyTelemetry and not(MemAdequate), dynamic(["memory history"]), dynamic([])),
+        iff(Layer == "parent" and AnyTelemetry, dynamic(["guest load (not in the parent's own counters)"]), dynamic([])),
+        iff(EnvironmentClass == "Unclassified", dynamic(["environment tag"]), dynamic([]))), ", ")
+| extend ReasonCount = array_length(Reasons), Primary = tostring(Reasons[0]),
+    EvidenceQuality = case(EvidenceState == "Adequate", "Adequate", EvidenceState == "No telemetry in window", "No telemetry", "Limited")
+| extend WhyStale = iff(not(AnyTelemetry), "No telemetry in this window. Check the Arc agent, the DCR association and power state. Stale does not mean safe to delete.",
+            strcat("No sample for ", tostring(SilentHours), " h before the window end. Verify power state; stale does not mean safe to delete.")),
+    WhyOwner = strcat("Published tag(s) missing: ", strcat_array(MissingTags, ", "), ". An evidence gap, not proof that nobody owns it."),
+    WhyUnder = strcat("CPU P95 ", Num(CpuP95, 1), "% (below ", tostring(LowCpuP95), "%) and memory in use P95 ", Num(MemP95, 1),
+            "% over ", Num(CpuObservedHours, 1), " observed hours. A sizing conversation starter; peaks and business cycles are not assessed."),
+    WhySched = strcat("Environment tag '", Environment, "' is non-production and CPU averaged below ", Num(IdleHourCpu, 0), "% in ", Num(IdleSharePct, 0),
+            "% of observed full hours. Any schedule is a proposal for the owner to confirm."),
+    WhyConsol = strcat(tostring(GroupCandidates), " similar low-utilisation machines (", Application, " / ", Os, "): ", GroupMachines,
+            ". No placement or combined sizing is implied; observed peaks are not additive.")
+| extend NothingFlagged = iff(isnotempty(EvidenceGaps), strcat("No review reason flagged yet. Evidence still needed: ", EvidenceGaps, "."), "No review reason flagged for this machine.")
+| extend Why = case(
+        Primary == "Not reporting", WhyStale,
+        Primary == "Ownership gap", WhyOwner,
+        Primary == "Low utilisation", WhyUnder,
+        Primary == "Scheduling", WhySched,
+        Primary == "Consolidation", WhyConsol,
+        NothingFlagged),
+    WhyAll = iff(ReasonCount == 0, NothingFlagged, strcat_array(array_concat(
+        iff(StaleState == "Flagged", pack_array(strcat("Not reporting: ", WhyStale)), dynamic([])),
+        iff(OwnershipState == "Flagged", pack_array(strcat("Ownership gap: ", WhyOwner)), dynamic([])),
+        iff(UnderState == "Flagged", pack_array(strcat("Low utilisation: ", WhyUnder)), dynamic([])),
+        iff(SchedulingState == "Flagged", pack_array(strcat("Scheduling: ", WhySched)), dynamic([])),
+        iff(ConsolidationState == "Flagged", pack_array(strcat("Consolidation: ", WhyConsol)), dynamic([]))), "  |  "))
+| extend SizeContext = iff(Vcpu > 0, strcat(tostring(Vcpu), " vCPU / ", Num(MemoryGb, 0), " GB (Arc inventory)"), "not reported")
+| sort by ReasonCount desc, Machine asc);

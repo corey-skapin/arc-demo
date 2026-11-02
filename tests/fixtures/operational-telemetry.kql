@@ -1,19 +1,69 @@
-let Base = range Offset from 0 to 10080 step 1
-| extend TimeGenerated = now() - 1m * Offset;
+// Deterministic literal telemetry for the opt-in, read-only query tests. Nothing here is ingested: every row exists only inside the query.
+// One sample per minute for seven days, ending at the anchor so five-minute bins line up with the workbook window end.
+// Counter names follow the real streams: Windows Perf, Linux Perf (Logical Disk, % Used Memory) and VM insights LogicalDisk.
+let Anchor = datetime(__ANCHOR__);
+let Base = range Offset from 0 to 10079 step 1
+| extend TimeGenerated = Anchor - 1m * Offset;
 let FixturePerf = union
-    (Base | extend _ResourceId="__PARENT__", ObjectName="Processor Information", CounterName="% Processor Time", InstanceName="_Total", CounterValue=iff(Offset == 30, 100.0, 10.0)),
-    (Base | extend _ResourceId="__PARENT__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="_Total", CounterValue=99.0),
-    (Base | extend _ResourceId="__PARENT__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="0", CounterValue=100.0),
-    (Base | extend _ResourceId="__GUEST__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=40.0),
-    (Base | extend _ResourceId="__LOW__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=10.0),
-    (Base | where Offset >= 2880 | extend _ResourceId="__PARKED__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=1.0),
-    (Base | where Offset <= 60 | extend _ResourceId="__SHORT__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=1.0),
-    (Base | extend _ResourceId="__PRESSURE__", ObjectName="Memory", CounterName="% Committed Bytes In Use", InstanceName="", CounterValue=90.0),
-    (Base | extend _ResourceId="__PRESSURE__", ObjectName="Memory", CounterName="Available MBytes", InstanceName="", CounterValue=100.0),
-    (Base | extend _ResourceId="__INVALID__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=110.0),
-    (Base | extend _ResourceId="__FOREIGN__", ObjectName="Processor", CounterName="% Processor Time", InstanceName="total", CounterValue=99.0)
+    // spike: one-minute peak on a low baseline. The duplicate Processor stream and the per-core stream must be ignored.
+    (Base | extend _ResourceId = "__SPIKE__", ObjectName = "Processor Information", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = iff(Offset == 30, 100.0, 10.0)),
+    (Base | extend _ResourceId = "__SPIKE__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = 99.0),
+    (Base | extend _ResourceId = "__SPIKE__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "0", CounterValue = 100.0),
+    (Base | extend _ResourceId = "__SPIKE__", ObjectName = "Memory", CounterName = "% Committed Bytes In Use", InstanceName = "", CounterValue = 40.0),
+    (Base | extend _ResourceId = "__SPIKE__", ObjectName = "Memory", CounterName = "Available MBytes", InstanceName = "", CounterValue = 8000.0),
+    // The aggregate disk stream is a decoy: the per-volume VM insights stream must win.
+    (Base | extend _ResourceId = "__SPIKE__", ObjectName = "LogicalDisk", CounterName = "% Free Space", InstanceName = "_Total", CounterValue = 20.0),
+    // parent and guest: declared relationship, separate evidence. The guest reports CPU only.
+    (Base | extend _ResourceId = "__PARENT__", ObjectName = "Processor Information", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = 15.0),
+    (Base | extend _ResourceId = "__PARENT__", ObjectName = "Memory", CounterName = "% Committed Bytes In Use", InstanceName = "", CounterValue = 45.0),
+    (Base | extend _ResourceId = "__PARENT__", ObjectName = "Memory", CounterName = "Available MBytes", InstanceName = "", CounterValue = 7000.0),
+    (Base | extend _ResourceId = "__GUEST__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "total", CounterValue = 40.0),
+    // lowa and lowb: adequate, low and similar (same application and OS). lowc is untagged.
+    (Base | extend _ResourceId = "__LOWA__", ObjectName = "Processor Information", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = 10.0),
+    (Base | extend _ResourceId = "__LOWA__", ObjectName = "Memory", CounterName = "% Committed Bytes In Use", InstanceName = "", CounterValue = 30.0),
+    (Base | extend _ResourceId = "__LOWA__", ObjectName = "Memory", CounterName = "Available MBytes", InstanceName = "", CounterValue = 6000.0),
+    (Base | extend _ResourceId = "__LOWB__", ObjectName = "Processor Information", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = 10.0),
+    (Base | extend _ResourceId = "__LOWB__", ObjectName = "Memory", CounterName = "% Committed Bytes In Use", InstanceName = "", CounterValue = 30.0),
+    (Base | extend _ResourceId = "__LOWB__", ObjectName = "Memory", CounterName = "Available MBytes", InstanceName = "", CounterValue = 6000.0),
+    (Base | extend _ResourceId = "__LOWC__", ObjectName = "Processor Information", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = 2.0),
+    (Base | extend _ResourceId = "__LOWC__", ObjectName = "Memory", CounterName = "% Committed Bytes In Use", InstanceName = "", CounterValue = 30.0),
+    (Base | extend _ResourceId = "__LOWC__", ObjectName = "Memory", CounterName = "Available MBytes", InstanceName = "", CounterValue = 6000.0),
+    // steady: inside every threshold; disk evidence is the aggregate stream only.
+    (Base | extend _ResourceId = "__STEADY__", ObjectName = "Processor Information", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = 35.0),
+    (Base | extend _ResourceId = "__STEADY__", ObjectName = "Memory", CounterName = "% Committed Bytes In Use", InstanceName = "", CounterValue = 50.0),
+    (Base | extend _ResourceId = "__STEADY__", ObjectName = "Memory", CounterName = "Available MBytes", InstanceName = "", CounterValue = 4000.0),
+    (Base | extend _ResourceId = "__STEADY__", ObjectName = "LogicalDisk", CounterName = "% Free Space", InstanceName = "_Total", CounterValue = 50.0),
+    // pressure: one hour of sustained CPU, memory above its threshold all week, a low-memory reading and a full volume.
+    (Base | extend _ResourceId = "__PRESSURE__", ObjectName = "Processor Information", CounterName = "% Processor Time", InstanceName = "_Total", CounterValue = iff(Offset between (61 .. 120), 90.0, 10.0)),
+    (Base | extend _ResourceId = "__PRESSURE__", ObjectName = "Memory", CounterName = "% Committed Bytes In Use", InstanceName = "", CounterValue = 90.0),
+    (Base | extend _ResourceId = "__PRESSURE__", ObjectName = "Memory", CounterName = "Available MBytes", InstanceName = "", CounterValue = 100.0),
+    // devidle: a Linux host using the AMA counter names. Pseudo mounts and the aggregate must not become capacity evidence.
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "total", CounterValue = 2.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Memory", CounterName = "% Used Memory", InstanceName = "", CounterValue = 35.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Memory", CounterName = "Available MBytes Memory", InstanceName = "", CounterValue = 3000.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "% Free Space", InstanceName = "/", CounterValue = 70.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "% Free Space", InstanceName = "/data", CounterValue = 55.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "% Free Space", InstanceName = "/snap/core/1", CounterValue = 0.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "% Free Space", InstanceName = "/run/user/1000", CounterValue = 0.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "% Free Space", InstanceName = "/dev/shm", CounterValue = 0.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "% Free Space", InstanceName = "total", CounterValue = 40.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "Free Megabytes", InstanceName = "/", CounterValue = 7000.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "Free Megabytes", InstanceName = "/data", CounterValue = 5500.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "Free Megabytes", InstanceName = "/snap/core/1", CounterValue = 0.0),
+    (Base | extend _ResourceId = "__DEVIDLE__", ObjectName = "Logical Disk", CounterName = "Free Megabytes", InstanceName = "total", CounterValue = 99999.0),
+    // short: about one hour of history. parked: samples stopped two days ago.
+    (Base | where Offset <= 60 | extend _ResourceId = "__SHORT__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "total", CounterValue = 1.0),
+    (Base | where Offset >= 2880 | extend _ResourceId = "__PARKED__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "total", CounterValue = 1.0),
+    // invalid: every sample is out of range. foreign: an identity outside the roster.
+    (Base | extend _ResourceId = "__INVALID__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "total", CounterValue = 110.0),
+    (Base | extend _ResourceId = "__FOREIGN__", ObjectName = "Processor", CounterName = "% Processor Time", InstanceName = "total", CounterValue = 99.0)
 | project TimeGenerated, _ResourceId, ObjectName, CounterName, InstanceName, CounterValue;
 let FixtureInsights = union
-    (Base | extend _ResourceId="__PRESSURE__", Origin="vm.azm.ms", Namespace="LogicalDisk", Name="FreeSpacePercentage", Tags='{"vm.azm.ms/mountId":"C:"}', Val=80.0 - 20.0 * (10080 - Offset)/10080),
-    (Base | extend _ResourceId="__PRESSURE__", Origin="vm.azm.ms", Namespace="LogicalDisk", Name="FreeSpacePercentage", Tags='{"vm.azm.ms/mountId":"D:"}', Val=10.0)
+    (Base | extend _ResourceId = "__SPIKE__", Origin = "vm.azm.ms", Namespace = "LogicalDisk", Name = "FreeSpacePercentage", Tags = '{"vm.azm.ms/mountId":"C:"}', Val = 60.0),
+    (Base | extend _ResourceId = "__PARENT__", Origin = "vm.azm.ms", Namespace = "LogicalDisk", Name = "FreeSpacePercentage", Tags = '{"vm.azm.ms/mountId":"C:"}', Val = 65.0),
+    (Base | extend _ResourceId = "__LOWA__", Origin = "vm.azm.ms", Namespace = "LogicalDisk", Name = "FreeSpacePercentage", Tags = '{"vm.azm.ms/mountId":"C:"}', Val = 70.0),
+    (Base | extend _ResourceId = "__LOWB__", Origin = "vm.azm.ms", Namespace = "LogicalDisk", Name = "FreeSpacePercentage", Tags = '{"vm.azm.ms/mountId":"C:"}', Val = 70.0),
+    (Base | extend _ResourceId = "__LOWC__", Origin = "vm.azm.ms", Namespace = "LogicalDisk", Name = "FreeSpacePercentage", Tags = '{"vm.azm.ms/mountId":"C:"}', Val = 70.0),
+    (Base | extend _ResourceId = "__PRESSURE__", Origin = "vm.azm.ms", Namespace = "LogicalDisk", Name = "FreeSpacePercentage", Tags = '{"vm.azm.ms/mountId":"C:"}', Val = 80.0 - 20.0 * (10080 - Offset) / 10080),
+    (Base | extend _ResourceId = "__PRESSURE__", Origin = "vm.azm.ms", Namespace = "LogicalDisk", Name = "FreeSpacePercentage", Tags = '{"vm.azm.ms/mountId":"D:"}', Val = 10.0)
 | project TimeGenerated, _ResourceId, Origin, Namespace, Name, Tags, Val;

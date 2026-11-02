@@ -1,0 +1,37 @@
+// include: candidates
+// Review card for the selected machine: why it was flagged, on what evidence, with which caveats and who decides. One evaluation.
+let C = Candidates | where Machine == '{SelectedHost}' | extend K = 1;
+datatable(SortKey:long, Aspect:string)[
+    1, "Machine",
+    2, "Reasons flagged",
+    3, "Why",
+    4, "Evidence window",
+    5, "Evidence quality",
+    6, "Still needed",
+    7, "Owner (published tags)",
+    8, "Size context",
+    9, "Next human decision",
+    10, "Not done here"]
+| extend K = 1
+| join kind=inner C on K
+| project SortKey, Aspect,
+    Detail = case(
+        SortKey == 1, strcat(Machine, " (", Topology, ", ", Os, ")"),
+        SortKey == 2, iff(ReasonCount == 0, "none", strcat_array(Reasons, ", ")),
+        SortKey == 3, WhyAll,
+        SortKey == 4, strcat(format_datetime(WindowStart, "yyyy-MM-dd HH:mm"), " to ", format_datetime(WindowEnd, "yyyy-MM-dd HH:mm"), " UTC; ",
+            tostring(coalesce(round(CpuObservedHours, 1), 0.0)), " observed CPU hours"),
+        SortKey == 5, strcat(EvidenceState, " | ", EvidenceNote),
+        SortKey == 6, iff(isempty(EvidenceGaps), "nothing further identified", EvidenceGaps),
+        SortKey == 7, strcat("owner: ", iff(isempty(Owner), "missing", Owner), " | cost centre: ", iff(isempty(CostCentre), "missing", CostCentre),
+            " | environment: ", Environment, " | application: ", Application),
+        SortKey == 8, SizeContext,
+        SortKey == 9, iff(ReasonCount == 0, "No reason is flagged; nothing needs a decision from this view.", strcat_array(array_concat(
+            iff(StaleState == "Flagged", dynamic(["Not reporting: the application owner confirms whether the machine should be running. Fix collection before any other decision."]), dynamic([])),
+            iff(OwnershipState == "Flagged", dynamic(["Ownership gap: record a named owner first. Until then no other decision about this machine has an accountable approver."]), dynamic([])),
+            iff(UnderState == "Flagged", dynamic(["Low utilisation: the owner and application team decide whether a sizing review is worthwhile, using peaks, business cycles and dependencies."]), dynamic([])),
+            iff(SchedulingState == "Flagged", dynamic(["Scheduling: the owner confirms the environment and proposes a schedule. This workbook never stops or starts a machine."]), dynamic([])),
+            iff(ConsolidationState == "Flagged", dynamic(["Consolidation: the application owner assesses dependencies, licensing and placement. Nothing here implies a target or a guarantee."]), dynamic([]))), "  |  ")),
+        "No shutdown, resize, schedule, tag change or deletion exists in this workbook. Observation is separate from approval.")
+| sort by SortKey asc
+| project Aspect, Detail

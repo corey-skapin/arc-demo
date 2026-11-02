@@ -1,0 +1,7 @@
+// include: candidates
+// Review reasons by evidence quality, so a flag backed by thin evidence is visibly different from one backed by adequate evidence.
+Candidates
+| mv-expand Reason = Reasons to typeof(string)
+| summarize Machines = count() by Reason, EvidenceQuality
+| sort by Reason asc, EvidenceQuality asc
+| project Reason, Machines, EvidenceQuality

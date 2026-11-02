@@ -1,0 +1,116 @@
+// include: summary
+// Host-level view: one row per selected machine, evidence first. Parent and guest stay separate rows and are never summed.
+// Needs: Summary, Samples, AllMachines, Machines, thresholds (CpuHigh, SustainedMinutes, MemHigh, DiskLow, LowCpuP95, MinObservedHours), WindowEnd.
+let RunStats = (T:(ResourceId:string, Bin:datetime, Hot:bool)) {
+    let Marked = materialize(T
+    | sort by ResourceId asc, Bin asc
+    | extend NewRun = not(Hot and prev(Hot) == true and prev(ResourceId) == ResourceId and (Bin - prev(Bin)) == 5m)
+    | extend RunId = row_cumsum(toint(NewRun)));
+    let Longest = Marked
+    | where Hot
+    | summarize RunBins = count() by ResourceId, RunId
+    | summarize LongestHotMinutes = max(RunBins) * 5 by ResourceId;
+    Marked
+    | summarize ObservedBins = count(), HotBins = countif(Hot) by ResourceId
+    | join kind=leftouter Longest on ResourceId
+    | project ResourceId, ObservedBins, HotBins, LongestHotMinutes = coalesce(LongestHotMinutes, long(0))
+};
+let CpuBins = Samples
+| where Metric == "CPU percent" and isnotnull(Value)
+| summarize BinAvg = avg(Value), N = count() by ResourceId, Bin = bin(TimeGenerated, 5m)
+| where N >= 3
+| project ResourceId, Bin, Hot = BinAvg >= CpuHigh;
+let MemBins = Samples
+| where Metric == "Memory percent" and isnotnull(Value)
+| summarize BinAvg = avg(Value), N = count() by ResourceId, Bin = bin(TimeGenerated, 5m)
+| where N >= 3
+| project ResourceId, Bin, Hot = BinAvg >= MemHigh;
+let CpuRuns = RunStats(CpuBins) | project ResourceId, CpuHotBins = HotBins, CpuLongestHotMin = LongestHotMinutes;
+let MemRuns = RunStats(MemBins) | project ResourceId, MemHotBins = HotBins, MemLongestHotMin = LongestHotMinutes;
+let CpuRow = Summary
+| where Metric == "CPU percent"
+| project ResourceId, CpuMean = Mean, CpuP95 = P95, CpuMax = Maximum, CpuSamples = Samples, CpuInvalid = InvalidSamples,
+    CpuObservedHours = ObservedHours, SamplingPct, CoveragePercent, FirstSeen, LastSeen, CpuBreachMinutes = BreachMinutes;
+let MemRow = Summary
+| where Metric == "Memory percent"
+| project ResourceId, MemMean = Mean, MemP95 = P95, MemMax = Maximum, MemSamples = Samples, MemObservedHours = ObservedHours,
+    MemBreachMinutes = BreachMinutes, MemSources = Sources, MemFirstSeen = FirstSeen;
+let AvailRow = Summary
+| where Metric == "Available MB"
+| project ResourceId, AvailMbMin = Minimum, AvailMbMean = Mean;
+let DiskRow = Summary
+| where Metric == "Disk free percent" and isnotnull(LastValue) and VolumeState != "No longer reported"
+| summarize arg_min(LastValue, Instance, Minimum, ObservedHours) by ResourceId
+| project ResourceId, DiskWorstVolume = Instance, DiskFreeNowPct = LastValue, DiskMinPct = Minimum, DiskObservedHours = ObservedHours;
+// An unusable sample still shows the agent reported: it counts for last-seen, never as a capacity value.
+let HostSeenAny = Samples
+| summarize HostLastSeen = max(TimeGenerated) by ResourceId;
+let InvalidRow = Summary
+| summarize InvalidSamples = sum(InvalidSamples) by ResourceId;
+let GuestRow = AllMachines
+| where Layer == "guest"
+| summarize GuestNames = strcat_array(make_list(Machine, 4), ", ") by ResourceId = ParentResourceId;
+let Hosts = materialize(Machines
+| lookup kind=leftouter CpuRow on ResourceId
+| lookup kind=leftouter CpuRuns on ResourceId
+| lookup kind=leftouter MemRow on ResourceId
+| lookup kind=leftouter MemRuns on ResourceId
+| lookup kind=leftouter AvailRow on ResourceId
+| lookup kind=leftouter DiskRow on ResourceId
+| lookup kind=leftouter InvalidRow on ResourceId
+| lookup kind=leftouter HostSeenAny on ResourceId
+| lookup kind=leftouter GuestRow on ResourceId
+| lookup kind=leftouter (AllMachines | project ParentResourceId = ResourceId, ParentMachine = Machine) on ParentResourceId
+| extend HasCpu = coalesce(CpuSamples, long(0)) > 0, HasMem = coalesce(MemSamples, long(0)) > 0, HasDisk = isnotnull(DiskFreeNowPct),
+    HasInvalid = coalesce(InvalidSamples, long(0)) > 0
+| extend AnyTelemetry = HasCpu or HasMem or HasDisk or HasInvalid
+| extend AgeMinutes = datetime_diff("minute", WindowEnd, HostLastSeen)
+| extend ReportingState = case(not(AnyTelemetry), "No telemetry", AgeMinutes <= 15, "Reporting", "Not reporting")
+// A Hyper-V parent reports its own OS only: Microsoft documents that root-partition CPU counters do not reflect physical CPU use.
+// Low values on a parent are therefore never read as headroom; pressure signals still count.
+| extend EvidenceState = case(
+    not(AnyTelemetry), "No telemetry in window",
+    HasInvalid, "Invalid samples - investigate",
+    not(HasCpu), "CPU telemetry missing",
+    CpuObservedHours < MinObservedHours, "Thin history",
+    SamplingPct < 80, "Sparse sampling while active",
+    not(HasMem) or not(HasDisk), "Memory or disk evidence missing",
+    MemObservedHours < MinObservedHours or DiskObservedHours < MinObservedHours, "Memory or disk history thin",
+    Layer == "parent", "Parent counters exclude guest load",
+    "Adequate")
+| extend EvidenceNote = strcat("CPU ", iff(HasCpu, strcat(Num(CpuObservedHours, 1), " h"), "missing"),
+    " | memory ", iff(HasMem, strcat(Num(MemObservedHours, 1), " h"), "missing"),
+    " | disk ", iff(HasDisk, strcat(Num(DiskObservedHours, 1), " h"), "missing"),
+    iff(HasInvalid, strcat(" | ", tostring(InvalidSamples), " invalid sample(s) ignored"), ""))
+| extend CpuSustained = coalesce(CpuLongestHotMin, long(0)) >= SustainedMinutes,
+    MemSustained = coalesce(MemLongestHotMin, long(0)) >= SustainedMinutes,
+    DiskPressure = coalesce(DiskFreeNowPct, 100.0) < DiskLow,
+    LowAvailable = coalesce(AvailMbMin, 1000000.0) < 512.0
+| extend CpuSpike = not(CpuSustained) and coalesce(CpuMax, 0.0) >= CpuHigh
+| extend Pattern = case(not(HasCpu), "No CPU data", CpuSustained, "Sustained pressure", CpuSpike, "Brief spike(s)", CpuP95 < LowCpuP95, "Steady, low", "Steady")
+| extend Assessment = case(
+    not(AnyTelemetry), "No telemetry",
+    CpuSustained or MemSustained or DiskPressure or LowAvailable, "Pressure observed",
+    EvidenceState != "Adequate", "Insufficient evidence",
+    CpuP95 < LowCpuP95, "Apparent headroom",
+    "Within thresholds")
+| extend PeakNote = iff(CpuSpike, strcat(" Peak ", Num(CpuMax, 0), "% was brief (never above ", CpuHigh, "% for ", SustainedMinutes, " continuous minutes)."), "")
+| extend Reason = case(
+    not(AnyTelemetry), "No samples in this window. That is unknown, not zero use: check the Arc agent, DCR association and power state.",
+    CpuSustained, strcat("CPU stayed at or above ", CpuHigh, "% for ", CpuLongestHotMin, " continuous minutes (sustained threshold ", SustainedMinutes, ")."),
+    MemSustained, strcat("Memory in use stayed at or above ", MemHigh, "% for ", MemLongestHotMin, " continuous minutes."),
+    DiskPressure, strcat("Volume ", DiskWorstVolume, " has ", Num(DiskFreeNowPct, 1), "% free (threshold ", DiskLow, "%)."),
+    LowAvailable, strcat("Available memory fell to ", Num(AvailMbMin, 0), " MB."),
+    EvidenceState == "Parent counters exclude guest load", strcat("Hosts the declared guest ", GuestNames, ". Its own OS counters (CPU P95 ", Num(CpuP95, 1),
+        "%) do not reflect the guest's load or physical CPU use, so this is not headroom.", PeakNote, " Guest and parent are never added together."),
+    Assessment == "Insufficient evidence", strcat("Evidence first: ", EvidenceState, ". ", EvidenceNote, ".", PeakNote),
+    Assessment == "Apparent headroom", strcat("CPU P95 ", Num(CpuP95, 1), "% with memory and disk evidence.", PeakNote, " A conversation starter, not a sizing recommendation."),
+    strcat("CPU P95 ", Num(CpuP95, 1), "% stays inside the illustrative thresholds.", PeakNote))
+| extend Rank = case(Assessment == "Pressure observed", 1, Assessment == "Insufficient evidence", 2, Assessment == "No telemetry", 3, Assessment == "Within thresholds", 4, 5)
+| extend Topology = case(Layer == "guest", strcat("guest of ", ParentMachine), Layer == "parent", strcat("parent of ", GuestNames), Layer == "standalone", "standalone", "unclassified")
+| project ResourceId, Machine, Layer, Topology, ParentResourceId, ParentMachine, GuestNames, Os, Environment, Application, Owner, CostCentre, Vcpu, MemoryGb,
+    ReportingState, AgeMinutes, FirstSeen, LastSeen, HostLastSeen, CpuObservedHours, SamplingPct, CoveragePercent,
+    CpuMean, CpuP95, CpuMax, CpuBreachMinutes, CpuHotBins, CpuLongestHotMin, CpuSustained, CpuSpike, Pattern,
+    MemMean, MemP95, MemMax, MemObservedHours, MemBreachMinutes, MemHotBins, MemLongestHotMin, MemSustained, MemSources, MemFirstSeen,
+    AvailMbMin, AvailMbMean, DiskWorstVolume, DiskFreeNowPct, DiskMinPct, DiskObservedHours, DiskPressure, LowAvailable,
+    HasCpu, HasMem, HasDisk, HasInvalid, AnyTelemetry, EvidenceState, EvidenceNote, Assessment, Reason, Rank);

@@ -14,14 +14,17 @@ param serializedData string
 ])
 param purpose string
 
+@description('Marks a separate review copy; the published workbook is untouched until it is promoted.')
+param draft bool = false
+
 resource workbook 'Microsoft.Insights/workbooks@2023-06-01' = {
   name: workbookName
   location: location
   kind: 'shared'
-  tags: {
+  tags: union({
     managedBy: 'arc-demo-operational-workbooks'
     purpose: purpose
-  }
+  }, draft ? { lifecycle: 'draft' } : {})
   properties: {
     displayName: displayName
     serializedData: serializedData

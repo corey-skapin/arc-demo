@@ -1,0 +1,29 @@
+// include: candidates
+// Opportunity summary: counts of machines flagged per review reason. These are conversation starters, not approved savings.
+let Counts = Candidates
+| summarize Total = count(), Guests = countif(Layer == "guest"), GuestNames = strcat_array(make_list_if(Machine, Layer == "guest", 3), ", "),
+    Under = countif(UnderState == "Flagged"), UnderNames = strcat_array(make_list_if(Machine, UnderState == "Flagged", 5), ", "),
+    Scheduling = countif(SchedulingState == "Flagged"), SchedulingNames = strcat_array(make_list_if(Machine, SchedulingState == "Flagged", 5), ", "),
+    Consolidation = countif(ConsolidationState == "Flagged"), ConsolidationNames = strcat_array(make_list_if(Machine, ConsolidationState == "Flagged", 5), ", "),
+    Ownership = countif(OwnershipState == "Flagged"), OwnershipNames = strcat_array(make_list_if(Machine, OwnershipState == "Flagged", 5), ", "),
+    Stale = countif(StaleState == "Flagged"), StaleNames = strcat_array(make_list_if(Machine, StaleState == "Flagged", 5), ", ")
+| extend K = 1;
+datatable(SortKey:long, Label:string)[
+    0, "🖥️ Machines reviewed",
+    1, "📉 Low observed utilisation",
+    2, "🕒 Scheduling conversation",
+    3, "🧩 Consolidation conversation",
+    4, "🏷️ Ownership gaps",
+    5, "📡 Not reporting"]
+| extend K = 1
+| join kind=inner Counts on K
+| project SortKey, Label,
+    Machines = case(SortKey == 0, Total, SortKey == 1, Under, SortKey == 2, Scheduling, SortKey == 3, Consolidation, SortKey == 4, Ownership, Stale),
+    Names = case(SortKey == 0, iff(Guests > 0,
+            strcat(tostring(Total - Guests), " independent + ", tostring(Guests), " declared guest (", GuestNames, "), counted once and never as extra capacity"),
+            strcat(tostring(Total), " independent machines")),
+        SortKey == 1, UnderNames, SortKey == 2, SchedulingNames, SortKey == 3, ConsolidationNames,
+        SortKey == 4, OwnershipNames, StaleNames)
+| extend Names = iff(isempty(Names), "none", Names)
+| sort by SortKey asc
+| project Label, Machines, Names

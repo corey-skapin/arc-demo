@@ -5,7 +5,9 @@ param(
 )
 
 # Explicit opt-in, read-only KQL execution. Normal CI needs no Azure account.
-Describe 'Operational queries executed against deterministic literal tables' -Skip:([string]::IsNullOrWhiteSpace($WorkspaceResourceId)) {
+# The production item queries run unchanged except that the two raw telemetry sources are swapped for literal fixture tables
+# defined inside the query text, so nothing is ingested and no real machine, guest or workload is touched.
+Describe 'Operational workbook queries executed against deterministic literal tables' -Skip:([string]::IsNullOrWhiteSpace($WorkspaceResourceId)) {
     BeforeAll {
         $ErrorActionPreference = 'Stop'
         $repo = Split-Path $PSScriptRoot
@@ -17,93 +19,407 @@ Describe 'Operational queries executed against deterministic literal tables' -Sk
         Initialize-DemoContext -SubscriptionId $SubscriptionId -TenantId $TenantId
         $workspace = Invoke-DemoAz -Arguments @('resource', 'show', '--ids', $WorkspaceResourceId, '-o', 'json') | ConvertFrom-Json
         if ($workspace.id -ne $WorkspaceResourceId -or -not $workspace.properties.customerId) { throw 'Test workspace identity/customerId unknown.' }
+        $token = Get-LawQueryToken
+
         $scope = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture'
-        $ids = @{}
-        foreach ($name in @('parent', 'guest', 'low', 'parked', 'short', 'pressure', 'invalid', 'missing', 'foreign')) {
-            $ids[$name] = "$scope/providers/Microsoft.HybridCompute/machines/$name".ToLowerInvariant()
+        $definitions = [ordered]@{
+            spike = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'crm'; owner = 'alice'; costcenter = 'cc-1' } }
+            parent = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'sql'; owner = 'bob'; costcenter = 'cc-2' } }
+            guest = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'sql'; owner = 'bob'; costcenter = 'cc-2' } }
+            lowa = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'web'; owner = 'carol'; costcenter = 'cc-3' } }
+            lowb = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'web'; owner = 'carol'; costcenter = 'cc-3' } }
+            lowc = @{ os = 'windows'; tags = @{} }
+            steady = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'erp'; owner = 'dave'; costcenter = 'cc-4' } }
+            pressure = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'erp'; owner = 'dave'; costcenter = 'cc-4' } }
+            devidle = @{ os = 'linux'; tags = @{ env = 'dev'; application = 'tools'; owner = 'erin'; costcenter = 'cc-5' } }
+            short = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'misc'; owner = 'frank'; costcenter = 'cc-6' } }
+            parked = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'misc'; owner = 'frank'; costcenter = 'cc-6' } }
+            missing = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'misc'; owner = 'frank'; costcenter = 'cc-6' } }
+            invalid = @{ os = 'windows'; tags = @{ env = 'prod'; application = 'misc'; owner = 'frank'; costcenter = 'cc-6' } }
         }
-        $machines = @($ids.Keys | Where-Object { $_ -ne 'foreign' } | ForEach-Object { @{ id = $ids[$_] } })
+        $ids = @{ foreign = "$scope/providers/Microsoft.HybridCompute/machines/foreign".ToLowerInvariant() }
+        $machines = @(
+            foreach ($name in $definitions.Keys) {
+                $ids[$name] = "$scope/providers/Microsoft.HybridCompute/machines/$name".ToLowerInvariant()
+                @{ id = $ids[$name]; osType = $definitions[$name].os; tags = $definitions[$name].tags }
+            }
+        )
         $topology = @(
             @{ resourceId = $ids.parent; layer = 'parent' }
             @{ resourceId = $ids.guest; layer = 'guest'; parentResourceId = $ids.parent }
         )
-        $book = (Get-DemoOperationalWorkbook -Purpose optimisation -WorkspaceResourceId "$scope/providers/Microsoft.OperationalInsights/workspaces/law-fixture" -Machines $machines -Topology $topology).SerializedData | ConvertFrom-Json -Depth 100
+        $roster = @(Get-DemoOperationalRoster -WorkspaceResourceId "$scope/providers/Microsoft.OperationalInsights/workspaces/law-fixture" -Machines $machines -Topology $topology)
+
         $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\operational-telemetry.kql') -Raw
         foreach ($key in $ids.Keys) { $fixture = $fixture.Replace("__$($key.ToUpperInvariant())__", $ids[$key]) }
-        $query = $fixture + "`n" + ($book.items | Where-Object name -eq 'review-candidates').content.query
-        $query = $query.Replace('{LookbackHours}', '168').Replace('let PerfRows = Perf', 'let PerfRows = FixturePerf').Replace('let InsightsRows = InsightsMetrics', 'let InsightsRows = FixtureInsights')
-        $token = Get-LawQueryToken
-        $response = Invoke-RestMethod -Method POST -Uri "https://api.loganalytics.io/v1/workspaces/$($workspace.properties.customerId)/query" `
-            -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body (@{ query = $query } | ConvertTo-Json -Depth 5) -TimeoutSec 120
-        if ($response.error -or @($response.tables).Count -ne 1) { throw 'Fixture query failed/partial; no deterministic result claim.' }
-        $table = $response.tables[0]
-        $rows = @(
-            foreach ($row in $table.rows) {
-                $record = [ordered]@{}
-                for ($i = 0; $i -lt $table.columns.Count; $i++) { $record[$table.columns[$i].name] = $row[$i] }
-                [pscustomobject]$record
+        $now = [datetime]::UtcNow
+        $anchor = [datetime]::SpecifyKind($now.Date.AddMinutes([math]::Floor($now.TimeOfDay.TotalMinutes / 5) * 5), [DateTimeKind]::Utc)
+        $fixture = $fixture.Replace('__ANCHOR__', $anchor.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [cultureinfo]::InvariantCulture))
+
+        function New-FixtureRequest {
+            param([string]$Name, [hashtable]$Parameters = @{}, [string[]]$Only = @())
+            # The fixtures were designed against a 24-hour evidence rule; the workbook default is a deliberately modest 3 hours.
+            $effective = @{ MinObservedHours = '24' }
+            foreach ($key in $Parameters.Keys) { $effective[$key] = $Parameters[$key] }
+            # -Only narrows the roster to named machines so the edge cases (nothing reporting, everything silent) can be exercised.
+            $scoped = if ($Only.Count) { @($roster | Where-Object { $_.machine -in $Only }) } else { $roster }
+            $text = Get-DemoOperationalQuery -Name $Name -Roster $scoped
+            $text = Expand-DemoOperationalQuery -Query $text -Roster $scoped -Parameters $effective -Start $anchor.AddDays(-7) -End $anchor
+            $readsSharedSamples = $text.Contains('let PerfRows = Perf')
+            $text = $text.Replace('let PerfRows = Perf', 'let PerfRows = FixturePerf').Replace('let InsightsRows = InsightsMetrics', 'let InsightsRows = FixtureInsights')
+            # Only the scenario arithmetic may skip the shared samples; every other item must run on the fixture tables.
+            if (-not $readsSharedSamples -and $Name -ne 'opt-scenario') {
+                throw "Query '$Name' does not read the shared telemetry sources; refusing to claim fixture coverage."
             }
-        )
-        function Get-FixtureMetric([string]$Machine, [string]$Metric) {
-            @($rows | Where-Object { $_.Machine -eq $Machine -and $_.Metric -eq $Metric })
+            @{ query = ($fixture + "`n" + $text) } | ConvertTo-Json -Depth 5
+        }
+        function Get-Fixture([object[]]$Rows, [string]$Machine) { @($Rows | Where-Object Machine -eq $Machine) }
+
+        $scenarioInputs = @{ SelectedHost = 'lowa'; SchedStartHour = '19'; SchedEndHour = '7'; SchedWeekendsOff = 'Yes'; ScenarioBaseline = '1000'; ScenarioSharePct = '60' }
+        $guestInputs = $scenarioInputs.Clone()
+        $guestInputs.SelectedHost = 'guest'
+        $requests = [ordered]@{
+            hosts = New-FixtureRequest 'cap-hosts'
+            volumes = New-FixtureRequest 'cap-disk-volumes'
+            memory = New-FixtureRequest 'cap-mem-grid'
+            capTiles = New-FixtureRequest 'cap-tiles'
+            scopeTiles = New-FixtureRequest 'cap-scope'
+            scopeAllAbsent = New-FixtureRequest 'cap-scope' -Only @('missing')
+            scopeAllSilent = New-FixtureRequest 'cap-scope' -Only @('parked')
+            scopeMixed = New-FixtureRequest 'cap-scope' -Only @('parked', 'missing')
+            detailTiles = New-FixtureRequest 'cap-detail-tiles' @{ SelectedHost = 'devidle' }
+            candidates = New-FixtureRequest 'opt-candidates'
+            optTiles = New-FixtureRequest 'opt-tiles'
+            card = New-FixtureRequest 'opt-detail-card' @{ SelectedHost = 'devidle' }
+            scenario = New-FixtureRequest 'opt-scenario' $scenarioInputs
+            guestScenario = New-FixtureRequest 'opt-scenario' $guestInputs
+            emptyScenario = New-FixtureRequest 'opt-scenario'
+        }
+        # Read-only queries run a few at a time: the service allows only a handful of concurrent queries per user.
+        $uri = "https://api.loganalytics.io/v1/workspaces/$($workspace.properties.customerId)/query"
+        $responses = @($requests.GetEnumerator() | ForEach-Object -ThrottleLimit 4 -Parallel {
+            try {
+                $reply = Invoke-RestMethod -Method POST -Uri $using:uri -Headers @{ Authorization = "Bearer $using:token" } -ContentType 'application/json' -Body $_.Value -TimeoutSec 180
+                [pscustomobject]@{ Key = $_.Key; Reply = $reply; Error = '' }
+            } catch {
+                [pscustomobject]@{ Key = $_.Key; Reply = $null; Error = [string]$_.ErrorDetails.Message }
+            }
+        })
+        $results = @{}
+        foreach ($response in $responses) {
+            if ($response.Error -or $response.Reply.error -or @($response.Reply.tables).Count -ne 1) {
+                throw "Fixture query '$($response.Key)' failed or was partial; no deterministic result claim. $($response.Error)"
+            }
+            $table = $response.Reply.tables[0]
+            $results[$response.Key] = @(
+                foreach ($row in $table.rows) {
+                    $record = [ordered]@{}
+                    for ($i = 0; $i -lt $table.columns.Count; $i++) { $record[$table.columns[$i].name] = $row[$i] }
+                    [pscustomobject]$record
+                }
+            )
+        }
+        $hosts = $results.hosts
+        $volumes = $results.volumes
+        $memory = $results.memory
+        $capTiles = $results.capTiles
+        $scopeTiles = $results.scopeTiles
+        $scopeAllAbsent = $results.scopeAllAbsent
+        $scopeAllSilent = $results.scopeAllSilent
+        $scopeMixed = $results.scopeMixed
+        $detailTiles = $results.detailTiles
+        $candidates = $results.candidates
+        $optTiles = $results.optTiles
+        $card = $results.card
+        $scenario = $results.scenario
+        $guestScenario = $results.guestScenario
+        $emptyScenario = $results.emptyScenario
+    }
+
+    Context 'Capacity status and evidence' {
+        It 'returns one row per roster machine and ignores identities outside the roster' {
+            $hosts.Count | Should -Be $definitions.Count
+            @($hosts | Where-Object Machine -eq 'foreign').Count | Should -Be 0
+            @($hosts.Machine | Sort-Object -Unique).Count | Should -Be $definitions.Count
+        }
+
+        It 'keeps a brief spike visible without calling it pressure, and rejects duplicate and per-core CPU streams' {
+            $row = Get-Fixture $hosts 'spike'
+            $row.CpuP95 | Should -Be 10
+            $row.CpuPeak | Should -Be 100
+            $row.Pattern | Should -Be 'Brief spike(s)'
+            $row.Assessment | Should -Be 'Apparent headroom'
+            $row.Reason | Should -Match 'Peak 100% was brief'
+            $row.Reason | Should -Match 'not a sizing recommendation'
+        }
+
+        It 'separates sustained pressure from a spike and reports memory, low memory and a full volume' {
+            $row = Get-Fixture $hosts 'pressure'
+            $row.Pattern | Should -Be 'Sustained pressure'
+            $row.Assessment | Should -Be 'Pressure observed'
+            $row.Reason | Should -Match 'continuous minutes'
+            $row.AvailMbMin | Should -Be 100
+            $row.Volume | Should -Be 'D:'
+            $row.FreePct | Should -Be 10
+        }
+
+        It 'keeps parent and guest as separate evidence rows, never adds them and does not read a parent as headroom' {
+            $parent = Get-Fixture $hosts 'parent'
+            $guest = Get-Fixture $hosts 'guest'
+            $parent.Topology | Should -Be 'parent of guest'
+            $guest.Topology | Should -Be 'guest of parent'
+            $parent.CpuP95 | Should -Be 15
+            $guest.CpuP95 | Should -Be 40
+            $parent.Evidence | Should -Be 'Parent counters exclude guest load'
+            $parent.Assessment | Should -Be 'Insufficient evidence'
+            $parent.Reason | Should -Match 'do not reflect the guest'
+            @($hosts | Where-Object { $_.Machine -match 'total|sum|combined' }).Count | Should -Be 0
+        }
+
+        It 'leaves missing measurements null, never zero or healthy' {
+            $guest = Get-Fixture $hosts 'guest'
+            $guest.MemP95 | Should -BeNullOrEmpty
+            $guest.FreePct | Should -BeNullOrEmpty
+            $guest.Evidence | Should -Be 'Memory or disk evidence missing'
+            $guest.Assessment | Should -Be 'Insufficient evidence'
+            $none = Get-Fixture $hosts 'missing'
+            $none.State | Should -Be 'No telemetry'
+            $none.Assessment | Should -Be 'No telemetry'
+            $none.CpuP95 | Should -BeNullOrEmpty
+            $none.MemP95 | Should -BeNullOrEmpty
+            $none.FreePct | Should -BeNullOrEmpty
+            $none.Reason | Should -Match 'unknown, not zero'
+        }
+
+        It 'treats a parked gap as evidence first, not as idle headroom' {
+            $row = Get-Fixture $hosts 'parked'
+            $row.State | Should -Be 'Not reporting'
+            $row.AgeMinutes | Should -BeGreaterThan 2800
+            $row.Assessment | Should -Be 'Insufficient evidence'
+            $row.Assessment | Should -Not -Be 'Apparent headroom'
+        }
+
+        It 'rejects a short history as capacity evidence' {
+            $row = Get-Fixture $hosts 'short'
+            $row.Evidence | Should -Be 'Thin history'
+            $row.Assessment | Should -Be 'Insufficient evidence'
+        }
+
+        It 'does not use invalid values as capacity evidence' {
+            $row = Get-Fixture $hosts 'invalid'
+            $row.Evidence | Should -Match 'Invalid samples'
+            $row.CpuP95 | Should -BeNullOrEmpty
+            $row.Assessment | Should -Be 'Insufficient evidence'
+            $row.History | Should -Match 'invalid sample'
+        }
+
+        It 'prefers per-volume disk evidence over the aggregate stream' {
+            $row = Get-Fixture $hosts 'spike'
+            $row.Volume | Should -Be 'C:'
+            $row.FreePct | Should -Be 60
+        }
+
+        It 'reads the Linux Perf counter names, including memory and the worst real mount' {
+            $row = Get-Fixture $hosts 'devidle'
+            $row.Os | Should -Be 'Linux'
+            $row.CpuP95 | Should -Be 2
+            $row.MemP95 | Should -Be 35
+            $row.AvailMbMin | Should -Be 3000
+            $row.Volume | Should -Be '/data'
+            $row.FreePct | Should -Be 55
+            $row.Assessment | Should -Be 'Apparent headroom'
         }
     }
 
-    It 'keeps a spike visible with low mean/P95 and rejects duplicate/per-core CPU streams' {
-        $row = Get-FixtureMetric parent 'CPU percent'
-        $row.Mean | Should -BeLessThan 11
-        $row.P95 | Should -Be 10
-        $row.Maximum | Should -Be 100
-        $row.Review | Should -Match 'spike'
-    }
+    Context 'Disk and memory detail' {
+        It 'excludes Linux pseudo mounts and the aggregate whenever per-volume evidence exists' {
+            $names = @((Get-Fixture $volumes 'devidle').Volume | Sort-Object)
+            $names | Should -Be @('/', '/data')
+        }
 
-    It 'keeps parent and guest observations separate rather than adding capacity' {
-        $parent = Get-FixtureMetric parent 'CPU percent'
-        $guest = Get-FixtureMetric guest 'CPU percent'
-        $parent.Layer | Should -Be parent
-        $guest.Layer | Should -Be guest
-        $guest.ParentResourceId | Should -Be $ids.parent
-        $guest.Mean | Should -Be 40
-    }
+        It 'derives a Linux volume size from free megabytes and free percent and labels the basis' {
+            $row = Get-Fixture $volumes 'devidle' | Where-Object Volume -eq '/'
+            $row.SizeBasis | Should -Be 'derived'
+            $row.FreeGb | Should -Be 6.8
+            $row.SizeGb | Should -Be 9.8
+        }
 
-    It 'leaves missing memory/disk/host measurements null, never zero' {
-        foreach ($row in @($rows | Where-Object { $_.Machine -eq 'missing' -or ($_.Machine -eq 'guest' -and $_.Metric -ne 'CPU percent') })) {
-            $row.Mean | Should -BeNullOrEmpty
-            $row.P95 | Should -BeNullOrEmpty
-            $row.Evidence | Should -Match 'Missing data'
-            $row.Review | Should -Not -Match 'Low sampled CPU'
+        It 'labels an aggregate-only series as not per-volume' {
+            $row = Get-Fixture $volumes 'steady'
+            $row.Volume | Should -Be '_Total (aggregate)'
+            $row.Level | Should -Be 'Aggregate only - not per-volume'
+        }
+
+        It 'reports first-to-last change in points, not a forecast, and flags the low volume' {
+            $rows = Get-Fixture $volumes 'pressure'
+            ($rows | Where-Object Volume -eq 'C:').FreeNowPct | Should -Be 60
+            ($rows | Where-Object Volume -eq 'C:').ChangePts | Should -Be -20
+            ($rows | Where-Object Volume -eq 'C:').Level | Should -Be 'Within threshold'
+            ($rows | Where-Object Volume -eq 'D:').Level | Should -Be 'Low free space'
+        }
+
+        It 'keeps each memory basis separate and never blends Windows and Linux counters' {
+            (Get-Fixture $memory 'spike').Basis | Should -Be 'Committed bytes in use (Windows)'
+            (Get-Fixture $memory 'devidle').Basis | Should -Be 'Used memory (Linux)'
+            (Get-Fixture $memory 'pressure').State | Should -Be 'Sustained pressure'
+            (Get-Fixture $memory 'guest').State | Should -Be 'Missing - not zero'
+            (Get-Fixture $memory 'pressure').LowestAvailableMB | Should -Be 100
         }
     }
 
-    It 'reports parked gaps/staleness without turning low samples into an opportunity' {
-        $row = Get-FixtureMetric parked 'CPU percent'
-        $row.CoveragePercent | Should -BeLessThan 80
-        $row.Evidence | Should -Match 'Stale'
-        $row.Review | Should -Match 'Evidence first'
+    Context 'Summary tiles' {
+        It 'answers scope and evidence quality: machines, reporting, freshness, adequate evidence and coverage' {
+            $tile = { param($label) @($scopeTiles | Where-Object Label -like "*$label*")[0] }
+            $total = & $tile 'Machines in scope'
+            $total.Machines | Should -Be $definitions.Count
+            $total.Names | Should -Match '12 independent \+ 1 declared guest \(guest\), counted once and never as extra capacity'
+            # The silent and absent machines are named, and an invalid-only host still counts as reporting (it sent samples).
+            $reporting = & $tile 'Reporting'
+            $reporting.Label | Should -Match 'Reporting (now|at the window end)'
+            $reporting.Machines | Should -Be 11
+            $reporting.Names | Should -Match '1 silent and 1 never reported'
+            $reporting.Names | Should -Match 'parked'
+            $reporting.Names | Should -Match 'missing'
+            $latest = & $tile 'since the latest sample'
+            $latest.Label | Should -Be '🕒 Minutes since the latest sample'
+            $latest.Machines | Should -Be 0
+            $latest.Names | Should -Match 'newest sample \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC'
+            $adequate = & $tile 'Adequate evidence'
+            $adequate.Machines | Should -Be 7
+            $adequate.Names | Should -Match 'at least 24 observed hours'
+            $limited = & $tile 'Limited evidence'
+            $limited.Machines | Should -Be 5
+            @(($limited.Names -split ' \(thin')[0] -split ', ' | Sort-Object) | Should -Be @('guest', 'invalid', 'parent', 'parked', 'short')
+            ($adequate.Machines + $limited.Machines + 1) | Should -Be $definitions.Count
+            # Median of the machines that have CPU samples only: the invalid-only host and the one without telemetry are not counted as zero.
+            $coverage = & $tile 'Window coverage'
+            $coverage.Machines | Should -Be 100
+            $coverage.Names | Should -Match 'parked time, unknown and not idle'
+        }
+
+        It 'tells unknown from parked when nothing is reporting' {
+            $tile = { param($rows, $label) @($rows | Where-Object Label -like "*$label*")[0] }
+            # Every machine without telemetry: nothing was observed, so there is no last observed data to describe and nothing is zero.
+            (& $tile $scopeAllAbsent 'Reporting').Machines | Should -Be 0
+            (& $tile $scopeAllAbsent 'Reporting').Names | Should -Be 'no machine in scope sent any telemetry in this window: unknown, not zero'
+            (& $tile $scopeAllAbsent 'Latest sample').Machines | Should -BeNullOrEmpty
+            (& $tile $scopeAllAbsent 'Latest sample').Names | Should -Match 'unknown, not zero'
+            (& $tile $scopeAllAbsent 'Window coverage').Machines | Should -BeNullOrEmpty
+            (& $tile $scopeAllAbsent 'Adequate evidence').Machines | Should -Be 0
+            (& $tile $scopeAllAbsent 'Limited evidence').Names | Should -Be 'none'
+            # Every machine silent: parked, and the figures describe the last observed data (48 hours old, 71% of the window observed).
+            $silent = & $tile $scopeAllSilent 'Reporting'
+            $silent.Names | Should -Match 'parked or silent'
+            $silent.Names | Should -Match 'last observed data'
+            $latest = & $tile $scopeAllSilent 'since the latest sample'
+            $latest.Label | Should -Be '🕒 Hours since the latest sample'
+            $latest.Machines | Should -Be 48
+            (& $tile $scopeAllSilent 'Window coverage').Machines | Should -Be 71
+            # A mix: only the silent subset has observed data to describe.
+            $mixed = & $tile $scopeMixed 'Reporting'
+            $mixed.Machines | Should -Be 0
+            $mixed.Names | Should -Match '^none within 15 minutes of the window end\. 1 silent \(the figures below describe their last observed data\) and 1 never reported: '
+            $mixed.Names | Should -Match 'parked'
+            $mixed.Names | Should -Match 'missing'
+        }
+
+        It 'counts mutually exclusive capacity assessments that add up to the machines in scope' {
+            $count = { param($label) [int](@($capTiles | Where-Object Label -like "*$label*")[0].Machines) }
+            @($capTiles | Where-Object Label -like '*Machines in scope*').Count | Should -Be 0
+            (& $count 'Pressure observed') | Should -Be 1
+            (& $count 'Apparent headroom') | Should -Be 5
+            (& $count 'Within thresholds') | Should -Be 1
+            (& $count 'Insufficient evidence') | Should -Be 5
+            (& $count 'No telemetry') | Should -Be 1
+            ((& $count 'Pressure observed') + (& $count 'Apparent headroom') + (& $count 'Within thresholds') + (& $count 'Insufficient evidence') + (& $count 'No telemetry')) |
+                Should -Be $definitions.Count
+        }
+
+        It 'adds the application context to the selected-machine tiles' {
+            $context = @($detailTiles | Where-Object Label -eq 'Application context')[0]
+            $context.Value | Should -Be 'tools / dev'
+            $context.Note | Should -Match 'owner erin \| cost centre cc-5 \| Linux'
+            @($detailTiles).Count | Should -Be 7
+            (@($detailTiles | Where-Object Label -eq 'Evidence')[0]).Value | Should -Be 'Adequate'
+        }
+
+        It 'counts optimisation review reasons without implying a saving' {
+            $count = { param($label) [int](@($optTiles | Where-Object Label -like "*$label*")[0].Machines) }
+            (& $count 'Machines reviewed') | Should -Be $definitions.Count
+            (& $count 'Low observed utilisation') | Should -Be 5
+            (& $count 'Scheduling') | Should -Be 1
+            (& $count 'Consolidation') | Should -Be 2
+            (& $count 'Ownership gaps') | Should -Be 1
+            (& $count 'Not reporting') | Should -Be 2
+            ($optTiles | ConvertTo-Json -Depth 4) | Should -Not -Match '(?i)saving'
+        }
     }
 
-    It 'rejects short histories as optimisation evidence' {
-        (Get-FixtureMetric short 'CPU percent').Evidence | Should -Match 'Insufficient history'
+    Context 'Optimisation review reasons' {
+        It 'flags low utilisation only on adequate evidence, worded as a conversation starter' {
+            foreach ($name in 'spike', 'lowa', 'lowb', 'lowc', 'devidle') { (Get-Fixture $candidates $name).LowUtilisation | Should -Be 'Flagged' }
+            foreach ($name in 'parent', 'short', 'parked', 'missing', 'invalid') { (Get-Fixture $candidates $name).LowUtilisation | Should -Be 'Needs evidence' }
+            foreach ($name in 'guest', 'steady', 'pressure') { (Get-Fixture $candidates $name).LowUtilisation | Should -Be 'Not flagged' }
+            (Get-Fixture $candidates 'lowa').Why | Should -Match 'sizing conversation starter'
+            ($candidates.Why -join ' ') | Should -Not -Match '(?i)\b(resize to|downsize to|will save|safe to resize)\b'
+            (Get-Fixture $candidates 'parent').Needs | Should -Match 'guest load'
+        }
+
+        It 'groups only similar non-guest low-utilisation machines for consolidation' {
+            foreach ($name in 'lowa', 'lowb') { (Get-Fixture $candidates $name).Consolidation | Should -Be 'Flagged' }
+            foreach ($name in 'spike', 'parent', 'guest', 'lowc', 'devidle', 'steady', 'pressure') { (Get-Fixture $candidates $name).Consolidation | Should -Be 'Not flagged' }
+            (Get-Fixture $candidates 'lowa').Reasons | Should -Be 'Low utilisation, Consolidation'
+        }
+
+        It 'proposes scheduling only where an explicit non-production tag exists and never assumes an environment' {
+            $dev = Get-Fixture $candidates 'devidle'
+            $dev.Scheduling | Should -Be 'Flagged'
+            $dev.IdleSharePct | Should -Be 100
+            $dev.Reasons | Should -Be 'Low utilisation, Scheduling'
+            (Get-Fixture $candidates 'lowc').Scheduling | Should -Be 'Needs evidence'
+            (Get-Fixture $candidates 'lowc').Environment | Should -Be 'Unclassified'
+            (Get-Fixture $candidates 'lowa').Scheduling | Should -Be 'Not flagged'
+        }
+
+        It 'explains every flagged reason in the review card and leaves each decision to a person' {
+            $why = (@($card | Where-Object Aspect -eq 'Why')[0]).Detail
+            $why | Should -Match 'Low utilisation: .*sizing conversation starter'
+            $why | Should -Match 'Scheduling: .*proposal for the owner to confirm'
+            $decision = (@($card | Where-Object Aspect -eq 'Next human decision')[0]).Detail
+            $decision | Should -Match 'never stops or starts a machine'
+            (@($card | Where-Object Aspect -eq 'Not done here')[0]).Detail | Should -Match 'No shutdown, resize, schedule, tag change or deletion'
+        }
+
+        It 'reports ownership gaps as missing tags, not as proof that nobody owns the machine' {
+            $row = Get-Fixture $candidates 'lowc'
+            $row.Ownership | Should -Be 'Flagged'
+            $row.Why | Should -Match 'owner'
+            $row.Why | Should -Match 'not proof'
+            (Get-Fixture $candidates 'lowa').Ownership | Should -Be 'Not flagged'
+        }
+
+        It 'flags silent and absent machines as not reporting without calling them safe to delete' {
+            foreach ($name in 'parked', 'missing') { (Get-Fixture $candidates $name).NotReporting | Should -Be 'Flagged' }
+            foreach ($name in 'invalid', 'pressure', 'spike') { (Get-Fixture $candidates $name).NotReporting | Should -Be 'Not flagged' }
+            (Get-Fixture $candidates 'parked').Why | Should -Match 'stale does not mean safe to delete'
+            (Get-Fixture $candidates 'missing').Why | Should -Match 'does not mean safe to delete'
+        }
     }
 
-    It 'surfaces committed/available memory and per-volume disk pressure' {
-        (Get-FixtureMetric pressure 'Committed percent').Review | Should -Match 'commitment pressure'
-        (Get-FixtureMetric pressure 'Available MB').Review | Should -Match 'Low available memory'
-        $disks = Get-FixtureMetric pressure 'Disk free percent'
-        $disks.Count | Should -Be 2
-        ($disks | Where-Object Instance -eq 'D:').Review | Should -Match 'free-space pressure'
-        ($disks | Where-Object Instance -eq 'C:').FirstValue | Should -Be 80
-        ($disks | Where-Object Instance -eq 'C:').LastValue | Should -Be 60
-        ($disks | Where-Object Instance -eq 'C:').Delta | Should -Be -20
-    }
+    Context 'Optional cost scenario' {
+        It 'matches the PowerShell reference arithmetic and states what it excludes' {
+            $reference = Get-DemoOperationalScenario -MonthlyBaseline 1000 -EligibleSharePercent 60 -WeeklyHoursOff 108
+            $text = { param($rows, $label) @($rows | Where-Object Label -eq $label)[0] }
+            (& $text $scenario 'Illustrative reduction').Value | Should -Be ([math]::Round($reference.IllustrativeReduction, 2).ToString([cultureinfo]::InvariantCulture))
+            (& $text $scenario 'Proposed hours off per week').Value | Should -Be '108 of 168'
+            (& $text $scenario 'Unchanged by the scenario').Value | Should -Be ([math]::Round($reference.FixedBaseline, 2).ToString([cultureinfo]::InvariantCulture))
+            (& $text $scenario 'Illustrative reduction').Note | Should -Match 'not billing'
+        }
 
-    It 'retains a low-CPU conversation only for adequate fresh evidence, never a sizing instruction' {
-        (Get-FixtureMetric low 'CPU percent').Review | Should -Match 'conversation only.*no sizing'
-    }
-
-    It 'does not treat invalid values or out-of-scope identities as capacity evidence' {
-        (Get-FixtureMetric invalid 'CPU percent').Mean | Should -BeNullOrEmpty
-        (Get-FixtureMetric invalid 'CPU percent').Evidence | Should -Match 'Invalid samples'
-        @($rows | Where-Object ResourceId -eq $ids.foreign).Count | Should -Be 0
+        It 'offers no scenario for a guest and stays unconfigured without inputs' {
+            (@($guestScenario | Where-Object Label -eq 'Illustrative reduction')[0]).Value | Should -Be 'not configured'
+            (@($guestScenario | Where-Object Label -eq 'Workload')[0]).Note | Should -Match 'guest'
+            (@($emptyScenario | Where-Object Label -eq 'Illustrative reduction')[0]).Value | Should -Be 'not configured'
+        }
     }
 }

@@ -1,0 +1,17 @@
+// include: candidates, schedule
+// Observed activity by local hour of day (average CPU, shared 0-100 scale). Blank cells are hours with no samples: unknown, not idle.
+let Hourly = Samples
+| where Metric == "CPU percent" and isnotnull(Value)
+| extend Hr = hourofday(TimeGenerated + UtcOffset)
+| summarize H00 = round(avgif(Value, Hr == 0), 0), H01 = round(avgif(Value, Hr == 1), 0), H02 = round(avgif(Value, Hr == 2), 0), H03 = round(avgif(Value, Hr == 3), 0),
+    H04 = round(avgif(Value, Hr == 4), 0), H05 = round(avgif(Value, Hr == 5), 0), H06 = round(avgif(Value, Hr == 6), 0), H07 = round(avgif(Value, Hr == 7), 0),
+    H08 = round(avgif(Value, Hr == 8), 0), H09 = round(avgif(Value, Hr == 9), 0), H10 = round(avgif(Value, Hr == 10), 0), H11 = round(avgif(Value, Hr == 11), 0),
+    H12 = round(avgif(Value, Hr == 12), 0), H13 = round(avgif(Value, Hr == 13), 0), H14 = round(avgif(Value, Hr == 14), 0), H15 = round(avgif(Value, Hr == 15), 0),
+    H16 = round(avgif(Value, Hr == 16), 0), H17 = round(avgif(Value, Hr == 17), 0), H18 = round(avgif(Value, Hr == 18), 0), H19 = round(avgif(Value, Hr == 19), 0),
+    H20 = round(avgif(Value, Hr == 20), 0), H21 = round(avgif(Value, Hr == 21), 0), H22 = round(avgif(Value, Hr == 22), 0), H23 = round(avgif(Value, Hr == 23), 0)
+    by ResourceId;
+Candidates
+| lookup kind=leftouter Hourly on ResourceId
+| sort by (EnvironmentClass == "Non-production (tag)") desc, Machine asc
+| project Machine, Environment = EnvironmentClass, IdleSharePct, ObservedHours = CpuObservedHours,
+    H00, H01, H02, H03, H04, H05, H06, H07, H08, H09, H10, H11, H12, H13, H14, H15, H16, H17, H18, H19, H20, H21, H22, H23

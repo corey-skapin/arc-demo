@@ -1,0 +1,8 @@
+// include: series
+// Selected machine: available memory (MB) per interval (lowest and mean). Gaps stay null.
+Samples
+| where Metric == "Available MB" and isnotnull(Value)
+| lookup kind=inner (Machines | project ResourceId, Machine) on ResourceId
+| where Machine == '{SelectedHost}'
+| make-series Lowest = min(Value) default = real(null), Mean = avg(Value) default = real(null)
+    on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step

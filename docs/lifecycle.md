@@ -424,7 +424,10 @@ VM-path CT reconciliation produced guest provisioning success and CT records for
 all three Linux hosts without restarts. Do not delete stuck Arc extensions or
 change paths incidentally. See the [CT support matrix and CLI examples](https://learn.microsoft.com/azure/azure-change-tracking-inventory/change-tracking-inventory-support-matrix).
 
-Linux VM Insights/Dependency Agent map remains disabled. The optional
+Linux VM Insights/Dependency Agent map remains disabled. Linux memory and disk
+telemetry comes from the four Linux AMA counters in the core DCR (table `Perf`),
+not from VM Insights; see the [workbook reference](operational-workbooks.md#linux-memory-and-disk-counters).
+The optional
 [real SQL workload](sql-engine-workload.md) is separate from Arc SQL: no SQL Server
 enabled by Azure Arc/BPA validation is claimed. Hibernate/Activate retain its
 engine/database and startup configuration without an implicit install/reset.

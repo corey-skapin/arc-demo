@@ -1,0 +1,9 @@
+// include: hosts
+// Declared parent/guest relationships side by side. A guest runs inside its parent, and the parent's own OS counters do not
+// reflect the guest's load (Hyper-V root partition), so each row is evidence about one OS only. Neither is extra capacity; nothing is summed.
+Hosts
+| where Layer in ("parent", "guest")
+| extend Group = iff(Layer == "guest", ParentMachine, Machine), RoleOrder = iff(Layer == "parent", 0, 1)
+| sort by Group asc, RoleOrder asc
+| project Group, Role = Layer, Machine, State = ReportingState, Assessment, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0),
+    MemP95 = round(MemP95, 1), FreePct = round(DiskFreeNowPct, 1), Evidence = EvidenceState, LastSample = HostLastSeen

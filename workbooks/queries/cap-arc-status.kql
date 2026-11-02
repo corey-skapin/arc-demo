@@ -1,0 +1,14 @@
+// Live Arc inventory for the published roster (Resource Graph). Connection state is evidence about the agent, not about telemetry.
+// Filtered like the telemetry views by operating system, environment and application, using each machine's current tags.
+Resources
+| where type =~ "microsoft.hybridcompute/machines"
+| where tolower(id) in (__ROSTER_IDS__)
+| extend Os = iff(tostring(properties.osType) =~ "linux", "Linux", iff(tostring(properties.osType) =~ "windows", "Windows", "Unknown")),
+    EnvironmentTag = case(isnotempty(tostring(tags.env)), tostring(tags.env), isnotempty(tostring(tags.environment)), tostring(tags.environment), "(untagged)"),
+    ApplicationTag = case(isnotempty(tostring(tags.application)), tostring(tags.application), isnotempty(tostring(tags.app)), tostring(tags.app),
+        isnotempty(tostring(tags.workload)), tostring(tags.workload), isnotempty(tostring(tags.role)), tostring(tags.role), "(untagged)")
+| where Os in ({OsFilter}) and EnvironmentTag in ({EnvironmentFilter}) and ApplicationTag in ({ApplicationFilter})
+| project Machine = name, ArcStatus = tostring(properties.status), LastStatusChange = todatetime(properties.lastStatusChange), Os,
+    OsSku = tostring(properties.osSku), Vcpu = toint(properties.detectedProperties.logicalCoreCount),
+    MemoryGb = toint(properties.detectedProperties.totalPhysicalMemoryInGigabytes), AgentVersion = tostring(properties.agentVersion)
+| order by ArcStatus asc, Machine asc

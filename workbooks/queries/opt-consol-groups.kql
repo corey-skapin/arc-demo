@@ -1,0 +1,13 @@
+// include: candidates
+// Consolidation review by application and operating system. Observed peaks are not additive and no placement is implied.
+Candidates
+| where Layer != "guest"
+| summarize Machines = count(), LowUtilisation = countif(UnderState == "Flagged"),
+    LowUtilisationNames = strcat_array(make_list_if(Machine, UnderState == "Flagged", 8), ", "),
+    HighestCpuPeak = round(max(CpuMax), 0), HighestMemP95 = round(max(MemP95), 1) by Application, Os
+| extend Reading = case(
+    LowUtilisation >= 2, "Conversation: similar low-utilisation machines. Dependencies, licensing, peaks and ownership are not assessed here.",
+    LowUtilisation == 1, "One low-utilisation machine: nothing to compare within this group.",
+    "No low-utilisation machine in this group.")
+| sort by LowUtilisation desc, Application asc, Os asc
+| project Application, Os, Machines, LowUtilisation, LowUtilisationNames, HighestCpuPeak, HighestMemP95, Reading
