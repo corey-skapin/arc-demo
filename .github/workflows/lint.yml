@@ -65,6 +65,7 @@ jobs:
             '.\tests\NestedSqlDemoBuild.Tests.ps1'
             '.\tests\SqlEngine.Tests.ps1'
             '.\tests\DemoMedia.Tests.ps1'
+            '.\tests\NestedSqlParentPrepare.Tests.ps1'
           ) -CI
 
   bicep-build:
