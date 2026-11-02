@@ -88,6 +88,39 @@ Describe 'Estate Overview keeps the guided section 1 tiles and honest supporting
     }
 }
 
+Describe 'Compliance patch tiles use real Update Manager data' {
+    BeforeAll {
+        $book = Read-Workbook 'workbooks\nseilaz\Arc_Compliance_Security_Governance_example.json'
+        $scorecard = (Get-WorkbookQuery $book | Where-Object { $_.content.query -match 'FullyPatchedPct' }).content.query
+        $table = (Get-WorkbookQuery $book | Where-Object { $_.content.title -eq 'Arc servers with pending critical or security updates' }).content.query
+    }
+
+    It 'has both the scorecard and the table' {
+        $scorecard | Should -Not -BeNullOrEmpty
+        $table | Should -Not -BeNullOrEmpty
+    }
+
+    It 'reads Update Manager assessments, not a connection-state estimate' {
+        foreach ($query in @($scorecard, $table)) {
+            $query | Should -Match 'patchassessmentresources'
+            $query | Should -Match 'microsoft\.hybridcompute/machines/patchassessmentresults'
+            $query | Should -Not -Match 'HealthScore|EstimatedCritical|daysOffline'
+        }
+    }
+
+    It 'classifies machines identically in the scorecard and the table' {
+        $common = { param($query) ($query -split '\| summarize|\| where PatchState')[0] }
+        (& $common $scorecard) | Should -Be (& $common $table)
+    }
+
+    It 'never reports a failed or unassessed machine as fully patched' {
+        $scorecard | Should -Match "isempty\(AssessmentStatus\), 'Not assessed'"
+        $scorecard | Should -Match "'Assessment failed'"
+        $scorecard | Should -Match "FullyPatched = countif\(PatchState == 'Fully patched'\)"
+        $table | Should -Match "PatchState != 'Fully patched'"
+    }
+}
+
 Describe 'Gallery workbooks open populated' {
     It '<Name> subscription pickers default to all subscriptions' -ForEach $pickerCases {
         $book = Read-Workbook $Path
