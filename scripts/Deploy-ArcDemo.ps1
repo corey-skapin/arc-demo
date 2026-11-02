@@ -1019,6 +1019,8 @@ function Set-WorkbookWorkspaceDefaults {
         [string]$DefaultWorkspaceId
     )
 
+    # Repo JSON carries only the placeholder; pin Log Analytics scope to this deployment's workspace.
+    $SerializedData = $SerializedData.Replace('__WORKSPACE__', $DefaultWorkspaceId)
     $workbook = $SerializedData | ConvertFrom-Json -Depth 100
     foreach ($item in @($workbook.items)) {
         if ($item.type -ne 9 -or -not $item.content -or -not $item.content.parameters) {
@@ -1096,12 +1098,14 @@ function Publish-Workbook {
 $customWb = Join-Path $repoRoot 'workbooks\arc-demo-overview.workbook.json'
 $wbId = Publish-Workbook -FilePath $customWb -DisplayName $workbookTitle
 
+# Asset inventory rebuilt for this lab (queries adapted from the vendored upstream workbook)
+Publish-Workbook -FilePath (Join-Path $repoRoot 'workbooks\arc-asset-inventory.workbook.json') -DisplayName 'Arc — Asset Inventory' | Out-Null
+
 # Nic Seilaz's workbook collection (vendored snapshot)
 $nseilazDir = Join-Path $repoRoot 'workbooks\nseilaz'
 $nseilazSet = @(
     @{ file = 'Arc_Compliance_Security_Governance_example.json'; name = 'Arc — Compliance, Security & Governance' }
     @{ file = 'ArcMachineIntelligenceCenter.json';               name = 'Arc — Machine Intelligence Center' }
-    @{ file = 'Asset_Inventory_Workbook_Example.json';           name = 'Arc — Asset Inventory' }
     @{ file = 'GovernanceComplianceWorkbook_Experiment.json';    name = 'Arc — Governance & Compliance (experimental)' }
     @{ file = 'SQL_Estate_Dashboard.json';                       name = 'Arc — SQL Estate Dashboard' }
 )

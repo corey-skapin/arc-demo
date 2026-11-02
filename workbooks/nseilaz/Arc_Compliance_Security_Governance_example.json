@@ -71,26 +71,6 @@
               "showDefault": false
             },
             "defaultValue": "value::all"
-          },
-          {
-            "id": "p_workspace",
-            "version": "KqlParameterItem/1.0",
-            "name": "LogAnalyticsWorkspace",
-            "type": 5,
-            "label": "📊 Log Analytics Workspace",
-            "isRequired": false,
-            "query": "resources\n| where type =~ 'microsoft.operationalinsights/workspaces'\n| project id, name, resourceGroup, subscriptionId\n| order by name asc",
-            "crossComponentResources": [
-              "value::all"
-            ],
-            "typeSettings": {
-              "resourceTypeFilter": {
-                "microsoft.operationalinsights/workspaces": true
-              },
-              "showDefault": false
-            },
-            "queryType": 1,
-            "resourceType": "microsoft.resourcegraph/resources"
           }
         ]
       }
@@ -460,7 +440,7 @@
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
               "crossComponentResources": [
-                "{LogAnalyticsWorkspace}"
+                "__WORKSPACE__"
               ],
               "visualization": "tiles",
               "tileSettings": {
@@ -489,7 +469,7 @@
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
               "crossComponentResources": [
-                "{LogAnalyticsWorkspace}"
+                "__WORKSPACE__"
               ],
               "visualization": "table",
               "gridSettings": {
@@ -564,7 +544,7 @@
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
               "crossComponentResources": [
-                "{LogAnalyticsWorkspace}"
+                "__WORKSPACE__"
               ],
               "visualization": "table",
               "gridSettings": {

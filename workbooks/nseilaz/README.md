@@ -27,6 +27,12 @@ The deployed copies differ from upstream in small query-text and default-value
 ways. Re-apply or re-check them after refreshing the snapshot below, or the
 refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
 
+- Asset Inventory is no longer deployed from this folder. It is rebuilt in
+  `workbooks/arc-asset-inventory.workbook.json` (queries adapted from the upstream file, attribution
+  kept in its header); the upstream file stays here unchanged as the attribution snapshot.
+- Log Analytics tiles are pinned to this deployment's workspace through the `__WORKSPACE__` placeholder that
+  Phase 11 binds at publish. The upstream workspace pickers resolved in the portal to a second workspace
+  without the Change Tracking tables and showed "Failed to resolve table" errors.
 - Subscription pickers (Asset Inventory, Compliance, Governance) default to
   **All** (`value::all`), so tiles populate when the workbook opens.
 - Tag queries (Asset Inventory, Governance) also read the lab's `costcenter`,
