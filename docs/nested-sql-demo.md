@@ -91,7 +91,7 @@ The individual New/Wait/Connect/Engine/Enable/Test scripts support targeted
 continuation through `Invoke-NestedSqlDemoStep.ps1`.
 
 | One-day-credential scratch-build step | Observed time |
-|---|---:|
+| --- | ---: |
 | Create/image/first boot | 10m37s |
 | Wait for unattended setup | 5m12s |
 | Arc connect | 6m16s |
@@ -143,8 +143,8 @@ For **only this pair**, retaining shared networking and all other workloads:
 
 The pair-only helper refuses to park its parent after failed graceful shutdown.
 Use normal Activate if whole-estate parking removed NAT. The live pair proof used
-the retained parent; the consolidated whole-estate wiring has mocked coverage,
-plus the partial live whole-estate rehearsal described below.
+the retained parent; consolidated whole-estate wiring has mocked coverage and
+the dated retained-estate rehearsals below, not a fresh full-estate rebuild proof.
 
 The merged skin/Common **pair-only** path was also exercised live on
 31 October 2026: wake, including Arc Connected, took 311.3 seconds; graceful
@@ -174,11 +174,20 @@ than missing Heartbeats. See [the Linux wait symptom](troubleshooting.md#linux-a
 The Linux command was not resubmitted; no sensor repair or further wake was
 attempted.
 
-Final whole-estate Hibernate passed in 7m42s, with graceful nested guest shutdown;
+That rehearsal's final Hibernate passed in 7m42s, with graceful nested guest shutdown;
 independent Hibernated readiness passed in 52 seconds. Direct reads verified all
 nine VMs deallocated, no active Container App revisions and no NAT gateway or
 public IP. This proves wake, SQL, fresh telemetry and parking, not clean
 completion of default Activate or a fully Ready whole-estate demo.
+
+On 2 November 2026 UTC, default Activate from merged main completed with exit 0
+at 00:12:20, including all eight guest checks, nested guest Arc connection and
+seven newly waking hosts' patch-assessment submissions. No Linux guest-check
+stall occurred on this attempt. All eight selected VMs were running; the excluded
+Jumpstart parent remained parked. Later read-only Active readiness at 00:25:48
+was pending only on the six Linux AMA/Change Tracking extension models reporting
+`Updating`, with fresh Heartbeats. This is not full Ready or completed patch
+assessment proof. The estate was retained awake for separately approved work.
 
 Arc Connected is not SQL readiness. After wake, run the parent-side SQL check:
 
@@ -226,7 +235,7 @@ The two approaches were deliberately raced. Scratch won the repeatable repo path
 Jumpstart remains a working, **manual** alternative, not a second build framework.
 
 | Approach | Needed and broke | Repeatability and time evidence |
-|---|---|---|
+| --- | --- | --- |
 | Scratch, primary | Prepared parent/media/network and onboarding application; corrected Server 2022 BCDBoot, DNS, bootstrap/block-list parsing and extension creation lag | One-day-credential build 42m30s; earlier run: build 45m44s, park 4m03s, wake 2m41s, repark 3m02s; retained identities and fresh SQL inventory |
 | Jumpstart image | Acquire image and accept licence; finish OOBE, set Administrator password and static IP/DNS; private Arc/SQL setup; invalid `Stop-VM -Shutdown` and empty inline Run Command output were fixed | SQL 2019 Developer and Arc SQL inventory worked; setup remained manual. No comparable end-to-end build time was captured |
 

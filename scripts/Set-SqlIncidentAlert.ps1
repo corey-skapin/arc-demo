@@ -28,7 +28,9 @@ if ($WorkspaceResourceId -notmatch ('^' + [regex]::Escape("$scope/providers/Micr
     throw 'Use exact existing workspace and Action Group IDs in this confirmed subscription/Arc group.'
 }
 Initialize-DemoContext $SubscriptionId $TenantId
-$inventory = Get-DemoInventory $NamePrefix
+$nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
+$inventory = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' }) `
+    -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
 Assert-DemoSkinInventory $skin $inventory
 $targets = @($inventory.Machines | Where-Object Name -eq $MachineName)
 if ($targets.Count -ne 1 -or $targets[0].Native -or $targets[0].OsType -ne 'Windows' -or

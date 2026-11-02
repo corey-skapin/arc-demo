@@ -14,10 +14,35 @@ depend on SRE Agent; it is source context only.
 The runtime reads `C:\ProgramData\ArcSreLobApp\appsettings.json`:
 
 | FaultMode | Behavior | Monitor signal |
-|---|---|---|
+| --- | --- | --- |
 | `Healthy` | Writes periodic heartbeat events and text logs. | Event ID `4000` Information |
 | `Degraded` | Writes warning events but keeps running. | Event ID `4200` Warning |
 | `CrashOnProcessing` | Writes an error event and exits with code 42. | Event ID `4100` Error plus stopped scheduled task |
+
+### Approved bounded warning rehearsal
+
+The companion helper's `WarnForDuration -WarningSeconds 120 -ApproveWarningWindow`
+requires explicit approval of the host, duration and alert/notification effects.
+It requires a Healthy running worker, temporarily selects Degraded, restores the
+exact original configuration in `finally`, and verifies the original worker/task
+without restarting or killing it. Interruption or a concurrent change requires
+operator inspection, not an automatic fault retry or reset.
+
+On **2 November 2026 UTC**, one approved window ran from 00:27:32 to 00:29:32;
+configuration restoration was verified at 00:29:34 with the same worker PID.
+Eight real `4200` events arrived in Log Analytics. The existing Sev2 alert fired
+at 00:28:39, its Action Group executed that second, and an automatic Review-only
+SRE thread ran from 00:29:41 to a final narrative at 00:31:10. Independent Status
+confirmed Healthy/running, and a post-restoration `4000` at 00:30:21 was ingested
+at 00:31:00. No task restart, guest repair or second fault was performed.
+
+**Narrative limits:** SRE incorrectly inferred an ongoing warning from the last
+ingested `4200` and overstated how strongly sparse host data ruled out pressure.
+Prefer the actual cleanup/current Status and fresh `4000` evidence. A still-Fired
+alert inside its ten-minute lookback is not proof of a current app fault;
+Acknowledged is not Resolved. Email receipt and a real upstream dependency
+failure were not proven. This is a configuration-driven warning and investigation,
+not an app-to-SQL transaction or automatic remediation.
 
 ## Showing healthy activity in Log Analytics
 
@@ -87,7 +112,7 @@ For the LOB-on-Arc demo:
 ## Relationship to the demo repos
 
 | Repo | Purpose |
-|---|---|
+| --- | --- |
 | `arc-demo` | Deploys Arc + Azure Monitor spine. |
 | `sre-agent` | Deploys SRE Agent layer and T11 helper scripts. |
 | `arc-demo/samples/lob-arc-app` | Provides LOB app source code context for SRE Agent RCA. |
