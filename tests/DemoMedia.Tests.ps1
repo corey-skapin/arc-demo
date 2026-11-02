@@ -11,8 +11,10 @@ BeforeAll {
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
         . ([scriptblock]::Create($definition.Extent.Text))
     }
-    # Windows storage API stand-in so the guest functions run offline on any OS.
-    if (-not (Get-Command Get-Volume -ErrorAction Ignore)) {
+    # Windows storage API stand-in so the guest functions run offline on any OS. Define it whenever the
+    # visible Get-Volume lacks -DriveLetter: SqlEngine.Tests.ps1 leaves such a stub behind in the same run.
+    $existingVolume = Get-Command Get-Volume -ErrorAction Ignore
+    if (-not $existingVolume -or -not $existingVolume.Parameters.ContainsKey('DriveLetter')) {
         function Get-Volume { param($DriveLetter) throw 'Unmocked Get-Volume in offline media tests.' }
     }
     function Get-Sha256Of {
