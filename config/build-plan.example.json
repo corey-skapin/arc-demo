@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "arcSkinPath": "arc-skin.json",
+  "deployerPrincipalId": "",
+  "autoShutdownTime": "",
+  "nestedSqlBuildInputPath": "nested-sql-build.json",
+  "realSql": {
+    "machineName": "win-sql-01",
+    "isoPath": "C:\\DemoMedia\\SQLServer2022-x64-ENU-Dev.iso",
+    "stageMedia": true
+  },
+  "operationalWorkbooks": true,
+  "sre": {
+    "repoPath": "<LOCAL_PATH_OF_THE_SRE_REPO_CLONE>",
+    "skinPath": "sre-skin.json",
+    "grantSwitch": "GrantAzureMonitorAlertAccess"
+  },
+  "presenter": {
+    "windowsMachineName": "win-app-01",
+    "linuxMachineName": "lnx-app-01",
+    "lobMachineName": "win-app-01"
+  }
+}

@@ -22,6 +22,8 @@ Thumbs.db
 !.github/**/*.json
 !bicep/**/parameters*.json
 !config/demo-media.json
+!config/build-plan.example.json
+!config/expected-inventory.json
 
 # PowerShell test output
 TestResults.xml

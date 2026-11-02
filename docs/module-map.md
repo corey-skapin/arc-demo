@@ -54,6 +54,8 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; v2 actual error/wait/session evidence, bounded rollback and independently gated recovery, not synthetic proof or SRE remediation |
 | `scripts/Set-ArcWorkloadAlertDescription.ps1` | Narrow existing-canonical SQL/LOB description-only PATCH/readback; preserves titles, queries, settings, scopes, routes and tags; no DCR, guest or receiver changes |
 | `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1` | Default read-only preview/scoped approved publication; exact Arc roster, optional declared topology, ownership guards, hypothetical one-resource decimal scenario, no lifecycle/collection actions |
+| `scripts/Invoke-ArcDemoBuild.ps1`, `scripts/lib/BuildPlan.psm1`, `config/build-plan.example.json` | Thin ordered wrapper (P0-P11) over the maintained scripts: plan only by default, explicit switches for first spend, licences, SRE parent creation and the opt-in alert-access grant, per-step resume state and evidence in the private folder, no deployment logic of its own |
+| `scripts/Export-ArcDemoInventory.ps1`, `scripts/Test-ArcDemoParity.ps1`, `scripts/lib/EstateSnapshot.psm1`, `config/expected-inventory.json` | Read-only JSON snapshot (denied reads recorded, no secrets) and a parity check of the expected objects and the manifest fleet; exit 0/1 |
 
 All four lifecycle/deployment scripts require explicit subscription/tenant and
 support ShouldProcess. Missing explicitly supplied skins are errors except approved parking with an
@@ -123,7 +125,12 @@ CLI not-found text, clean-subscription and stale-manifest Deploy, Key Vault writ
 retry, allocation guidance and the Remove workspace/history options.
 `tests/FleetVmShape.Tests.ps1` covers the optional per-entry size/security/disk
 schema, the skin-declared nested parent, retained size/disk refusal and per-size
-capacity demand, including the Deploy preview wiring.Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
+capacity demand, including the Deploy preview wiring.
+`tests/BuildPlan.Tests.ps1` covers the build wrapper's config, plan, approvals,
+resume state, runner and presenter handoff with stub scripts;
+`tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded
+denials) and the parity rules, both without Azure.
+Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
 conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile
 and advisory documentation lint. Inspect the Markdown log rather than treating
