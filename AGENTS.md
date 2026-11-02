@@ -55,11 +55,11 @@
 
 ## Activation and readiness
 
-- Verify guests on every activation/retry, including already-running/connected hosts; do not restart already-correct hosts or skip a failed phase.
-- Submit host checks concurrently through existing checked jobs and retain per-host `-ResultPath` evidence outside git.
-- Check Windows Arc `himds` and AMA `MonAgentCore`, not an assumed `AzureMonitorAgent` SCM service; never restart the extension host.
-- Allow the ten-minute AMA startup wait and explicit pending marker; preserve true service/command failures and safe completion-marker checks.
-- Check Linux services individually; remove temporary script files/jobs on success and failure without exposing arbitrary guest output.
+- Verify hosts on every activation/retry, including already-running/connected hosts, in one shared wait under a single global deadline (`-GuestCheckMinutes`, default 12): VM running, Arc `Connected` and, for monitored hosts, a Heartbeat generated after the VM start. Do not skip a failed phase or restart already-correct hosts.
+- Use no Run Command for host checks by default: a queued VM extension update (Defender MDE, AMA, Change Tracking) must not stall the wake. `-GuestChecks WhenStalled|Always` and `-RepairStalledAgents` are explicit opt-ins that share the same deadline. The nested guest start keeps its own concurrent Run Command with a five-minute budget.
+- Treat extension provisioning state (AMA, Change Tracking, MDE) as a time-boxed soft warning, never a gate: `extension/*` readiness rows are `required:false` and the required `heartbeat/*` rows decide. A Failed AMA extension with no Heartbeat is still a failure, not telemetry lag.
+- Leave a host with no Heartbeat at the deadline pending for that host only; a stopped VM or an Arc identity that never connects fails. Retain per-host `-ResultPath` evidence (`method`, `startedAtUtc`, `lastHeartbeatUtc`, `extensionStates`) outside git.
+- When a guest check is opted in, check Windows Arc `himds` and AMA `MonAgentCore` (not an assumed `AzureMonitorAgent` SCM service) and Linux services individually; keep the ten-minute AMA wait, explicit pending marker and safe completion-marker checks; never restart the extension host; remove temporary script files/jobs on success, failure and timeout without exposing arbitrary guest output.
 - Submit default patch assessments only for Arc hosts started/waking on this attempt; do not resubmit on already-active retries.
 - Use `-AssessPatches` only for explicit all-host assessment work; reject it with `-SkipPatchAssessment`, and distinguish submission from completion.
 - Record telemetry-only lag as pending even when activation exits 0; poll read-only readiness to pass before presentation or dependent SRE/incident offers.

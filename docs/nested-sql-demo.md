@@ -132,7 +132,9 @@ requested operation:
 Hibernate requests graceful guest shutdown before parking parent compute.
 Whole-estate parking still attempts all compute if guest shutdown fails, with an
 explicit consistency warning. Activate restores retained outbound NAT before
-compute, starts the guest and waits for Arc; it does not reconnect/reinstall SQL.
+compute, starts the guest (a concurrent Run Command with its own five-minute
+budget) and waits for its Arc connection inside the shared host wait; it does not
+reconnect/reinstall SQL.
 
 For **only this pair**, retaining shared networking and all other workloads:
 

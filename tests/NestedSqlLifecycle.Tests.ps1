@@ -131,8 +131,13 @@ Describe 'Nested SQL wiring in the normal entry points' {
         Mock Invoke-DemoNestedSqlGuest {
             param($Action)
             $fixture.events.Add("guest-$Action")
+            [pscustomobject]@{ Name = 'nested-start'; State = 'Completed' }
         }
         Mock Wait-DemoNestedSqlArcConnected {}
+        Mock Wait-DemoHostsReady {
+            $fixture.nestedGuestRequest = $NestedGuest
+            [pscustomobject]@{ Status = 'pass'; Hosts = @(); NestedGuest = [ordered]@{ status = 'pass'; startCommand = 'pass' }; ElapsedSeconds = 1 }
+        }
         Mock Get-DemoReadinessChecks { New-DemoCheck 'vm/power' $fixture.parent.Id 'deallocated' 'deallocated' 'pass' }
         Mock Get-DemoRemovalChecks { New-DemoCheck 'group' '/fixture' 'absent' 'absent' 'pass' }
         Mock Wait-Until {
@@ -167,10 +172,15 @@ Describe 'Nested SQL wiring in the normal entry points' {
         Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'deallocate' -in $Arguments -or 'delete' -in $Arguments }
     }
 
-    It 'starts the configured guest and waits for its Arc connection' {
+    It 'submits the configured guest start as a concurrent job and hands its Arc connection to the shared wait' {
         & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') @target -SkipValidate -SkipPatchAssessment
         $fixture.events | Should -Be @('guest-Start')
-        Should -Invoke Wait-DemoNestedSqlArcConnected -Times 1 -ParameterFilter { $ArcMachineName -eq 'arc-guest' }
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $AsJob -and $GuestVmName -eq 'sql-guest' -and $Action -eq 'Start' }
+        Should -Invoke Wait-DemoNestedSqlArcConnected -Times 0
+        Should -Invoke Wait-DemoHostsReady -Times 1 -Exactly -ParameterFilter {
+            $NestedGuest.ArcMachineName -eq 'arc-guest' -and $NestedGuest.GuestVmName -eq 'sql-guest' -and
+            $NestedGuest.Parent.Name -eq 'sql-parent' -and $NestedGuest.BudgetMinutes -eq 5
+        }
         Should -Invoke Get-DemoInventory -ParameterFilter { $NestedSqlParentVmName -eq 'sql-parent' }
     }
 

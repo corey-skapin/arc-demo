@@ -4,6 +4,7 @@
 .DESCRIPTION
     JSON schemaVersion 1. Exit 0: required checks pass; 1: fail/error;
     2: eventual-consistency checks remain pending at the bounded deadline.
+    extension/* rows are non-required soft diagnostics; the required heartbeat/* rows decide readiness.
     Never repairs, induces faults, changes context defaults or registers providers.
 #>
 [CmdletBinding()]
@@ -54,6 +55,10 @@ try {
 } catch {
     $status = 'fail'
     $checks = @($checks) + @(New-DemoCheck 'readiness/error' '' 'successful read-only inspection' $null 'fail' -Message $_.Exception.Message)
+}
+$softExtensions = @($checks | Where-Object { $_ -and $_.id -like 'extension/*' -and -not $_.required -and $_.status -ne 'pass' })
+if ($softExtensions.Count) {
+    Write-Warning "$($softExtensions.Count) extension row(s) are not Succeeded. Soft warning only: the required heartbeat rows decide readiness; see docs/troubleshooting.md."
 }
 $result = [ordered]@{
     schemaVersion = 1; workload = 'arc-demo'; checkedAtUtc = [DateTime]::UtcNow.ToString('o')

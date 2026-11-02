@@ -135,18 +135,47 @@ Monitor-supported hosts, Windows VM Insights hosts, and Arc patch-assessment
 targets are distinct sets. Heartbeat compares `_ResourceId`, not computer counts.
 
 Activation restores NAT before starting VMs, starts stopped AKS, and reactivates
-the latest Container App revision only if none is active. It restarts guest
-agents only for newly started/disconnected machines. Already-running/connected
-machines are not restarted, but **every activation verifies guest health**, including
-on a retry after partial failure. Windows Arc checks the `himds` service and,
-for monitored hosts, the `MonAgentCore` process with a ten-minute startup wait.
-Host commands are submitted concurrently through the existing checked jobs.
-Progress identifies the jobs still awaited. A healthy Arc service with AMA not
-yet visible at the deadline records guest `pending` and warns; missing/stopped
-required services, command/transport failures and denied reads still fail.
-It does not assume the Windows client/MSI `AzureMonitorAgent` service exists or
-restart the extension host. Linux checks each required service individually.
+the latest Container App revision only if none is active. Already-running/connected
+machines are never restarted, but **every activation verifies the hosts**, including
+on a retry after partial failure, in one shared wait with a single global deadline
+(`-GuestCheckMinutes`, default 12). Each poll costs the same however many hosts
+there are: one `az connectedmachine list`, **one** Log Analytics query returning
+`max(TimeGenerated)` per `_ResourceId` from `Heartbeat`, and one parallel,
+time-boxed ARM read of extension provisioning states. A host passes when its VM is
+running, its Arc identity is `Connected` and, for a monitored host, a Heartbeat was
+generated **after the VM start time**: the moment activation requested the start, or
+the start of the attempt for a host that was already running or starting. A host
+with no Heartbeat at the deadline is `pending` for that host only. A VM that is no
+longer running, an Arc identity that never connects, or no Heartbeat together with
+a `Failed` AMA extension fails. Expected wake is about 12-15 minutes (VM start 3-4,
+NAT 1-2, Windows Heartbeat up to about 9) rather than 30-45+.
+
+**No Run Command is used for host checks by default.** Run Command queues behind VM
+extension updates (Defender MDE, AMA, Change Tracking), so N blocked Linux VMs used
+to cost up to N x 15 minutes and then fail activation although Heartbeats were
+fresh. Extension provisioning state (AMA, Change Tracking, MDE) is only a
+time-boxed **soft warning**, printed as
+`extension <name> Updating for at least <n> min (not a gate)`, recorded in the
+per-host evidence and shown by readiness as
+non-required `extension/*` rows. The required `heartbeat/*` rows stay the authority.
+`-GuestChecks WhenStalled` runs the guest health script only on a host with no
+Heartbeat after `-StallMinutes` (default 9), and only when its VM agent is Ready and
+no VM extension operation is in flight (it would queue behind it).
+`-GuestChecks Always` runs it on every host. Both are asynchronous jobs that share the global
+deadline, and neither restarts anything unless `-RepairStalledAgents` is also
+supplied. The script checks the Windows Arc `himds` service and, for monitored hosts,
+the `MonAgentCore` process with a ten-minute startup wait; it does not assume the
+Windows client/MSI `AzureMonitorAgent` service exists or restart the extension
+host. Linux checks each required service individually. A guest check that is still
+queued at the deadline leaves the host pending, not failed; missing/stopped
+required services and command failures still fail.
 See [Windows Arc AMA troubleshooting](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc).
+
+The nested SQL guest start keeps its Run Command, but it is submitted as soon as the
+parent VM is running, runs concurrently with the host checks and has its own
+five-minute budget. If it does not finish in time, the wait relies on the guest's
+Arc connection (a warning is recorded). A failed start command, or a guest Arc
+machine that is not `Connected` at the deadline, fails activation.
 
 Unless skipped, activation submits assessments only for Arc hosts started/waking
 on the attempt. Already-active retries still verify guests but **do not resubmit**
@@ -164,13 +193,16 @@ including denied or missing resources, still fail activation.
 validated demo. Activation never changes workload fault flags.
 
 Use `-ResultPath <PRIVATE_EXISTING_DIRECTORY>\activation-attempt.json` to retain
-schema-versioned per-host guest checks, restarted service names, assessment
-submission states, final readiness and failure information outside git. Use a new
+schema-versioned per-host `guestChecks` (`method`, `startedAtUtc`, `lastHeartbeatUtc`,
+`arcStatus`, `extensionStates`, warnings and any restarted service names), the nested
+guest outcome, assessment submission states, final readiness and failure information
+outside git. Use a new
 file per attempt. This report does not include arbitrary guest output or scripts.
-After compute and Arc checks, a single full readiness snapshot is taken.
+After the host wait, a single full readiness snapshot is taken.
 If only required `heartbeat/*` checks are pending, activation exits 0 but records
 `status:pending`, `readiness:pending` and exact readiness rows, with a re-check
-message. Any other required pending/failed check remains a failed activation.
+message; a host left pending by the wait also records `status:pending` even with
+`-SkipValidate`. Any other required pending/failed check remains a failed activation.
 The AI must poll the read-only readiness command to pass before continuing the
 presentation, dependent SRE readiness or the conversational incident offer;
 activation exit 0 alone does not prove telemetry has arrived.
@@ -323,8 +355,9 @@ eventual-consistency checks still pending at the deadline. Consumers correlate
 outside committed source because it contains live environment identifiers.
 
 Checks cover retained groups, core resources/workbook presence, exact VM power,
-Arc connection, supported extension provisioning, DCRA identities, recent
-Heartbeat by expected ARM ID, NAT attachment/presence, AKS power/provisioning and
+Arc connection, recent Heartbeat by expected ARM ID, supported extension
+provisioning (soft, non-required `extension/*` diagnostics), DCRA identities, NAT
+attachment/presence, AKS power/provisioning and
 active Container App revision health. `RunningAtMinScale`/`RunningAtMaxScale` are
 valid healthy revision states. Hibernated checks only compute state and named
 NAT/PIP cost diagnostics, without inspecting retained monitoring.
@@ -332,6 +365,14 @@ Removed checks group/policy/budget absence and emits non-required skipped rows
 for retained tenant/shared/soft-delete exceptions. SchemaVersion 1 and existing
 0/1/2 exit meanings are unchanged: consumers must honor each row's `required`
 flag, not fail merely because any diagnostic row is red.
+Extension rows are `required:false`: ARM provisioning state `Updating` can persist
+for an hour or more behind an outstanding Defender MDE operation while Heartbeats
+are fresh, so a row can read `pending` or `fail` without changing the overall status,
+and the command prints one warning. The message carries the state, how long the
+host's Arc identity has been connected (the ARM extension model has no timestamp)
+and, after 30 minutes, a pointer to [troubleshooting](troubleshooting.md#linux-arm-updating-while-monitoring-guest-handlers-are-healthy).
+A `Failed` AMA extension with no recent Heartbeat makes the **required**
+`heartbeat/*` row `fail` rather than pending: a failed agent is not telemetry lag.
 This is **infrastructure/monitor readiness**, not proof of every guest workload,
 Kubernetes pod, policy compliance result, CT inventory cycle, or completed patch
 assessment or Defender sensor/AV/EDR health. Demonstrate those separately; never
@@ -393,9 +434,16 @@ as full Ready. Drift, denial and partial-failure predicates remain mocked:
 the successful wake does not exercise every failure path or prove fresh
 deployment, patch completion, full removal or rebuild.
 
-The best-effort parking and concurrent cold-start changes have local coverage for
+The shared Heartbeat wait replaced those Run Command host checks afterwards. It has
+mocked coverage and a read-only run against the awake estate (eight fresh Heartbeats
+while six Linux extension models were still `Updating`: all eight hosts passed in
+the first poll with warnings). A full wake timing has not been recorded yet.
+
+The best-effort parking and shared-wait changes have local coverage for
 missing manifests, unlisted VMs, OS/skin drift, foreign NAT, partial deallocation,
-denied/unknown power, a five-minute AMA start, ten-minute pending evidence and
+denied/unknown power, one global deadline with per-host pending/fail outcomes, soft
+extension warnings, opt-in Run Command and its script's five-minute AMA start and
+ten-minute pending evidence, and
 telemetry-only pending versus real service/readiness failures. Native-process
 stderr and explicit-null JSON regressions remain. Mocks cannot prove Azure
 allocation, guest boot timing, RunCommand delivery/truncation, eventual ARM
