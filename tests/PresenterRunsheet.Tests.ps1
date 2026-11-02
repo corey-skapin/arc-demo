@@ -266,6 +266,36 @@ Describe 'Offline private presenter guide' {
         Get-Content $output -Raw | Should -Not -Match '\[SRE presenter guide\]'
     }
 
+    It 'can write absolute file links for a guide that is copied away from the worktree' {
+        $companion = Join-Path $TestDrive 'companion folder\afternoon (guide).md'
+        New-Item -ItemType Directory -Path (Split-Path $companion) -Force | Out-Null
+        Set-Content $companion '# SRE fixture'
+        $context.companionSreRunsheetPath = $companion
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path -AbsoluteLocalLinks | Out-Null
+        $text = Get-Content $output -Raw
+        $match = [regex]::Match($text, '\[SRE presenter guide\]\((file:///[^)]+)\)')
+        $match.Success | Should -BeTrue
+        $match.Groups[1].Value | Should -Match 'companion%20folder/afternoon%20%28guide%29\.md$'
+        [uri]::UnescapeDataString($match.Groups[1].Value) | Should -Match 'afternoon \(guide\)\.md$'
+    }
+
+    It 'writes an absolute link to the saved SQL proof only when asked' {
+        $context.sqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/sql-fixture"
+        $context | ConvertTo-Json | Set-Content $path
+        @{
+            schemaVersion = 1; workload = 'arc-sql-engine'; action = 'Status'; resourceId = $context.sqlMachineResourceId
+            evidence = @{
+                status = 'pass'; instance = 'ARCDEMO'; database = 'ArcDemoOrders'; edition = 'Developer Edition (64-bit)'
+                version = '16.0.1000.6'; orderCount = 7; checkedAtUtc = '2026-10-20T01:02:03Z'; lastCommitUtc = '2026-10-20T01:01:53Z'
+            }
+        } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $local 'sql-engine-status.json')
+        & $generator -ContextPath $path | Out-Null
+        Get-Content $output -Raw | Should -Match '\[Saved engine/query proof\]\(sql-engine-status\.json\)'
+        & $generator -ContextPath $path -AbsoluteLocalLinks | Out-Null
+        Get-Content $output -Raw | Should -Match '\[Saved engine/query proof\]\(file:///.*sql-engine-status\.json\)'
+    }
+
     It 'fails explicitly on a missing context' {
         { & $generator -ContextPath $path } | Should -Throw '*context is missing*'
         Test-Path $output | Should -BeFalse
@@ -389,7 +419,7 @@ Describe 'Presenter runsheet template' {
         $template | Should -Match '(?m)^### 6c\. The SQL and application alerts'
         $template | Should -Match '\{\{SqlIncidentAvailability\}\}'
         $template | Should -Match '\{\{LobIncidentAvailability\}\}'
-        $template | Should -Match 'The incident evidence is in the SRE guide'
+        $template | Should -Match 'incidents are\s+triggered, approved and read in the SRE half'
         $template | Should -Not -Match '(?i)\bprobe\b'
     }
 
@@ -406,13 +436,14 @@ Describe 'Presenter runsheet template' {
     }
 
     It 'keeps the read-only presenter behaviour and the honesty caveats' {
-        $template | Should -Match 'Everything on this page is\s+read-only'
+        $template | Should -Match 'Everything on this Arc path is\s+read-only'
         $template | Should -Match 'do not start machines, run\s+assessments, select \*\*Check for updates\*\*'
         $template | Should -Match 'not a hardened production architecture'
         $template | Should -Match 'Missing data is not zero'
         $template | Should -Match 'never additive hardware capacity'
         $template | Should -Match 'not billing, not realised savings'
         $template | Should -Match 'Update Manager is free for Azure VMs\s+but billed for Arc-enabled servers'
+        $template | Should -Match 'we make no Defender claim\s+for an experimental nested\s+guest'
         $template | Should -Match 'Do not read out the workbook''s patch scorecard'
     }
 

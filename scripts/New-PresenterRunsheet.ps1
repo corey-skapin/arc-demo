@@ -7,7 +7,8 @@
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$ContextPath = (Join-Path $PSScriptRoot '..\.local\demo-context.json')
+    [string]$ContextPath = (Join-Path $PSScriptRoot '..\.local\demo-context.json'),
+    [switch]$AbsoluteLocalLinks
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot
@@ -180,11 +181,12 @@ if ($context.Contains('sqlMachineResourceId')) {
         $committed -gt $checked -or ($checked - $committed).TotalSeconds -gt 120) {
         throw 'Saved SQL evidence is incomplete, unverified or belongs to a different host; no SQL presentation claim.'
     }
-    $values.SqlAvailability = "Prepared real SQL host: **$($values.sqlMachineName)**. [Saved engine/query proof](sql-engine-status.json): SQL Server $($data.version) Developer, instance ARCDEMO, database ArcDemoOrders, $($data.orderCount) rows; last commit $($committed.UtcDateTime.ToString('o')), checked $($checked.UtcDateTime.ToString('o')). This is dated evidence, not a new guest query."
+    $proofLink = if ($AbsoluteLocalLinks) { ([uri]$proofPath).AbsoluteUri -replace '\(', '%28' -replace '\)', '%29' } else { 'sql-engine-status.json' }
+    $values.SqlAvailability = "Prepared real SQL host: **$($values.sqlMachineName)**. [Saved engine/query proof]($proofLink): SQL Server $($data.version) Developer, instance ARCDEMO, database ArcDemoOrders, $($data.orderCount) rows; last commit $($committed.UtcDateTime.ToString('o')), checked $($checked.UtcDateTime.ToString('o')). This is dated evidence, not a new guest query."
     $values.SqlHostFilter = '| where tolower(_ResourceId) == "' + $context.sqlMachineResourceId.ToLowerInvariant() + '"'
 }
 if ($context.Contains('sqlIncidentAlertResourceId')) {
-    $values.SqlIncidentAvailability = "Recorded [SQL incident alert]($($values.sqlIncidentAlertUrl)), **$($values.sqlIncidentAlertName)**. This link is not proof of an alert firing or an SRE investigation; the incident evidence is dated and lives in the SRE guide."
+    $values.SqlIncidentAvailability = "Recorded [SQL incident alert]($($values.sqlIncidentAlertUrl)), **$($values.sqlIncidentAlertName)**. This link is not proof of an alert firing or an SRE investigation; investigations are read in the SRE guide, live or dated."
 }
 if ($context.Contains('lobMachineName')) {
     if ($context.lobMachineName -isnot [string] -or $context.lobMachineName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
@@ -197,9 +199,13 @@ if ($context.Contains('companionSreRunsheetPath')) {
     $companion = [string]$context.companionSreRunsheetPath
     if (-not [IO.Path]::IsPathFullyQualified($companion)) { throw 'companionSreRunsheetPath must be an explicit absolute local path.' }
     if (Test-Path -LiteralPath $companion -PathType Leaf) {
-        $relative = [IO.Path]::GetRelativePath($directory, $companion)
-        if ([IO.Path]::IsPathRooted($relative)) { throw 'Companion guide must be on the same drive to create a relative Markdown link.' }
-        $link = (($relative -split '[\\/]') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+        if ($AbsoluteLocalLinks) {
+            $link = ([uri]$companion).AbsoluteUri -replace '\(', '%28' -replace '\)', '%29'
+        } else {
+            $relative = [IO.Path]::GetRelativePath($directory, $companion)
+            if ([IO.Path]::IsPathRooted($relative)) { throw 'Companion guide must be on the same drive to create a relative Markdown link.' }
+            $link = (($relative -split '[\\/]') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+        }
         $values.CompanionSection = "Continue with the [SRE presenter guide]($link). Arc identity and monitoring are already covered; the SRE repo owns investigation and human Review approval."
     }
 }

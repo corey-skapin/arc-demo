@@ -50,6 +50,9 @@ $context | ConvertTo-Json -Depth 4 | Set-Content .\.local\demo-context.json
 ```
 
 No sign-in, Azure read/write, guest command or health check occurs in generation.
+Pass `-AbsoluteLocalLinks` when the generated guide will be copied away from the
+repository: the companion-guide and saved SQL-proof links then become absolute file
+links instead of paths relative to `.local`.
 Missing/foreign/malformed IDs fail explicitly before replacing the output.
 The context timestamp is printed prominently: old evidence is not current health.
 The generator does not read a credential store, copy a whole deployment manifest

@@ -10,9 +10,10 @@ The preparing operator verifies readiness before handing over this page.
 
 Allow **25-30 minutes** for this Arc path (the scene times below add up to 28; each
 optional beat adds about a minute). The SRE guide it hands over to has its own
-timing. Everything on this page is read-only: do not start machines, run
+timing. Everything on this Arc path is read-only: do not start machines, run
 assessments, select **Check for updates**, change configuration, send test emails,
-approve anything or induce a fault.
+approve anything or induce a fault here. Live faults, fresh investigations and the
+Review approval belong to the SRE half, with their own approvals.
 
 | # | Scene | Minutes | Evidence |
 | --- | --- | --- | --- |
@@ -21,7 +22,7 @@ approve anything or induce a fault.
 | 3 | SQL under the same view: a real workload, then nested Arc SQL | 5 | Live; nested Arc SQL is experimental |
 | 4 | Capacity and headroom (engineer task 2) | 3 | Live |
 | 5 | Optimisation opportunities (engineer task 2) | 3 | Live |
-| 6 | From signal to alert (engineer task 3 starts here) | 5 | Alert rules live; incident evidence recorded |
+| 6 | From signal to alert (engineer task 3 starts here) | 5 | Alert rules live; incidents live or dated in the SRE half |
 | 7 | Operating posture | 2 | Live |
 | 8 | Close and hand over | 2 | Recap |
 
@@ -178,6 +179,10 @@ or support validation."
 - Do not claim Monitoring, best practices assessment or Defender for SQL on this
   instance, and do not open those panes: they are not enabled or verified for it
   in this lab.
+- Subscription-level Defender settings can add the Defender extensions, and a
+  Protected status, to a host independently of this lab. If asked, say: "that is
+  present through subscription-level Defender settings; we make no Defender claim
+  for an experimental nested guest."
 - Inventory can lag; database changes appear in the portal within about an hour.
   Judge freshness by **Last collected time**, not by the guest being up.
 - If the guest or instance shows **Disconnected** or **Expired**, or has no
@@ -292,7 +297,7 @@ inventory. Do not promise complete outage detection or a fixed notification time
 If alert history is populated, show the affected resource and timestamp. A healthy
 lab may have no fired alerts: show the rule, not a manufactured outage.
 
-### 6c. The SQL and application alerts (2 minutes, rules live, incidents recorded)
+### 6c. The SQL and application alerts (2 minutes, rules live)
 
 {{SqlIncidentAvailability}}
 
@@ -303,11 +308,11 @@ Show each rule's scope, condition and severity.
 **Say:** "These alerts use the same action group. When the SQL worker logs a lock
 timeout, or the application worker reports a degraded state, an alert fires and the
 SRE agent starts an investigation automatically. The incidents we walk through next
-are recorded, and dated."
+are the SRE agent's own: any we trigger live are current, earlier ones are dated."
 
-If the alert history or an investigation is absent, state that gap; do not trigger
-anything or manufacture evidence. The incident evidence is in the SRE guide, not
-here.
+If the alert history or an investigation is absent, state that gap and do not
+manufacture evidence. Nothing is triggered from this Arc path: incidents are
+triggered, approved and read in the SRE half.
 
 ## 7. Operating posture (2 minutes, live)
 
@@ -354,7 +359,7 @@ hand-written queries.
 | 3. Open an incident, read the investigation and review a narrowly scoped proposed action | Scene 6, then the SRE guide |
 
 **Say:** "An engineer who can read the evidence is not necessarily an approver.
-Reader and approver are separate roles, and nothing in this walkthrough approves or
+Reader and approver are separate roles, and nothing on this Arc path approves or
 changes anything."
 
 {{CompanionSection}}
@@ -439,21 +444,24 @@ not presenter patter, and nothing here is run during the presentation.
   extension path; patch and Defender extensions may show Creating, Updating or
   Failed while assessments and telemetry still work). Do not delete stuck Arc
   extensions, change AV mode or policy, reinstall or restart anything to tidy it.
-- **SQL incident:** navigation-only rehearsal uses recorded evidence. A fresh run
-  uses only the Arc-owned bounded lock-timeout helper and the exact-host Sev2
-  alert, preserves the orders worker, needs its own approval, runs sequentially
-  with any LOB scenario and is never run as readiness or lifecycle preparation. An
-  alert that remains Fired is not proof of a current block.
-- **LOB incident:** degraded or fault states are operator preparation under
-  separate approval, never a presenter step and never part of navigation-only
-  rehearsal. Starting the application, changing collection or injecting a fault is
-  not done to make a tile or a query green.
+- **SQL incident:** a navigation-only rehearsal uses the dated threads. A fresh run
+  needs a fresh alert route first (SRE repo: `Invoke-SreDemoRoute.ps1 -Action
+  Prepare`, then `-Action Restore` afterwards) or the agent merges the new alert
+  into the earlier thread. It uses only the Arc-owned bounded lock-timeout helper
+  and the exact-host Sev2 alert, preserves the orders worker, needs its own
+  approval, runs sequentially with any LOB scenario and is never run as readiness
+  or lifecycle preparation. An alert that remains Fired is not proof of a current
+  block.
+- **LOB incident:** the degraded state is run in the SRE half under its own
+  approval and the same fresh alert route; it is never a step on this Arc path and
+  never part of navigation-only rehearsal. Starting the application, changing
+  collection or injecting a fault is not done to make a tile or a query green.
 - **Workbooks:** they read existing telemetry only. Do not change collection,
   induce load or activate hosts to populate a tile; history is thin when the lab
   runs on demand, and the page says so.
-- **Reader and approver:** the presenter's access is for reading evidence. Do not
-  approve a Review card or accept a request for additional permissions during this
-  walkthrough.
+- **Reader and approver:** on this Arc path the presenter only reads evidence: do
+  not approve a Review card or accept a request for additional permissions here.
+  The Review approval belongs to the SRE half.
 - **SRE hand-over:** the companion guide owns the investigation, the human Review
   approval and any separate approval to send an investigation or trigger an
   incident. Arc-only activation never prompts for or induces an incident.
