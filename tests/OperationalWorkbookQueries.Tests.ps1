@@ -56,14 +56,21 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $anchor = [datetime]::SpecifyKind($now.Date.AddMinutes([math]::Floor($now.TimeOfDay.TotalMinutes / 5) * 5), [DateTimeKind]::Utc)
         $fixture = $fixture.Replace('__ANCHOR__', $anchor.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [cultureinfo]::InvariantCulture))
 
+        # The grids show a short selection of columns. The test-only wide projections (tests/fixtures/operational-queries) compose with the
+        # production shared fragments from a scratch folder, so the classification logic under test is exactly the shipped logic.
+        $wideRoot = Join-Path ([IO.Path]::GetTempPath()) ('operational-queries-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $wideRoot | Out-Null
+        Copy-Item (Join-Path $repo 'workbooks\queries\operational-*.kql') $wideRoot
+        Copy-Item (Join-Path $PSScriptRoot 'fixtures\operational-queries\*.kql') $wideRoot
+
         function New-FixtureRequest {
-            param([string]$Name, [hashtable]$Parameters = @{}, [string[]]$Only = @())
+            param([string]$Name, [hashtable]$Parameters = @{}, [string[]]$Only = @(), [string]$QueryRoot = '')
             # The fixtures were designed against a 24-hour evidence rule; the workbook default is a deliberately modest 3 hours.
             $effective = @{ MinObservedHours = '24' }
             foreach ($key in $Parameters.Keys) { $effective[$key] = $Parameters[$key] }
             # -Only narrows the roster to named machines so the edge cases (nothing reporting, everything silent) can be exercised.
             $scoped = if ($Only.Count) { @($roster | Where-Object { $_.machine -in $Only }) } else { $roster }
-            $text = Get-DemoOperationalQuery -Name $Name -Roster $scoped
+            $text = if ($QueryRoot) { Get-DemoOperationalQuery -Name $Name -Roster $scoped -QueryRoot $QueryRoot } else { Get-DemoOperationalQuery -Name $Name -Roster $scoped }
             $text = Expand-DemoOperationalQuery -Query $text -Roster $scoped -Parameters $effective -Start $anchor.AddDays(-7) -End $anchor
             $readsSharedSamples = $text.Contains('let PerfRows = Perf')
             $text = $text.Replace('let PerfRows = Perf', 'let PerfRows = FixturePerf').Replace('let InsightsRows = InsightsMetrics', 'let InsightsRows = FixtureInsights')
@@ -79,10 +86,12 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $guestInputs = $scenarioInputs.Clone()
         $guestInputs.SelectedHost = 'guest'
         $requests = [ordered]@{
-            hosts = New-FixtureRequest 'cap-hosts'
+            hosts = New-FixtureRequest 'test-hosts' -QueryRoot $wideRoot
+            hostsGrid = New-FixtureRequest 'cap-hosts'
             volumes = New-FixtureRequest 'cap-disk-volumes'
             memory = New-FixtureRequest 'cap-mem-grid'
             capTiles = New-FixtureRequest 'cap-tiles'
+            capTilesGaps = New-FixtureRequest 'cap-tiles-gaps'
             scopeTiles = New-FixtureRequest 'cap-scope'
             scopeAllAbsent = New-FixtureRequest 'cap-scope' -Only @('missing')
             scopeAllSilent = New-FixtureRequest 'cap-scope' -Only @('parked')
@@ -93,8 +102,11 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             scopeAllStar = New-FixtureRequest 'cap-scope' @{ OsFilter = "'*'"; EnvironmentFilter = "'*'"; ApplicationFilter = "'*'" }
             scopeLinuxOnly = New-FixtureRequest 'cap-scope' @{ OsFilter = "'Linux'" }
             detailTiles = New-FixtureRequest 'cap-detail-tiles' @{ SelectedHost = 'devidle' }
-            candidates = New-FixtureRequest 'opt-candidates'
+            whyLines = New-FixtureRequest 'detail-why' @{ SelectedHost = 'parent' }
+            candidates = New-FixtureRequest 'test-candidates' -QueryRoot $wideRoot
+            candidatesGrid = New-FixtureRequest 'opt-candidates'
             optTiles = New-FixtureRequest 'opt-tiles'
+            optTilesHygiene = New-FixtureRequest 'opt-tiles-hygiene'
             card = New-FixtureRequest 'opt-detail-card' @{ SelectedHost = 'devidle' }
             scenario = New-FixtureRequest 'opt-scenario' $scenarioInputs
             guestScenario = New-FixtureRequest 'opt-scenario' $guestInputs
@@ -125,6 +137,11 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             )
         }
         $hosts = $results.hosts
+        $hostsGrid = $results.hostsGrid
+        $capTilesGaps = $results.capTilesGaps
+        $whyLines = $results.whyLines
+        $candidatesGrid = $results.candidatesGrid
+        $optTilesHygiene = $results.optTilesHygiene
         $volumes = $results.volumes
         $memory = $results.memory
         $capTiles = $results.capTiles
@@ -143,6 +160,10 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $scenario = $results.scenario
         $guestScenario = $results.guestScenario
         $emptyScenario = $results.emptyScenario
+    }
+
+    AfterAll {
+        if ($wideRoot -and (Test-Path -LiteralPath $wideRoot)) { Remove-Item -LiteralPath $wideRoot -Recurse -Force }
     }
 
     Context 'Capacity status and evidence' {
@@ -259,16 +280,19 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             $row.Level | Should -Be 'Aggregate only - not per-volume'
         }
 
-        It 'reports first-to-last change in points, not a forecast, and flags the low volume' {
+        It 'reports free space now and the observed trend, not a forecast, and flags the low volume' {
             $rows = Get-Fixture $volumes 'pressure'
-            ($rows | Where-Object Volume -eq 'C:').FreeNowPct | Should -Be 60
-            ($rows | Where-Object Volume -eq 'C:').ChangePts | Should -Be -20
-            ($rows | Where-Object Volume -eq 'C:').Level | Should -Be 'Within threshold'
+            $cDrive = $rows | Where-Object Volume -eq 'C:'
+            $cDrive.FreeNowPct | Should -Be 60
+            $trend = @($cDrive.FreeTrend | ConvertFrom-Json)
+            $trend[0] | Should -Be 80
+            $trend[-1] | Should -Be 60
+            $cDrive.Level | Should -Be 'Within threshold'
             ($rows | Where-Object Volume -eq 'D:').Level | Should -Be 'Low free space'
         }
 
         It 'keeps each memory basis separate and never blends Windows and Linux counters' {
-            (Get-Fixture $memory 'spike').Basis | Should -Be 'Committed bytes in use (Windows)'
+            (Get-Fixture $memory 'spike').Basis | Should -Be 'Committed bytes (Windows)'
             (Get-Fixture $memory 'devidle').Basis | Should -Be 'Used memory (Linux)'
             (Get-Fixture $memory 'pressure').State | Should -Be 'Sustained pressure'
             (Get-Fixture $memory 'guest').State | Should -Be 'Missing - not zero'
@@ -277,37 +301,32 @@ Describe 'Operational workbook queries executed against deterministic literal ta
     }
 
     Context 'Summary tiles' {
-        It 'answers scope and evidence quality: machines, reporting, freshness, adequate evidence and coverage' {
+        It 'answers scope and evidence quality: machines, reporting, freshness and adequate evidence with its coverage' {
             $tile = { param($label) @($scopeTiles | Where-Object Label -like "*$label*")[0] }
             $total = & $tile 'Machines in scope'
-            $total.Machines | Should -Be $definitions.Count
-            $total.Names | Should -Match '12 independent \+ 1 declared guest \(guest\), counted once and never as extra capacity'
-            # The silent and absent machines are named, and an invalid-only host still counts as reporting (it sent samples).
+            [int]$total.Value | Should -Be $definitions.Count
+            $total.Note | Should -Be '1 guest, counted once'
+            # The silent and absent machines are counted, and an invalid-only host still counts as reporting (it sent samples).
             $reporting = & $tile 'Reporting'
-            $reporting.Label | Should -Match 'Reporting (now|at the window end)'
-            $reporting.Machines | Should -Be 11
-            $reporting.Names | Should -Match '1 silent and 1 never reported'
-            $reporting.Names | Should -Match 'parked'
-            $reporting.Names | Should -Match 'missing'
-            $latest = & $tile 'since the latest sample'
-            $latest.Label | Should -Be '🕒 Minutes since the latest sample'
-            $latest.Machines | Should -Be 0
-            $latest.Names | Should -Match 'newest sample \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC'
+            $reporting.Label | Should -Match 'Reporting (now|at end)'
+            [int]$reporting.Value | Should -Be 11
+            $reporting.Note | Should -Be '2 not reporting'
+            $latest = & $tile 'Latest sample'
+            $latest.Value | Should -Be '0 min'
+            $latest.Note | Should -Be 'since newest sample'
             $adequate = & $tile 'Adequate evidence'
-            $adequate.Machines | Should -Be 7
-            $adequate.Names | Should -Match 'at least 24 observed hours'
-            $limited = & $tile 'Limited evidence'
-            $limited.Machines | Should -Be 5
-            @(($limited.Names -split ' \(thin')[0] -split ', ' | Sort-Object) | Should -Be @('guest', 'invalid', 'parent', 'parked', 'short')
-            ($adequate.Machines + $limited.Machines + 1) | Should -Be $definitions.Count
+            [int]$adequate.Value | Should -Be 7
             # Median of the machines that have CPU samples only: the invalid-only host and the one without telemetry are not counted as zero.
-            $coverage = & $tile 'Window coverage'
-            $coverage.Machines | Should -Be 100
-            $coverage.Names | Should -Match 'parked time, unknown and not idle'
+            $adequate.Note | Should -Be 'median coverage 100%'
+            @($scopeTiles).Count | Should -Be 4
+            # Adequate evidence plus the two gap rows is every machine in scope; the names are in the wide status table.
+            $gaps = @($hosts | Where-Object Assessment -in 'Insufficient evidence', 'No telemetry')
+            ([int]$adequate.Value + $gaps.Count) | Should -Be $definitions.Count
+            @(($hosts | Where-Object Assessment -eq 'Insufficient evidence').Machine | Sort-Object) | Should -Be @('guest', 'invalid', 'parent', 'parked', 'short')
         }
 
         It 'treats an empty list, the literal All marker and * as no filter, and still filters a real selection' {
-            $inScope = { param($rows) @($rows | Where-Object Label -like '*Machines in scope*')[0].Machines }
+            $inScope = { param($rows) [int]@($rows | Where-Object Label -like '*Machines in scope*')[0].Value }
             & $inScope $scopeTiles | Should -Be $definitions.Count
             & $inScope $scopeAllEmpty | Should -Be $definitions.Count
             & $inScope $scopeAllMarker | Should -Be $definitions.Count
@@ -319,32 +338,30 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         It 'tells unknown from parked when nothing is reporting' {
             $tile = { param($rows, $label) @($rows | Where-Object Label -like "*$label*")[0] }
             # Every machine without telemetry: nothing was observed, so there is no last observed data to describe and nothing is zero.
-            (& $tile $scopeAllAbsent 'Reporting').Machines | Should -Be 0
-            (& $tile $scopeAllAbsent 'Reporting').Names | Should -Be 'no machine in scope sent any telemetry in this window: unknown, not zero'
-            (& $tile $scopeAllAbsent 'Latest sample').Machines | Should -BeNullOrEmpty
-            (& $tile $scopeAllAbsent 'Latest sample').Names | Should -Match 'unknown, not zero'
-            (& $tile $scopeAllAbsent 'Window coverage').Machines | Should -BeNullOrEmpty
-            (& $tile $scopeAllAbsent 'Adequate evidence').Machines | Should -Be 0
-            (& $tile $scopeAllAbsent 'Limited evidence').Names | Should -Be 'none'
+            (& $tile $scopeAllAbsent 'Reporting').Value | Should -Be '0'
+            (& $tile $scopeAllAbsent 'Reporting').Note | Should -Be 'no telemetry in window'
+            (& $tile $scopeAllAbsent 'Latest sample').Value | Should -Be 'none'
+            (& $tile $scopeAllAbsent 'Latest sample').Note | Should -Be 'no sample: unknown'
+            (& $tile $scopeAllAbsent 'Adequate evidence').Value | Should -Be '0'
+            (& $tile $scopeAllAbsent 'Adequate evidence').Note | Should -Be 'no CPU samples'
             # Every machine silent: parked, and the figures describe the last observed data (48 hours old, 71% of the window observed).
             $silent = & $tile $scopeAllSilent 'Reporting'
-            $silent.Names | Should -Match 'parked or silent'
-            $silent.Names | Should -Match 'last observed data'
-            $latest = & $tile $scopeAllSilent 'since the latest sample'
-            $latest.Label | Should -Be '🕒 Hours since the latest sample'
-            $latest.Machines | Should -Be 48
-            (& $tile $scopeAllSilent 'Window coverage').Machines | Should -Be 71
+            $silent.Value | Should -Be '0'
+            $silent.Note | Should -Be 'parked or silent'
+            (& $tile $scopeAllSilent 'Latest sample').Value | Should -Be '2 d'
+            (& $tile $scopeAllSilent 'Adequate evidence').Note | Should -Be 'median coverage 71%'
             # A mix: only the silent subset has observed data to describe.
             $mixed = & $tile $scopeMixed 'Reporting'
-            $mixed.Machines | Should -Be 0
-            $mixed.Names | Should -Match '^none within 15 minutes of the window end\. 1 silent \(the figures below describe their last observed data\) and 1 never reported: '
-            $mixed.Names | Should -Match 'parked'
-            $mixed.Names | Should -Match 'missing'
+            $mixed.Value | Should -Be '0'
+            $mixed.Note | Should -Be '2 not reporting'
+            (& $tile $scopeMixed 'Latest sample').Value | Should -Be '2 d'
         }
 
-        It 'counts mutually exclusive capacity assessments that add up to the machines in scope' {
-            $count = { param($label) [int](@($capTiles | Where-Object Label -like "*$label*")[0].Machines) }
+        It 'counts mutually exclusive capacity assessments that add up to the machines in scope, on two rows of tiles' {
+            $count = { param($label) [int](@(@($capTiles) + @($capTilesGaps) | Where-Object Label -like "*$label*")[0].Value) }
             @($capTiles | Where-Object Label -like '*Machines in scope*').Count | Should -Be 0
+            @($capTiles).Count | Should -Be 3
+            @($capTilesGaps).Count | Should -Be 2
             (& $count 'Pressure observed') | Should -Be 1
             (& $count 'Apparent headroom') | Should -Be 5
             (& $count 'Within thresholds') | Should -Be 1
@@ -352,25 +369,56 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             (& $count 'No telemetry') | Should -Be 1
             ((& $count 'Pressure observed') + (& $count 'Apparent headroom') + (& $count 'Within thresholds') + (& $count 'Insufficient evidence') + (& $count 'No telemetry')) |
                 Should -Be $definitions.Count
+            # The tile caption names one machine and a count, so it never overflows the tile.
+            (@($capTiles | Where-Object Label -like '*Apparent headroom*')[0]).Note | Should -Be 'devidle +4'
+            (@($capTilesGaps | Where-Object Label -like '*No telemetry*')[0]).Note | Should -Be 'missing'
         }
 
         It 'adds the application context to the selected-machine tiles' {
-            $context = @($detailTiles | Where-Object Label -eq 'Application context')[0]
+            $context = @($detailTiles | Where-Object Label -eq 'Application')[0]
             $context.Value | Should -Be 'tools / dev'
             $context.Note | Should -Match 'owner erin \| cost centre cc-5 \| Linux'
             @($detailTiles).Count | Should -Be 7
             (@($detailTiles | Where-Object Label -eq 'Evidence')[0]).Value | Should -Be 'Adequate'
+            (@($detailTiles | Where-Object Label -eq 'CPU P95 / peak')[0]).Value | Should -Be '2% / 2%'
         }
 
-        It 'counts optimisation review reasons without implying a saving' {
-            $count = { param($label) [int](@($optTiles | Where-Object Label -like "*$label*")[0].Machines) }
+        It 'counts optimisation review reasons on two rows of tiles without implying a saving' {
+            $count = { param($label) [int](@(@($optTiles) + @($optTilesHygiene) | Where-Object Label -like "*$label*")[0].Value) }
+            @($optTiles).Count | Should -Be 4
+            @($optTilesHygiene).Count | Should -Be 2
             (& $count 'Machines reviewed') | Should -Be $definitions.Count
-            (& $count 'Low observed utilisation') | Should -Be 5
+            (& $count 'Low utilisation') | Should -Be 5
             (& $count 'Scheduling') | Should -Be 1
             (& $count 'Consolidation') | Should -Be 2
             (& $count 'Ownership gaps') | Should -Be 1
             (& $count 'Not reporting') | Should -Be 2
-            ($optTiles | ConvertTo-Json -Depth 4) | Should -Not -Match '(?i)saving'
+            (@($optTilesHygiene | Where-Object Label -like '*Not reporting*')[0]).Note | Should -Be 'missing, parked'
+            (@($optTiles | Where-Object Label -like '*Machines reviewed*')[0]).Note | Should -Be '1 guest, counted once'
+            (@($optTiles | Where-Object Label -like '*Low utilisation*')[0]).Note | Should -Be 'devidle +4'
+            (@($optTiles) + @($optTilesHygiene) | ConvertTo-Json -Depth 4) | Should -Not -Match '(?i)saving'
+        }
+    }
+
+    Context 'Grid columns' {
+        It 'keeps the status grid to the columns an engineer reads first' {
+            @($hostsGrid[0].PSObject.Properties.Name) | Should -Be @('Machine', 'Assessment', 'Evidence', 'CpuP95', 'CpuPeak', 'MemP95', 'FreePct')
+            @($hostsGrid).Count | Should -Be $definitions.Count
+        }
+
+        It 'keeps the candidate grid short and shortens the guest-load gap without losing the full wording elsewhere' {
+            @($candidatesGrid[0].PSObject.Properties.Name) | Should -Be @('Machine', 'Reasons', 'Evidence', 'Needs', 'CpuP95', 'MemP95')
+            (Get-Fixture $candidatesGrid 'parent').Needs | Should -Be 'guest load'
+            (Get-Fixture $candidatesGrid 'lowa').Needs | Should -Be 'nothing further'
+            (Get-Fixture $candidates 'parent').Needs | Should -Be "guest load (not in the parent's own counters)"
+        }
+
+        It 'wraps the explanation of the selected machine into readable lines, never one long cell' {
+            @($whyLines).Count | Should -BeGreaterThan 1
+            $whyLines[0].Assessment | Should -Be 'Insufficient evidence'
+            foreach ($row in $whyLines | Select-Object -Skip 1) { $row.Assessment | Should -BeNullOrEmpty }
+            foreach ($row in $whyLines) { $row.Why.Length | Should -BeLessOrEqual 95 }
+            (($whyLines.Why) -join ' ') | Should -Match "do not reflect the guest's load or physical CPU use"
         }
     }
 
@@ -401,12 +449,23 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         }
 
         It 'explains every flagged reason in the review card and leaves each decision to a person' {
-            $why = (@($card | Where-Object Aspect -eq 'Why')[0]).Detail
+            # The card wraps long sentences into lines and names each aspect on its first line only.
+            $text = {
+                param($aspect)
+                $collect = $false
+                $lines = foreach ($row in $card) {
+                    if ($row.Aspect) { $collect = ($row.Aspect -eq $aspect) }
+                    if ($collect) { $row.Detail }
+                }
+                @($lines) -join ' '
+            }
+            foreach ($row in $card) { $row.Detail.Length | Should -BeLessOrEqual 90 }
+            $why = & $text 'Why'
             $why | Should -Match 'Low utilisation: .*sizing conversation starter'
             $why | Should -Match 'Scheduling: .*proposal for the owner to confirm'
-            $decision = (@($card | Where-Object Aspect -eq 'Next human decision')[0]).Detail
-            $decision | Should -Match 'never stops or starts a machine'
-            (@($card | Where-Object Aspect -eq 'Not done here')[0]).Detail | Should -Match 'No shutdown, resize, schedule, tag change or deletion'
+            (& $text 'Next human decision') | Should -Match 'never stops or starts a machine'
+            (& $text 'Not done here') | Should -Match 'No shutdown, resize, schedule, tag change or deletion'
+            (& $text 'Evidence window') | Should -Not -Match 'UTC'
         }
 
         It 'reports ownership gaps as missing tags, not as proof that nobody owns the machine' {

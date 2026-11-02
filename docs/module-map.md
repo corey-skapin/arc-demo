@@ -55,7 +55,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved media/terms, bounded startup and hash ownership; guarded emitter-only update preserves normal worker functions and migrates the owned checkpoint with rollback/backups; no Arc SQL, automatic reboot/repair or Defender changes |
 | `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; v2 actual error/wait/session evidence, bounded rollback and independently gated recovery, not synthetic proof or SRE remediation |
 | `scripts/Set-ArcWorkloadAlertDescription.ps1` | Narrow existing-canonical SQL/LOB description-only PATCH/readback; preserves titles, queries, settings, scopes, routes and tags; no DCR, guest or receiver changes |
-| `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1` | Default read-only preview, scoped approved publication, separate draft copies and draft-only removal; exact bounded Arc roster, config-driven nested guest from the skin plus optional declared topology, ownership/draft guards, shared-query composer and offline scenario reference; no lifecycle/collection actions |
+| `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1`, `workbooks/operational-layout.json` | Default read-only preview, scoped approved publication, separate draft copies and draft-only removal; exact bounded Arc roster, config-driven nested guest from the skin plus optional declared topology, ownership/draft guards, shared-query composer, the portal layout pass (grid widths and formats, sizes, column charts, tiles) driven by the layout file, and offline scenario reference; no lifecycle/collection actions |
 | `scripts/Invoke-ArcDemoBuild.ps1`, `scripts/lib/BuildPlan.psm1`, `config/build-plan.example.json` | Thin ordered wrapper (P0-P11) over the maintained scripts: plan only by default, explicit switches for first spend, licences, SRE parent creation and the opt-in alert-access grant, per-step resume state and evidence in the private folder, no deployment logic of its own |
 | `scripts/Export-ArcDemoInventory.ps1`, `scripts/Test-ArcDemoParity.ps1`, `scripts/lib/EstateSnapshot.psm1`, `config/expected-inventory.json` | Read-only JSON snapshot (denied reads recorded, no secrets) and a parity check of the expected objects and the manifest fleet; exit 0/1 |
 
@@ -152,7 +152,10 @@ renders with the exact roster, so the same evidence logic serves both workbooks.
 The single presenter template accepts actual published optional links; missing
 or stale telemetry stays explicit and parent/guest rows are never totalled.
 `tests/OperationalWorkbooks.Tests.ps1` covers rendering, scoping, roster/topology,
-draft and scenario behavior; `tests/OperationalWorkbookQueries.Tests.ps1`
+draft and scenario behavior; `tests/OperationalWorkbooksLayout.Tests.ps1` guards the
+portal layout (fr widths, Full-size bounded tables, number and time formats, column
+charts with null gaps, colourless tiles) and the layout pass's refusals;
+`tests/OperationalWorkbookQueries.Tests.ps1`
 explicitly opts into read-only execution of the production item queries against
 deterministic literal-table fixtures (`tests/fixtures/operational-telemetry.kql`),
 not a live fault or ingestion.

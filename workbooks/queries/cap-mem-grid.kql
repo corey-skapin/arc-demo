@@ -8,10 +8,8 @@ let Trends = Samples
 | summarize MemTrend = make_list(round(P95, 1)) by ResourceId;
 Hosts
 | lookup kind=leftouter Trends on ResourceId
-| extend Basis = case(tostring(MemSources) has "Committed", "Committed bytes in use (Windows)", tostring(MemSources) has "Used Memory", "Used memory (Linux)", "not reported"),
+| extend Basis = case(tostring(MemSources) has "Committed", "Committed bytes (Windows)", tostring(MemSources) has "Used Memory", "Used memory (Linux)", "not reported"),
     MemState = case(not(HasMem), "Missing - not zero", MemSustained, "Sustained pressure", MemObservedHours < MinObservedHours, "Thin history", coalesce(MemMax, 0.0) >= MemHigh, "Brief peak", "Within threshold")
 | sort by HasMem desc, MemP95 desc, Machine asc
-| project Machine, Os, Basis, State = MemState, Mean = round(MemMean, 1), P95 = round(MemP95, 1), Peak = round(MemMax, 1),
-    MinutesAtOrAbove = coalesce(MemBreachMinutes, long(0)), LongestRunMin = coalesce(MemLongestHotMin, long(0)),
-    LowestAvailableMB = round(AvailMbMin, 0), AvailableMBMean = round(AvailMbMean, 0), MemTrend,
-    ObservedHours = MemObservedHours, HistoryFrom = MemFirstSeen, Evidence = EvidenceState
+| project Machine, Basis, State = MemState, Mean = round(MemMean, 1), P95 = round(MemP95, 1), Peak = round(MemMax, 1), MemTrend,
+    LowestAvailableMB = round(AvailMbMin, 0)

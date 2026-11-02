@@ -1,5 +1,6 @@
 // include: candidates, schedule
 // Observed activity by local hour of day (average CPU, shared 0-100 scale). Blank cells are hours with no samples: unknown, not idle.
+let Clean = (v:real) { iff(isnan(v), real(null), v) };
 let Hourly = Samples
 | where Metric == "CPU percent" and isnotnull(Value)
 | extend Hr = hourofday(TimeGenerated + UtcOffset)
@@ -13,5 +14,8 @@ let Hourly = Samples
 Candidates
 | lookup kind=leftouter Hourly on ResourceId
 | sort by (EnvironmentClass == "Non-production (tag)") desc, Machine asc
-| project Machine, Environment = EnvironmentClass, IdleSharePct, ObservedHours = CpuObservedHours,
-    H00, H01, H02, H03, H04, H05, H06, H07, H08, H09, H10, H11, H12, H13, H14, H15, H16, H17, H18, H19, H20, H21, H22, H23
+// avgif over an hour with no samples is NaN: turn it into a null so the cell is blank, not the text NaN.
+| project Machine, IdleSharePct,
+    H00 = Clean(H00), H01 = Clean(H01), H02 = Clean(H02), H03 = Clean(H03), H04 = Clean(H04), H05 = Clean(H05), H06 = Clean(H06), H07 = Clean(H07),
+    H08 = Clean(H08), H09 = Clean(H09), H10 = Clean(H10), H11 = Clean(H11), H12 = Clean(H12), H13 = Clean(H13), H14 = Clean(H14), H15 = Clean(H15),
+    H16 = Clean(H16), H17 = Clean(H17), H18 = Clean(H18), H19 = Clean(H19), H20 = Clean(H20), H21 = Clean(H21), H22 = Clean(H22), H23 = Clean(H23)

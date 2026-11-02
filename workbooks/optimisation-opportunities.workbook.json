@@ -268,20 +268,54 @@
             "formatter": 1
           },
           "leftContent": {
-            "columnMatch": "Machines",
+            "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
-            "columnMatch": "Names",
+            "columnMatch": "Note",
             "formatter": 1
           },
           "showBorder": true
         }
       },
       "name": "summary-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "__QUERY:opt-tiles-hygiene__",
+        "size": 3,
+        "title": "Review reasons: ownership and reporting",
+        "noDataMessage": "No machines match the current filters.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "none"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "summary-tiles-hygiene"
     },
     {
       "type": 3,
@@ -305,6 +339,7 @@
           "group": "EvidenceQuality",
           "createOtherGroup": 10,
           "showLegend": true,
+          "showMetrics": false,
           "seriesLabelSettings": [
             {
               "seriesName": "Adequate",
@@ -2131,33 +2166,14 @@
             "content": {
               "version": "KqlItem/1.0",
               "query": "__QUERY:opt-detail-card__",
-              "size": 0,
+              "size": 3,
               "title": "Review card",
               "noDataMessage": "Select a machine in the review candidates table above.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "table",
-              "gridSettings": {
-                "formatters": [
-                  {
-                    "columnMatch": "Aspect",
-                    "formatter": 1,
-                    "formatOptions": {
-                      "customColumnWidthSetting": "24ch"
-                    }
-                  },
-                  {
-                    "columnMatch": "Detail",
-                    "formatter": 1,
-                    "formatOptions": {
-                      "customColumnWidthSetting": "110ch"
-                    }
-                  }
-                ],
-                "filter": false
-              }
+              "visualization": "table"
             },
             "name": "detail-card",
             "conditionalVisibility": {
@@ -2170,25 +2186,40 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "__QUERY:detail-cpu__",
+              "query": "__QUERY:detail-cpu-p95__",
               "size": 1,
-              "title": "CPU: mean, 95th percentile and peak",
+              "title": "CPU: 95th percentile per interval (%)",
               "noDataMessage": "No CPU samples for this machine in the window. Missing is not zero.",
               "noDataMessageStyle": 5,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
-              "chartSettings": {
-                "ySettings": {
-                  "min": 0,
-                  "max": 100
-                },
-                "customThresholdLine": "{CpuHigh}",
-                "customThresholdLineStyle": 1
-              }
+              "visualization": "barchart"
             },
-            "name": "detail-cpu",
+            "name": "detail-cpu-p95",
+            "customWidth": "50",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:detail-cpu-peak__",
+              "size": 1,
+              "title": "CPU: peak per interval (%)",
+              "noDataMessage": "No CPU samples for this machine in the window. Missing is not zero.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart"
+            },
+            "name": "detail-cpu-peak",
+            "customWidth": "50",
             "conditionalVisibility": {
               "parameterName": "SelectedHost",
               "comparison": "isNotEqualTo",
@@ -2201,21 +2232,13 @@
               "version": "KqlItem/1.0",
               "query": "__QUERY:detail-mem-pct__",
               "size": 1,
-              "title": "Memory in use: mean and peak",
+              "title": "Memory in use: 95th percentile per interval (%)",
               "noDataMessage": "No memory samples for this machine in the window.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
-              "chartSettings": {
-                "ySettings": {
-                  "min": 0,
-                  "max": 100
-                },
-                "customThresholdLine": "{MemHigh}",
-                "customThresholdLineStyle": 1
-              }
+              "visualization": "barchart"
             },
             "name": "detail-mem-pct",
             "customWidth": "50",
@@ -2237,15 +2260,7 @@
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
-              "chartSettings": {
-                "ySettings": {
-                  "min": 0,
-                  "max": 100
-                },
-                "customThresholdLine": "{DiskLow}",
-                "customThresholdLineStyle": 1
-              }
+              "visualization": "unstackedbar"
             },
             "name": "detail-disk",
             "customWidth": "50",

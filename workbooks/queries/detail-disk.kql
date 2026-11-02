@@ -4,4 +4,4 @@ Samples
 | where Metric == "Disk free percent" and isnotnull(Value)
 | lookup kind=inner (Summary | where Metric == "Disk free percent" and VolumeState != "No longer reported" | project ResourceId, Instance, Machine) on ResourceId, Instance
 | where Machine == '{SelectedHost}'
-| make-series FreePercent = avg(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Volume = Instance
+| make-series FreePercent = avg(Value) default = real(null) on TimeGenerated from bin(WindowStart, DetailStep) to bin(WindowEnd, DetailStep) + DetailStep step DetailStep by Volume = Instance

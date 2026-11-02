@@ -1,0 +1,8 @@
+// include: candidates
+// Test only, never shipped in a workbook: the shared Candidates table with every column the review-reason assertions read.
+// The candidate grid shows a short selection of these columns; the logic being tested lives in the shared fragment.
+Candidates
+| project Machine, Topology, Os, Application, Environment = EnvironmentClass, State = ReportingState, Evidence = EvidenceState,
+    LowUtilisation = UnderState, Scheduling = SchedulingState, Consolidation = ConsolidationState, Ownership = OwnershipState, NotReporting = StaleState,
+    Reasons = strcat_array(Reasons, ", "), CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0), MemP95 = round(MemP95, 1),
+    FreePct = round(DiskFreeNowPct, 1), IdleSharePct, ObservedHours = CpuObservedHours, Needs = EvidenceGaps, Why

@@ -11,6 +11,5 @@ Hosts
 | extend MinutesAtOrAbove = coalesce(CpuBreachMinutes, long(0)),
     SharePct = iff(coalesce(CpuObservedHours, 0.0) > 0, round(100.0 * coalesce(CpuBreachMinutes, long(0)) / (CpuObservedHours * 60.0), 1), real(null))
 | sort by Rank asc, CpuMax desc, Machine asc
-| project Machine, Os, Pattern, Mean = round(CpuMean, 1), P95 = round(CpuP95, 1), Peak = round(CpuMax, 0), MinutesAtOrAbove,
-    SharePct, LongestRunMin = coalesce(CpuLongestHotMin, long(0)), P95Trend, PeakTrend, ObservedHours = CpuObservedHours,
-    Evidence = EvidenceState, LastSample = HostLastSeen
+| project Machine, Pattern, Mean = round(CpuMean, 1), P95 = round(CpuP95, 1), Peak = round(CpuMax, 1),
+    SharePct, LongestRunMin = coalesce(CpuLongestHotMin, long(0)), P95Trend, PeakTrend

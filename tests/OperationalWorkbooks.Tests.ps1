@@ -187,7 +187,7 @@ Describe 'Scoped operational workbook rendering' {
     It 'shares detail queries between both workbooks' {
         $capacity = (Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
         $optimisation = (Get-DemoOperationalWorkbook -Purpose optimisation -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
-        foreach ($name in 'detail-cpu', 'detail-mem-pct', 'detail-disk', 'detail-evidence') {
+        foreach ($name in 'detail-cpu-p95', 'detail-cpu-peak', 'detail-mem-pct', 'detail-disk', 'detail-evidence') {
             $one = (Get-WorkbookItems $capacity.items | Where-Object name -eq $name).content.query
             $two = (Get-WorkbookItems $optimisation.items | Where-Object name -eq $name).content.query
             $one | Should -Not -BeNullOrEmpty
@@ -231,7 +231,7 @@ Describe 'Scoped operational workbook rendering' {
             'Available', 'Unavailable', 'Degraded', 'Unknown', 'Blank')
         $colours = @('None', 'redBright', 'green', 'yellow', 'orange', 'lightBlue', 'gray', 'turquoise', 'red', 'blueDark', 'blue', 'grayBlue', 'magenta', 'greenDark',
             'purple', 'brown', 'yellowDark', 'amethyst', 'pink', 'orangeDark')
-        $palettes = @('auto', 'blue', 'blueDark', 'green', 'greenRed', 'orange', 'red', 'redGreen', 'redBright', 'turquoise', 'yellow', 'gray', 'purple', 'pink', 'magenta')
+        $palettes = @('auto', 'none', 'blue', 'blueDark', 'green', 'greenRed', 'orange', 'red', 'redGreen', 'redBright', 'turquoise', 'yellow', 'gray', 'purple', 'pink', 'magenta')
         $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
         $formatters = @(Get-JsonNodes $book.items | Where-Object { $_.PSObject.Properties['formatter'] -and $_.PSObject.Properties['formatOptions'] })
         $formatters.Count | Should -BeGreaterThan 20
@@ -252,7 +252,7 @@ Describe 'Scoped operational workbook rendering' {
 
     It 'gives every query item a clear empty state, amber only where absence is itself a finding, for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
         $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
-        $warningAllowed = @('cpu-p95', 'cpu-peak', 'detail-cpu', 'arc-status', 'own-grid')
+        $warningAllowed = @('cpu-p95', 'cpu-peak', 'detail-cpu-p95', 'detail-cpu-peak', 'arc-status', 'own-grid')
         $items = @(Get-WorkbookItems $book.items | Where-Object { $_.type -eq 3 })
         $items.Count | Should -BeGreaterThan 10
         $missing = @($items | Where-Object { -not $_.content.PSObject.Properties['noDataMessage'] } | ForEach-Object name)
@@ -272,7 +272,8 @@ Describe 'Scoped operational workbook rendering' {
         $scope.content.visualization | Should -Be 'tiles'
         $scope.content.query | Should -Match 'datatable\(SortKey:long\)'
         $scope.content.query | Should -Match 'Reporting now'
-        $scope.content.query | Should -Match 'Window coverage'
+        $scope.content.query | Should -Match 'Latest sample'
+        $scope.content.query | Should -Match 'Adequate evidence'
         ($book.items | Where-Object name -eq 'overview-tiles').content.query | Should -Not -MatchExactly 'Machines in scope"'
         $scope.content.query | Should -MatchExactly 'Machines in scope"'
     }

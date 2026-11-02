@@ -437,12 +437,12 @@ Act: plan. Pain point: 3 Capacity planning. Engineer task 2.
 **Show, in this order:**
 
 1. **Scope and evidence quality** (the first row of tiles): **Machines in scope**,
-   **Reporting now** and **Adequate evidence**. Can this view be relied on at all? A
-   parked or thin-history estate reads as a plain message, not an error.
+   **Reporting now**, **Latest sample** and **Adequate evidence**. Can this view be relied
+   on at all? A parked or thin-history estate reads as a plain message, not an error.
 2. **Where should engineers look first?**: the **Estate capacity summary** tiles
-   (**Pressure observed**, **Apparent headroom**, **Insufficient evidence** and **No
-   telemetry**) and the table **Status and evidence quality by machine (select a row)**.
-   Find the SQL host's row.
+   (**Pressure observed**, **Apparent headroom** and **Within thresholds**, then **Insufficient
+   evidence** and **No telemetry** on the second row) and the table **Status and evidence
+   quality by machine (select a row)**. Find the SQL host's row.
 3. The **CPU** tab: **CPU 95th percentile by machine** beside **CPU peak by machine**, then
    **Sustained versus brief: what the numbers say**.
 4. If the nested guest is part of this run, **Declared parent and guest (side by side,
@@ -497,9 +497,9 @@ Engineer task 2, continued.
 **Show, in this order:**
 
 1. **Opportunity summary**: the **Review reasons** tiles (**Machines reviewed**, **Low
-   observed utilisation**, **Scheduling conversation**, **Consolidation conversation**,
-   **Ownership gaps** and **Not reporting**) and **Review reasons by evidence quality**. A
-   machine can carry several reasons; these are conversation starters, not savings.
+   utilisation**, **Scheduling** and **Consolidation**, then **Ownership gaps** and **Not
+   reporting** on the second row) and **Review reasons by evidence quality**. A machine can
+   carry several reasons; these are conversation starters, not savings.
 2. In **Review candidates (select a row for the review detail)**, select one machine, then
    open the **Review detail** tab. The **Review card** explains each reason, the evidence
    window, what is still missing, the published owner tags, the next human decision and

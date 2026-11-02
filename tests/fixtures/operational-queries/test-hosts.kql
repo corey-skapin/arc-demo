@@ -1,0 +1,9 @@
+// include: hosts
+// Test only, never shipped in a workbook: the shared Hosts table with every column the classification assertions read.
+// The grids show a short selection of these columns; the logic being tested lives in the shared fragment, not in the projection.
+Hosts
+| sort by Rank asc, Machine asc
+| project Machine, Topology, Os, Application, Environment, State = ReportingState, Assessment, Evidence = EvidenceState,
+    CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0), Pattern,
+    MemP95 = round(MemP95, 1), MemPeak = round(MemMax, 1), AvailMbMin = round(AvailMbMin, 0), FreePct = round(DiskFreeNowPct, 1), Volume = DiskWorstVolume,
+    History = EvidenceNote, LastSample = HostLastSeen, AgeMinutes, Reason

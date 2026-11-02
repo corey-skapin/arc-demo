@@ -107,7 +107,9 @@ $workbookTarget = @{
 
 Actual publication is a separate approved operation, confirmed by ShouldProcess.
 `-DisplayUtcOffsetHours` sets the default display time zone of the scheduling heat-map
-(the workbook selector can change it).
+(the workbook selector can change it) and the clock stamped on each workbook's roster
+footer, which names the offset (for example *UTC+10:30*) instead of calling a local time UTC.
+Pass the offset the workbook already carries when republishing in place, or its times shift.
 
 Only the selected shared workbook is created/updated by the small Bicep module,
 with an exact-content readback. Stable IDs are derived from workspace/purpose
@@ -124,8 +126,8 @@ for the links to resolve; the portal URL carries the confirmed tenant.
 **Coverage before conclusions:** each table starts with every selected Arc ID,
 including hosts without samples. One canonical source is selected per host and
 metric across the window, source names and observed hours stay visible, missing
-values are null (never zero), invalid samples warn, and charts omit absent
-intervals instead of drawing zeros. The default window is 14 days because the lab
+values are null (never zero), invalid samples warn, and the column charts leave
+absent intervals blank instead of drawing zeros. The default window is 14 days because the lab
 runs sporadically; coverage is observed one-minute bins, not uptime or an agent SLA.
 Evidence is adequate only with the selected observed hours (default 3, an illustrative
 setting for an on-demand lab) and 80% sampling while active, so newly collected Linux memory
@@ -169,7 +171,8 @@ source validation alone. Documented workbook deployment and scope conventions:
 and [workbook resource templates](https://learn.microsoft.com/azure/templates/microsoft.insights/2023-06-01/workbooks).
 
 Local Pester covers rendering, scoping, roster and topology guards, size bounds,
-draft handling and scenario arithmetic. `tests/OperationalWorkbookQueries.Tests.ps1`
+draft handling, scenario arithmetic and the portal layout rules
+(`tests/OperationalWorkbooksLayout.Tests.ps1`). `tests/OperationalWorkbookQueries.Tests.ps1`
 is deliberately opt-in: pass explicit workspace/subscription/tenant via
 `New-PesterContainer -Data` to execute the production item queries read-only
 against deterministic literal tables. It ingests nothing, touches no guests and

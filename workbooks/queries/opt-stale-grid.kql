@@ -4,6 +4,5 @@ Candidates
 | where StaleState == "Flagged"
 | extend SilentFor = iff(isnull(SilentHours), "no sample in window", strcat(tostring(SilentHours), " h"))
 | sort by Machine asc
-| project Machine, Topology, Os, Environment, State = ReportingState, SilentFor, LastSample = HostLastSeen, Evidence = EvidenceState,
-    Reading = iff(AnyTelemetry, "Telemetry stopped. Verify power state and the agent before drawing any conclusion.",
-        "No telemetry in this window. Check Arc state, the DCR association and power state; absence is unknown, not unused.")
+| project Machine, State = ReportingState, SilentFor, LastSample = HostLastSeen,
+    Reading = iff(AnyTelemetry, "Stopped: verify power and agent", "No telemetry: unknown, not unused")
