@@ -444,7 +444,16 @@ Describe 'Presenter runsheet template' {
         $template | Should -Match 'not billing, not realised savings'
         $template | Should -Match 'Update Manager is free for Azure VMs\s+but billed for Arc-enabled servers'
         $template | Should -Match 'we make no Defender claim\s+for an experimental nested\s+guest'
-        $template | Should -Match 'Do not read out the workbook''s patch scorecard'
+    }
+
+    It 'describes the Compliance patch tiles as Update Manager data, not a connection-state estimate' {
+        $template | Should -Not -Match 'heuristic'
+        $template | Should -Not -Match 'Do not read out the workbook'
+        $template | Should -Match 'read the latest Update Manager\s+assessments'
+        $template | Should -Match 'never counted as fully patched'
+        $template | Should -Match '\*\*Assessment failed\*\*\s+or\s+\*\*Not assessed\*\*'
+        $template | Should -Match 'Stand behind that figure for governance'
+        $template | Should -Match 'the \*\*Updates\*\* view above is the per-machine drill-down'
     }
 
     It 'names the agent and the data collection rule without a cost claim' {

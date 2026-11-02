@@ -87,6 +87,11 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             scopeAllAbsent = New-FixtureRequest 'cap-scope' -Only @('missing')
             scopeAllSilent = New-FixtureRequest 'cap-scope' -Only @('parked')
             scopeMixed = New-FixtureRequest 'cap-scope' -Only @('parked', 'missing')
+            # Every way a portal can expand the All choice of the three filter dropdowns; none of them may remove a machine.
+            scopeAllMarker = New-FixtureRequest 'cap-scope' @{ OsFilter = "'value::all'"; EnvironmentFilter = "'value::all'"; ApplicationFilter = "'value::all'" }
+            scopeAllEmpty = New-FixtureRequest 'cap-scope' @{ OsFilter = ''; EnvironmentFilter = ''; ApplicationFilter = '' }
+            scopeAllStar = New-FixtureRequest 'cap-scope' @{ OsFilter = "'*'"; EnvironmentFilter = "'*'"; ApplicationFilter = "'*'" }
+            scopeLinuxOnly = New-FixtureRequest 'cap-scope' @{ OsFilter = "'Linux'" }
             detailTiles = New-FixtureRequest 'cap-detail-tiles' @{ SelectedHost = 'devidle' }
             candidates = New-FixtureRequest 'opt-candidates'
             optTiles = New-FixtureRequest 'opt-tiles'
@@ -127,6 +132,10 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $scopeAllAbsent = $results.scopeAllAbsent
         $scopeAllSilent = $results.scopeAllSilent
         $scopeMixed = $results.scopeMixed
+        $scopeAllMarker = $results.scopeAllMarker
+        $scopeAllEmpty = $results.scopeAllEmpty
+        $scopeAllStar = $results.scopeAllStar
+        $scopeLinuxOnly = $results.scopeLinuxOnly
         $detailTiles = $results.detailTiles
         $candidates = $results.candidates
         $optTiles = $results.optTiles
@@ -295,6 +304,16 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             $coverage = & $tile 'Window coverage'
             $coverage.Machines | Should -Be 100
             $coverage.Names | Should -Match 'parked time, unknown and not idle'
+        }
+
+        It 'treats an empty list, the literal All marker and * as no filter, and still filters a real selection' {
+            $inScope = { param($rows) @($rows | Where-Object Label -like '*Machines in scope*')[0].Machines }
+            & $inScope $scopeTiles | Should -Be $definitions.Count
+            & $inScope $scopeAllEmpty | Should -Be $definitions.Count
+            & $inScope $scopeAllMarker | Should -Be $definitions.Count
+            & $inScope $scopeAllStar | Should -Be $definitions.Count
+            # A real selection still narrows the view: exactly one fixture machine is Linux.
+            & $inScope $scopeLinuxOnly | Should -Be @($definitions.Values | Where-Object { $_.os -eq 'linux' }).Count
         }
 
         It 'tells unknown from parked when nothing is reporting' {

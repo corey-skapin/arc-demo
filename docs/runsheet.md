@@ -336,10 +336,20 @@ assessment, Monitoring and Defender for SQL are not demonstrated on any host.
 {{ComplianceWorkbookAvailability}}
 Show the policy compliance score. This lab is intentionally un-hardened, so a low
 score is the honest baseline rather than a failure of the demo: visibility first,
-then an agreed change. Do not read out the workbook's patch scorecard: it is a
-heuristic from connection state, not an Update Manager assessment, so use the
-**Updates** view above for patching. Do not open the experimental governance
-workbook; some of its tiles are empty by design.
+then an agreed change. Stand behind that figure for governance.
+
+The scorecard and the table **Arc servers with pending critical or security
+updates** read the latest Update Manager assessments, so they agree with the
+**Updates** view above. Windows servers show their pending security, update rollup
+and definition updates. A machine whose assessment failed or has not run says
+**Assessment failed** or **Not assessed** and is never counted as fully patched; in
+this lab that is expected for the Linux hosts (their patch extension is not ready,
+an artifact of simulating on-premises with Azure VMs) and for the experimental
+nested guest. Read the counts as shown: they reflect the last assessment time, not
+live state, and the **Updates** view above is the per-machine drill-down.
+
+Do not open the experimental governance workbook; some of its tiles are empty by
+design.
 
 ## 8. Close and hand over (2 minutes)
 

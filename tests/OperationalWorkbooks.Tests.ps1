@@ -72,6 +72,90 @@ Describe 'Scoped operational workbook rendering' {
         @(Test-WorkbookScoping $book.items @('selectedTab')) | Should -BeNullOrEmpty
     }
 
+    It 'renders every dropdown option list as a flat array of objects the portal can expand for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
+        $dropdowns = @($book.items | Where-Object type -eq 9 | ForEach-Object { $_.content.parameters } | Where-Object { $_.type -eq 2 -and $_.jsonData })
+        $dropdowns.Count | Should -BeGreaterOrEqual 9
+        foreach ($dropdown in $dropdowns) {
+            # An array wrapped in a second array leaves the portal with one unusable option, so All cannot expand to anything.
+            $dropdown.jsonData | Should -Match '^\[\{' -Because "$($dropdown.name) options must be a flat array of objects"
+            $options = $dropdown.jsonData | ConvertFrom-Json -NoEnumerate
+            @($options).Count | Should -BeGreaterThan 0
+            foreach ($option in $options) {
+                $option.value | Should -Not -BeNullOrEmpty
+                $option.label | Should -Not -BeNullOrEmpty
+            }
+        }
+    }
+
+    It 'builds option lists as flat JSON arrays for zero, one and several values' {
+        InModuleScope OperationalWorkbooks {
+            Get-DemoOperationalOptions -Roster @() -Kind os | Should -BeExactly '[]'
+            $linux = [pscustomobject]@{ os = 'Linux'; environment = 'demo'; application = 'app'; machine = 'a' }
+            $windows = [pscustomobject]@{ os = 'Windows'; environment = 'demo'; application = 'sql'; machine = 'b' }
+            Get-DemoOperationalOptions -Roster @($linux) -Kind environment | Should -BeExactly '[{"value":"demo","label":"demo"}]'
+            Get-DemoOperationalOptions -Roster @($windows, $linux) -Kind os | Should -BeExactly '[{"value":"Linux","label":"Linux"},{"value":"Windows","label":"Windows"}]'
+        }
+    }
+
+    It 'treats All as no filter in the three scope dropdowns for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
+        foreach ($name in 'OsFilter', 'EnvironmentFilter', 'ApplicationFilter') {
+            $dropdown = @($book.items | Where-Object type -eq 9 | ForEach-Object { $_.content.parameters } | Where-Object name -eq $name)[0]
+            $dropdown.multiSelect | Should -BeTrue
+            @($dropdown.value) | Should -Be @('value::all')
+            $dropdown.defaultValue | Should -Be 'value::all'
+            $dropdown.typeSettings.additionalResourceOptions | Should -Contain 'value::all'
+            # Official All dropdowns set the special All value (empty: the filter lists then expand to nothing) and a time context.
+            $dropdown.typeSettings.PSObject.Properties.Name | Should -Contain 'selectAllValue'
+            [string]$dropdown.typeSettings.selectAllValue | Should -BeExactly ''
+            $dropdown.timeContext.durationMs | Should -BeGreaterThan 0
+        }
+    }
+
+    It 'guards every Log Analytics filter test against an empty list, the literal All marker and * for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
+        $logQueries = @(Get-WorkbookItems $book.items | Where-Object { $_.type -eq 3 -and $_.content.queryType -eq 0 } | ForEach-Object { $_.content.query })
+        $logQueries.Count | Should -BeGreaterThan 10
+        foreach ($query in $logQueries) {
+            foreach ($filter in 'Os', 'Environment', 'Application') {
+                $query | Should -Match "let ${filter}Filter = dynamic\(\[\{${filter}Filter\}\]\);"
+                $query | Should -Match "let ${filter}All = array_length\(${filter}Filter\) == 0 or set_has_element\(${filter}Filter, 'value::all'\) or set_has_element\(${filter}Filter, '\*'\);"
+                $query | Should -Match "\(${filter}All or ${filter} in \(${filter}Filter\)\)"
+            }
+        }
+    }
+
+    It 'guards the Resource Graph filter tests the same way, inline because Resource Graph has no let, for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
+        $argQueries = @(Get-WorkbookItems $book.items | Where-Object { $_.type -eq 3 -and $_.content.queryType -eq 1 } | ForEach-Object { $_.content.query })
+        $argQueries.Count | Should -BeGreaterThan 0
+        foreach ($query in $argQueries) {
+            $query | Should -Not -Match '(?m)^\s*let\s'
+            foreach ($filter in 'Os', 'Environment', 'Application') {
+                $uses = [regex]::Matches($query, "\{${filter}Filter\}").Count
+                $inline = [regex]::Matches($query, "dynamic\(\[\{${filter}Filter\}\]\)").Count
+                $uses | Should -BeGreaterThan 0
+                $uses | Should -Be $inline -Because "$filter placeholders must only appear inside an inline dynamic list, never in a bare in () that an empty value would break"
+                $query | Should -Match "array_length\(dynamic\(\[\{${filter}Filter\}\]\)\) == 0"
+                $query | Should -Match "set_has_element\(dynamic\(\[\{${filter}Filter\}\]\), 'value::all'\)"
+                $query | Should -Match "set_has_element\(dynamic\(\[\{${filter}Filter\}\]\), '\*'\)"
+            }
+        }
+    }
+
+    It 'expands every way of selecting All into a valid filter list' -ForEach @(
+        @{ Form = 'an empty string'; Value = ''; Expected = 'dynamic\(\[\]\)' }
+        @{ Form = 'the literal All marker'; Value = "'value::all'"; Expected = "dynamic\(\['value::all'\]\)" }
+        @{ Form = 'a star'; Value = "'*'"; Expected = "dynamic\(\['\*'\]\)" }
+    ) {
+        $roster = @(Get-DemoOperationalRoster -WorkspaceResourceId $workspaceId -Machines $machines)
+        $query = Expand-DemoOperationalQuery -Query (Get-DemoOperationalQuery -Name 'cap-scope' -Roster $roster) -Roster $roster `
+            -Parameters @{ OsFilter = $Value; EnvironmentFilter = $Value; ApplicationFilter = $Value }
+        foreach ($filter in 'Os', 'Environment', 'Application') { $query | Should -Match "let ${filter}Filter = $Expected;" }
+        $query | Should -Not -Match '\{[A-Za-z]+Filter\}'
+    }
+
     It 'labels the thresholds illustrative and exposes them as editable parameters for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
         $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
         $names = @($book.items | Where-Object type -eq 9 | ForEach-Object { $_.content.parameters.name })

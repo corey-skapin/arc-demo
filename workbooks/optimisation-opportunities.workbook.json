@@ -77,9 +77,13 @@
               "additionalResourceOptions": [
                 "value::all"
               ],
+              "selectAllValue": "",
               "showDefault": false
             },
             "jsonData": "__OPTIONS:os__",
+            "timeContext": {
+              "durationMs": 86400000
+            },
             "defaultValue": "value::all"
           },
           {
@@ -99,9 +103,13 @@
               "additionalResourceOptions": [
                 "value::all"
               ],
+              "selectAllValue": "",
               "showDefault": false
             },
             "jsonData": "__OPTIONS:environment__",
+            "timeContext": {
+              "durationMs": 86400000
+            },
             "defaultValue": "value::all"
           },
           {
@@ -121,9 +129,13 @@
               "additionalResourceOptions": [
                 "value::all"
               ],
+              "selectAllValue": "",
               "showDefault": false
             },
             "jsonData": "__OPTIONS:application__",
+            "timeContext": {
+              "durationMs": 86400000
+            },
             "defaultValue": "value::all"
           }
         ],
