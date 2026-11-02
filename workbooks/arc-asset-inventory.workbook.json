@@ -190,7 +190,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| project Server = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), Status = iff(tostring(properties.status) == 'Connected', 'Connected', 'Disconnected'), AgentVersion = tostring(properties.agentVersion), LastStatusChange = todatetime(properties.lastStatusChange), Environment, Owner, CostCentre, ResourceGroup = resourceGroup, Location = location\n| order by tolower(Server) asc",
-        "size": 0,
+        "size": 3,
         "title": "Server inventory",
         "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
         "noDataMessageStyle": 4,
@@ -285,6 +285,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "AgentVersion",
@@ -445,7 +446,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| project Server = tostring(split(properties.containerResourceId, '/')[8]), Instance = name, Edition = tostring(properties.edition), Version = tostring(properties.version), License = tostring(properties.licenseType), Defender = tostring(properties.azureDefenderStatus), VCores = toint(properties.vCore), Status = tostring(properties.status), ResourceGroup = resourceGroup\n| order by tolower(Server) asc",
-        "size": 0,
+        "size": 3,
         "title": "SQL Server instance inventory",
         "noDataMessage": "No Arc-enabled SQL Server instances were found. SQL Server is inventoried here only when the Arc SQL Server extension is installed on the host (in this lab, the nested guest).",
         "noDataMessageStyle": 4,
@@ -501,6 +502,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "VCores",
@@ -610,7 +612,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion) by Computer, SoftwareName\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName)\n| where Software !startswith 'Microsoft Defender Antivirus'\n| summarize Versions = dcount(CurrentVersion), Servers = dcount(Computer), VersionList = make_set(CurrentVersion, 6) by Software\n| where Versions > 1\n| order by Versions desc, Software asc\n| take 10\n| project Software, Versions, Servers, VersionList = strcat_array(VersionList, ', ')",
-        "size": 0,
+        "size": 3,
         "title": "Software on more than one version",
         "noDataMessage": "Good news: every software item in the selected time range is on a single version across the estate.",
         "noDataMessageStyle": 4,
@@ -732,7 +734,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "Heartbeat\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(OSType) == '{OsFilter}'\n| summarize LastHeartbeat = max(TimeGenerated) by Server = Computer, OS = OSType\n| extend MinutesAgo = datetime_diff('minute', now(), LastHeartbeat)\n| extend State = iff(MinutesAgo <= 10, 'Reporting', 'Not reporting')\n| project Server, OS, State, LastHeartbeat, MinutesAgo\n| order by tolower(Server) asc",
-        "size": 0,
+        "size": 3,
         "title": "Last heartbeat by server",
         "noDataMessage": "No heartbeats in the selected time range. The lab is probably parked, so no server is reporting.",
         "noDataMessageStyle": 5,
@@ -791,6 +793,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "LastHeartbeat",

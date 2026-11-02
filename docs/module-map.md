@@ -122,9 +122,10 @@ the workbooks it publishes to the deployment workspace, so the repo JSON carries
 `tests/AssetInventoryWorkbook.Tests.ps1`, `tests/ComplianceWorkbook.Tests.ps1`,
 `tests/GovernanceWorkbook.Tests.ps1` and `tests/WorkbookWorkspaceScope.Tests.ps1` guard them, and
 `tests/RebuiltWorkbooksLayout.Tests.ps1` guards what only shows in the portal (grid headers that fit their
-column width, date/time columns in local time, percentage bars printed as percentages, grouped bar charts
-that name their category column). Resource Graph allows at most two tables per query and never the
-security and patch tables together, so the compliance tiles are one query per table pair.
+column width, date/time columns in local time, percentage bars printed as percentages, small grids that fit
+their rows instead of reserving a fixed 330 px band, grouped bar charts that name their category column).
+Resource Graph allows at most two tables per query and never the security and patch tables together, so the
+compliance tiles are one query per table pair.
 
 `tests/MachineIntelligenceWorkbook.Tests.ps1` and `tests/SqlEstateWorkbook.Tests.ps1` guard the two reworked
 engineer workbooks offline: defaults and a no-click open, no workspace picker, a specific message for
