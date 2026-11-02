@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory)][guid]$SubscriptionId,
     [Parameter(Mandatory)][guid]$TenantId,
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z][A-Za-z0-9-]{0,13}[A-Za-z0-9]$')][string]$MachineName,
-    [ValidateSet('Install', 'Status', 'Start', 'Stop', 'Incident', 'ProtectArcSql')][string]$Action = 'Status',
+    [ValidateSet('Install', 'Status', 'Start', 'Stop', 'Incident', 'UpdateIncidentEmitter', 'ProtectArcSql')][string]$Action = 'Status',
     [string]$NamePrefix = 'arc-demo',
     [string]$SkinPath = '',
     [string]$MediaIsoPath,
@@ -114,7 +114,9 @@ if ($lines.Count -ne 1) { throw 'SQL guest operation did not return exactly one 
 $snapshot = $lines[0].Substring('ARC_SQL_RESULT='.Length) | ConvertFrom-Json
 if ($snapshot.status -notin @('pass', 'pending', 'stopped', 'recovered', 'protected') -or $snapshot.instance -ne 'ARCDEMO' -or $snapshot.database -ne 'ArcDemoOrders' -or
     ($Action -eq 'ProtectArcSql' -and ($snapshot.status -ne 'protected' -or $snapshot.blockedType -ne 'Microsoft.AzureData/WindowsAgent.SqlServer' -or $snapshot.monitoringUnchanged -ne $true)) -or
-    ($Action -eq 'Incident' -and ($snapshot.status -ne 'recovered' -or $snapshot.sqlErrorNumber -ne 1222 -or $snapshot.ownedSessionsRemaining -ne 0 -or $snapshot.ordersWorkerHealthy -ne $true))) {
+    ($Action -eq 'Incident' -and ($snapshot.status -ne 'recovered' -or $snapshot.sqlErrorNumber -ne 1222 -or $snapshot.ownedSessionsRemaining -ne 0 -or $snapshot.ordersWorkerHealthy -ne $true)) -or
+    ($Action -eq 'UpdateIncidentEmitter' -and ($snapshot.status -ne 'pass' -or $snapshot.eventSchemaVersion -ne 2 -or
+        $snapshot.checkpointTable -ne 'dbo.OrderProcessingCheckpoint' -or $snapshot.installedScriptSha256 -notmatch '^[A-Fa-f0-9]{64}$'))) {
     throw 'SQL guest query result does not match the expected workload.'
 }
 $result = [pscustomobject]@{
