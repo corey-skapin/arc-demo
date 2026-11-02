@@ -108,9 +108,12 @@ alert scenes and the three engineer tasks). SRE Agent is an optional later layer
 consuming the same alerts, not a prerequisite or replacement.
 `tests/OriginalWorkbooks.Tests.ps1` keeps those six original workbooks valid and
 demo-ready offline: JSON and title checks, subscription-picker defaults, the lab's
-tag names and the Estate Overview tile logic. `workbooks/arc-asset-inventory.workbook.json` is the rebuilt
-asset inventory; its Log Analytics scope is the `__WORKSPACE__` placeholder that Phase 11 binds at publish,
-and `tests/AssetInventoryWorkbook.Tests.ps1` and `tests/WorkbookWorkspaceScope.Tests.ps1` guard it.
+tag names and the Estate Overview tile logic. `workbooks/arc-asset-inventory.workbook.json` and
+`workbooks/arc-compliance.workbook.json` are the rebuilt asset inventory and compliance workbooks; their
+Log Analytics scope is the `__WORKSPACE__` placeholder that Phase 11 binds at publish, and
+`tests/AssetInventoryWorkbook.Tests.ps1`, `tests/ComplianceWorkbook.Tests.ps1` and
+`tests/WorkbookWorkspaceScope.Tests.ps1` guard them (Resource Graph allows at most two tables per query and
+never the security and patch tables together, so the compliance tiles are one query per table pair).
 
 `workbooks/capacity-headroom.workbook.json`,
 `workbooks/optimisation-opportunities.workbook.json` and the shared
