@@ -563,6 +563,20 @@ Describe 'Presenter runsheet template' {
         $presenter | Should -Not -Match 'bounded lock-timeout helper|Test-ArcDemoReadiness|Test-ArcSqlDemoInventory|Invoke-SqlEngineOnArc'
     }
 
+    It 'sets the stage first: workbooks opened from the gallery in their own tabs, and grids that fit the screen' {
+        $stage = @($sections | Where-Object { $_ -match '^## Stage setup' })
+        $stage.Count | Should -Be 1
+        $stageFlat = ($stage[0] -replace '(?m)^\s*>\s?', '') -replace '\s+', ' '
+        $stageFlat | Should -Match 'Open every workbook from the gallery, each in its own tab'
+        $stageFlat | Should -Match 'shows its display name in the title; one opened by a direct link shows its ID'
+        $stageFlat | Should -Match 'The links in this guide are the fallback, not the way in'
+        $stageFlat | Should -Match 'browser zoom to 100 percent \(90 percent on a smaller screen\)'
+        $stageFlat | Should -Match "collapse the portal's left menu, press F11 for full screen and hide the favourites bar"
+        $stage[0] | Should -Match '\{\{workspaceUrl\}\}'
+        $notes | Should -Match 'Workbooks gallery'
+        $template.IndexOf('## Stage setup') | Should -BeLessThan $template.IndexOf('## Opening:')
+    }
+
     It 'no longer carries statements that are wrong for the demo as it is' {
         $template | Should -Not -Match 'not part of this default demo'
         $template | Should -Not -Match 'one-shot probe'

@@ -110,6 +110,19 @@ show, in order; what to say (written to be spoken, about 40 seconds); one wow
 moment; a bridge into the next chapter; and a short watch-outs box for the
 guardrails and the questions you may be asked.
 
+## Stage setup (two minutes, before you start)
+
+- **Open every workbook from the gallery, each in its own tab.** In
+  [the workspace]({{workspaceUrl}}), **{{workspaceName}}**, open **Workbooks**, then open
+  the estate workbook, Machine Intelligence Center, Compliance, SQL Estate, Capacity and
+  Optimisation (and Asset Inventory if you will show it), one tab each, and finish on the
+  estate tab. A workbook opened from the gallery shows its display name in the title; one
+  opened by a direct link shows its ID. The links in this guide are the fallback, not the
+  way in: where a chapter says "Open", switch to that tab.
+- **Make the grids fit.** Set browser zoom to 100 percent (90 percent on a smaller screen),
+  collapse the portal's left menu, press F11 for full screen and hide the favourites bar. A
+  narrow window clips table headers and cells.
+
 ## Opening: the Monday-morning questions (1 minute, clock 0:00 to 1:00)
 
 Act: open. Pain points: all of them. Have [the estate workbook]({{workbookUrl}}) open
@@ -792,7 +805,10 @@ not presenter patter, and nothing here is run during the presentation.
 - **Before handing over:** verify Active readiness independently
   (`Test-ArcDemoReadiness.ps1 -DesiredState Active`, read-only with a bounded
   timeout) and poll until any telemetry-only lag clears to a pass; lag is not a
-  ready handoff. Open every link on this page once. Check the nested guest with
+  ready handoff. Open every link on this page once, and open each workbook from the
+  workspace's Workbooks gallery too: a workbook opened by a direct link shows its ID in
+  the blade title, which is why the stage setup tells the presenter to use the gallery
+  and keep the links as the fallback. Check the nested guest with
   `Test-ArcSqlDemoInventory.ps1` (read-only).
 - **Nested guest:** its lifecycle follows the `nestedSqlGuest` block in the private
   skin. The presenter never starts, stops or repairs it; a guest that is parked or
