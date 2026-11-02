@@ -101,7 +101,8 @@ Fleet paths resolve from repo root. Optional-workload templates may retain
 intentional sample names; lifecycle follows IDs rather than guessing those names.
 
 `workbooks/arc-demo-overview.workbook.json` is a static, self-contained template (no
-deploy-time tokens), so Phase 11 publishes it unchanged; it reads the Arc inventory
+deploy-time tokens), so Phase 11 publishes it as is, apart from pinning its Log Analytics
+items to the deployment workspace; it reads the Arc inventory
 through `arg("")` inside its Log Analytics queries and takes its filter options from
 Resource Graph. It and the vendored `workbooks/nseilaz` collection provide the presenter
 surfaces. `docs/runsheet.md` keeps the
@@ -114,6 +115,12 @@ demo-ready offline: JSON and title checks, subscription-picker defaults, the lab
 tag names and the Compliance patch tiles. `tests/EstateOverviewWorkbook.Tests.ps1`
 covers the Estate Overview's own behaviour (see the
 [workbook reference](operational-workbooks.md#estate-overview-scene-1)).
+`workbooks/arc-asset-inventory.workbook.json` and `workbooks/arc-compliance.workbook.json` are the rebuilt asset
+inventory and compliance workbooks. Phase 11 (`Set-WorkbookWorkspaceDefaults`) pins every Log Analytics item of
+the workbooks it publishes to the deployment workspace, so the repo JSON carries no workspace id, and
+`tests/AssetInventoryWorkbook.Tests.ps1`, `tests/ComplianceWorkbook.Tests.ps1` and
+`tests/WorkbookWorkspaceScope.Tests.ps1` guard them (Resource Graph allows at most two tables per query and
+never the security and patch tables together, so the compliance tiles are one query per table pair).
 
 `workbooks/capacity-headroom.workbook.json`,
 `workbooks/optimisation-opportunities.workbook.json` and the shared

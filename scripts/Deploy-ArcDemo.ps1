@@ -1045,6 +1045,37 @@ function Set-WorkbookWorkspaceDefaults {
         }
     }
 
+    # Pin every Log Analytics query (items and LA-backed parameters, groups included) to the one deployment workspace.
+    # A picker or subscription scope can resolve to a second workspace in the subscription, which has none of these tables.
+    $pinned = [string[]]@($DefaultWorkspaceId)
+    $isWorkspaceQuery = {
+        param($Node)
+        $resourceType = [string]$Node.resourceType
+        $Node.queryType -eq 0 -and (-not $resourceType -or $resourceType -eq 'microsoft.operationalinsights/workspaces')
+    }
+    $pinWorkspaceScope = {
+        param($Items)
+        foreach ($entry in @($Items)) {
+            if (-not $entry.content) { continue }
+            if ($entry.type -eq 12 -and $entry.content.items) {
+                & $pinWorkspaceScope $entry.content.items
+                continue
+            }
+            if ($entry.type -in 3, 9 -and (& $isWorkspaceQuery $entry.content)) {
+                $entry.content | Add-Member -NotePropertyName crossComponentResources -NotePropertyValue $pinned -Force
+            }
+            if ($entry.type -eq 9) {
+                foreach ($parameter in @($entry.content.parameters)) {
+                    if (& $isWorkspaceQuery $parameter) {
+                        $parameter | Add-Member -NotePropertyName crossComponentResources -NotePropertyValue $pinned -Force
+                    }
+                }
+            }
+        }
+    }
+    & $pinWorkspaceScope $workbook.items
+    $workbook | Add-Member -NotePropertyName fallbackResourceIds -NotePropertyValue $pinned -Force
+
     return ($workbook | ConvertTo-Json -Depth 100)
 }
 
@@ -1096,12 +1127,16 @@ function Publish-Workbook {
 $customWb = Join-Path $repoRoot 'workbooks\arc-demo-overview.workbook.json'
 $wbId = Publish-Workbook -FilePath $customWb -DisplayName $workbookTitle
 
+# Asset inventory rebuilt for this lab (queries adapted from the vendored upstream workbook)
+Publish-Workbook -FilePath (Join-Path $repoRoot 'workbooks\arc-asset-inventory.workbook.json') -DisplayName 'Arc — Asset Inventory' | Out-Null
+
+# Compliance, security and governance rebuilt for this lab (queries adapted from the vendored upstream workbook)
+Publish-Workbook -FilePath (Join-Path $repoRoot 'workbooks\arc-compliance.workbook.json') -DisplayName 'Arc — Compliance, Security & Governance' | Out-Null
+
 # Nic Seilaz's workbook collection (vendored snapshot)
 $nseilazDir = Join-Path $repoRoot 'workbooks\nseilaz'
 $nseilazSet = @(
-    @{ file = 'Arc_Compliance_Security_Governance_example.json'; name = 'Arc — Compliance, Security & Governance' }
     @{ file = 'ArcMachineIntelligenceCenter.json';               name = 'Arc — Machine Intelligence Center' }
-    @{ file = 'Asset_Inventory_Workbook_Example.json';           name = 'Arc — Asset Inventory' }
     @{ file = 'GovernanceComplianceWorkbook_Experiment.json';    name = 'Arc — Governance & Compliance (experimental)' }
     @{ file = 'SQL_Estate_Dashboard.json';                       name = 'Arc — SQL Estate Dashboard' }
 )

@@ -1,0 +1,847 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Arc asset inventory\n*Which Azure Arc-enabled servers does this estate have, are they connected and tagged, what SQL Server runs on them and what software is installed? Servers, tags and SQL are live from Azure Resource Graph; software and heartbeats come from Log Analytics. Queries adapted from Nic Seilaz's Arc workbooks (MIT licence).*"
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "4bde3c22-fa1c-58a6-8d11-25e81c302240",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range (software and telemetry)",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 604800000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                }
+              ],
+              "allowCustom": true
+            }
+          },
+          {
+            "id": "e9fe36bb-f572-5f49-9e7e-d302ffdc4a93",
+            "version": "KqlParameterItem/1.0",
+            "name": "OsFilter",
+            "label": "Operating system",
+            "type": 2,
+            "isRequired": true,
+            "jsonData": "[{\"value\": \"*\", \"label\": \"All\"}, {\"value\": \"windows\", \"label\": \"Windows\"}, {\"value\": \"linux\", \"label\": \"Linux\"}]",
+            "value": "*",
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            }
+          }
+        ]
+      },
+      "name": "filters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Estate at a glance\nLive counts of Arc-enabled servers, and how many are sending telemetry right now."
+      },
+      "name": "glance-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend os = tolower(tostring(properties.osType)), status = tostring(properties.status)\n| summarize Servers = count(), Windows = countif(os == 'windows'), Linux = countif(os == 'linux'), Connected = countif(status == 'Connected'), Offline = countif(status != 'Connected'), OfflineNames = strcat_array(make_set_if(name, status != 'Connected', 3), ', ')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Arc servers', 'Value', Servers, 'Note', strcat(tostring(Connected), ' connected')),\n    pack('Order', 2, 'Label', 'Windows', 'Value', Windows, 'Note', 'Windows Server'),\n    pack('Order', 3, 'Label', 'Linux', 'Value', Linux, 'Note', 'Linux servers'),\n    pack('Order', 4, 'Label', 'Disconnected', 'Value', Offline, 'Note', iff(Offline == 0, 'All servers connected', OfflineNames)))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Arc servers",
+        "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "glance-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Heartbeat\n| where TimeGenerated > ago(15m)\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(OSType) == '{OsFilter}'\n| summarize Reporting = dcount(Computer), Newest = max(TimeGenerated)\n| where Reporting > 0\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Reporting now', 'Value', Reporting, 'Note', 'Heartbeat in the last 15 minutes'),\n    pack('Order', 2, 'Label', 'Newest heartbeat', 'Value', toint(datetime_diff('second', now(), Newest)), 'Note', 'seconds ago'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Telemetry",
+        "noDataMessage": "No Azure Monitor Agent heartbeat in the last 15 minutes. The lab is probably parked, so no server is reporting.",
+        "noDataMessageStyle": 5,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "tiles",
+        "timeContextFromParameter": "TimeRange",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "telemetry-tiles"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Servers\nWhat the servers run and how they are connected. Select a column header to sort; use the filter box to search."
+      },
+      "name": "servers-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend OperatingSystem = coalesce(tostring(properties.osSku), tostring(properties.osName))\n| summarize Servers = count() by OperatingSystem\n| order by Servers desc",
+        "size": 1,
+        "title": "Operating system",
+        "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "os-chart",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| summarize Servers = count() by AgentVersion = tostring(properties.agentVersion)\n| order by AgentVersion desc",
+        "size": 1,
+        "title": "Azure Connected Machine agent version",
+        "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "agent-chart",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| project Server = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), Status = iff(tostring(properties.status) == 'Connected', 'Connected', 'Disconnected'), AgentVersion = tostring(properties.agentVersion), LastStatusChange = todatetime(properties.lastStatusChange), Environment, Owner, CostCentre, ResourceGroup = resourceGroup, Location = location\n| order by tolower(Server) asc",
+        "size": 0,
+        "title": "Server inventory",
+        "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Status",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Connected",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disconnected",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "OS",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "40ch"
+              }
+            },
+            {
+              "columnMatch": "AgentVersion",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "Environment",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Owner",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "CostCentre",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "AgentVersion",
+              "label": "Agent version"
+            },
+            {
+              "columnId": "LastStatusChange",
+              "label": "Last status change"
+            },
+            {
+              "columnId": "CostCentre",
+              "label": "Cost centre"
+            },
+            {
+              "columnId": "ResourceGroup",
+              "label": "Resource group"
+            }
+          ]
+        }
+      },
+      "name": "inventory-grid"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Tagging\nShare of Arc servers carrying each required tag (green is good, red is missing). The lab tags are `owner`, `costcenter` and `env`; the queries also accept the `CostCentre`, `Owner` and `Environment` spellings."
+      },
+      "name": "tags-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| summarize Total = count(), HasCostCentre = countif(isnotempty(CostCentre)), HasOwner = countif(isnotempty(Owner)), HasEnvironment = countif(isnotempty(Environment))\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Cost centre tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasCostCentre / Total, 1)), 'Note', strcat(tostring(HasCostCentre), ' of ', tostring(Total), ' servers')),\n    pack('Order', 2, 'Label', 'Owner tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasOwner / Total, 1)), 'Note', strcat(tostring(HasOwner), ' of ', tostring(Total), ' servers')),\n    pack('Order', 3, 'Label', 'Environment tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasEnvironment / Total, 1)), 'Note', strcat(tostring(HasEnvironment), ' of ', tostring(Total), ' servers')))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Tag coverage",
+        "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen"
+            },
+            "numberFormat": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 1
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "tag-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| where isempty(CostCentre) or isempty(Owner) or isempty(Environment)\n| project Server = name, MissingTags = trim_end(', ', strcat(iff(isempty(CostCentre), 'Cost centre, ', ''), iff(isempty(Owner), 'Owner, ', ''), iff(isempty(Environment), 'Environment, ', ''))), OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), ResourceGroup = resourceGroup\n| order by tolower(Server) asc",
+        "size": 0,
+        "title": "Servers missing a required tag",
+        "noDataMessage": "Good news: every Arc server has the cost centre, owner and environment tags, so nothing needs fixing here.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "MissingTags",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "30ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "MissingTags",
+              "label": "Missing tags"
+            },
+            {
+              "columnId": "ResourceGroup",
+              "label": "Resource group"
+            }
+          ]
+        }
+      },
+      "name": "missing-tags"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## SQL Server\nArc-enabled SQL Server instances, their edition and licence. Real SQL Server on a host without the Arc SQL extension is not listed here."
+      },
+      "name": "sql-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend version = tostring(properties.version), defender = tostring(properties.azureDefenderStatus), vcores = toint(properties.vCore)\n| summarize Instances = count(), Protected = countif(defender =~ 'Protected'), VCores = sum(vcores), Unsupported = countif(version has_any ('2008', '2012', '2014') or version startswith '10.' or version startswith '11.' or version startswith '12.')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'SQL instances', 'Value', Instances, 'Note', 'Arc-enabled SQL Server'),\n    pack('Order', 2, 'Label', 'Defender protected', 'Value', Protected, 'Note', iff(Instances == 1, 'of 1 instance', strcat('of ', tostring(Instances), ' instances'))),\n    pack('Order', 3, 'Label', 'Total vCores', 'Value', VCores, 'Note', 'across the instances'),\n    pack('Order', 4, 'Label', 'Unsupported', 'Value', Unsupported, 'Note', 'SQL Server 2014 or older'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "SQL Server instances",
+        "noDataMessage": "No Arc-enabled SQL Server instances were found. SQL Server is inventoried here only when the Arc SQL Server extension is installed on the host (in this lab, the nested guest).",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "sql-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| summarize Instances = count() by Edition = tostring(properties.edition)\n| order by Instances desc",
+        "size": 1,
+        "title": "Edition",
+        "noDataMessage": "No Arc-enabled SQL Server instances were found. SQL Server is inventoried here only when the Arc SQL Server extension is installed on the host (in this lab, the nested guest).",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "piechart"
+      },
+      "name": "sql-edition",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend License = case(tostring(properties.licenseType) =~ 'PAYG', 'Pay-as-you-go', tostring(properties.licenseType) =~ 'Paid', 'Perpetual licence', tostring(properties.licenseType) =~ 'LicenseOnly', 'Azure Hybrid Benefit', tostring(properties.licenseType) =~ 'Free', 'Free (Developer or Express)', 'Not reported')\n| summarize Instances = count() by License\n| order by Instances desc",
+        "size": 1,
+        "title": "Licence type",
+        "noDataMessage": "No Arc-enabled SQL Server instances were found. SQL Server is inventoried here only when the Arc SQL Server extension is installed on the host (in this lab, the nested guest).",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "piechart"
+      },
+      "name": "sql-license",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| project Server = tostring(split(properties.containerResourceId, '/')[8]), Instance = name, Edition = tostring(properties.edition), Version = tostring(properties.version), License = tostring(properties.licenseType), Defender = tostring(properties.azureDefenderStatus), VCores = toint(properties.vCore), Status = tostring(properties.status), ResourceGroup = resourceGroup\n| order by tolower(Server) asc",
+        "size": 0,
+        "title": "SQL Server instance inventory",
+        "noDataMessage": "No Arc-enabled SQL Server instances were found. SQL Server is inventoried here only when the Arc SQL Server extension is installed on the host (in this lab, the nested guest).",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Version",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "Status",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Connected",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disconnected",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "14ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "VCores",
+              "label": "vCores"
+            },
+            {
+              "columnId": "ResourceGroup",
+              "label": "Resource group"
+            }
+          ]
+        }
+      },
+      "name": "sql-grid"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Software\nInstalled software from Change Tracking and Inventory (Windows applications and Linux packages) over the selected time range. Servers without the Azure Monitor Agent, such as the nested SQL guest, are not included."
+      },
+      "name": "software-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion, Publisher) by Computer, SoftwareName\n| summarize Servers = dcount(Computer), Versions = dcount(CurrentVersion) by SoftwareName, Publisher\n| order by Servers desc, SoftwareName asc\n| take 15\n| project Software = SoftwareName, Publisher, Servers, Versions",
+        "size": 0,
+        "title": "Most widely installed software",
+        "noDataMessage": "No software inventory in the selected time range. Change Tracking and Inventory reports software only from Arc servers running the Azure Monitor Agent, and a parked lab reports nothing.",
+        "noDataMessageStyle": 4,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Software",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "46ch"
+              }
+            },
+            {
+              "columnMatch": "Publisher",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "30ch"
+              }
+            },
+            {
+              "columnMatch": "Servers",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue",
+                "min": 0,
+                "customColumnWidthSetting": "12ch"
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "software-top"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| where isnotempty(Publisher)\n| summarize Installs = dcount(strcat(Computer, '|', SoftwareName)), Servers = dcount(Computer), Products = dcount(SoftwareName) by Publisher\n| top 10 by Installs desc\n| project Publisher, Products, Installs, Servers",
+        "size": 0,
+        "title": "Software by publisher",
+        "noDataMessage": "No software inventory in the selected time range. Change Tracking and Inventory reports software only from Arc servers running the Azure Monitor Agent, and a parked lab reports nothing.",
+        "noDataMessageStyle": 4,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Publisher",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "36ch"
+              }
+            },
+            {
+              "columnMatch": "Installs",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue",
+                "min": 0,
+                "customColumnWidthSetting": "12ch"
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "software-publishers"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion) by Computer, SoftwareName\n| summarize Versions = dcount(CurrentVersion), Servers = dcount(Computer), VersionList = make_set(CurrentVersion, 6) by SoftwareName\n| where Versions > 1\n| order by Versions desc, SoftwareName asc\n| take 10\n| project Software = SoftwareName, Versions, Servers, VersionList = strcat_array(VersionList, ', ')",
+        "size": 0,
+        "title": "Software on more than one version",
+        "noDataMessage": "Good news: every software item in the selected time range is on a single version across the estate.",
+        "noDataMessageStyle": 4,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Software",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "40ch"
+              }
+            },
+            {
+              "columnMatch": "VersionList",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "60ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "VersionList",
+              "label": "Versions seen"
+            }
+          ]
+        }
+      },
+      "name": "software-sprawl"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and ChangeCategory == 'Added'\n| project Time = TimeGenerated, Server = Computer, Software = SoftwareName, Version = Current\n| order by Time desc\n| take 50",
+        "size": 0,
+        "title": "Software added",
+        "noDataMessage": "No software was added on any server in the selected time range.",
+        "noDataMessageStyle": 4,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Software",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "60ch"
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "software-added"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and ChangeCategory == 'Removed'\n| project Time = TimeGenerated, Server = Computer, Software = SoftwareName, PreviousVersion = Previous\n| order by Time desc\n| take 50",
+        "size": 0,
+        "title": "Software removed",
+        "noDataMessage": "No software was removed from any server in the selected time range.",
+        "noDataMessageStyle": 4,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Software",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "60ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "PreviousVersion",
+              "label": "Previous version"
+            }
+          ]
+        }
+      },
+      "name": "software-removed"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Telemetry coverage\nWhen each server last sent an Azure Monitor Agent heartbeat. An Arc server missing here is connected to Azure but not sending telemetry (the nested SQL guest has no Azure Monitor Agent)."
+      },
+      "name": "telemetry-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Heartbeat\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(OSType) == '{OsFilter}'\n| summarize LastHeartbeat = max(TimeGenerated) by Server = Computer, OS = OSType\n| extend MinutesAgo = datetime_diff('minute', now(), LastHeartbeat)\n| extend State = iff(MinutesAgo <= 10, 'Reporting', 'Not reporting')\n| project Server, OS, State, LastHeartbeat, MinutesAgo\n| order by tolower(Server) asc",
+        "size": 0,
+        "title": "Last heartbeat by server",
+        "noDataMessage": "No heartbeats in the selected time range. The lab is probably parked, so no server is reporting.",
+        "noDataMessageStyle": 5,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "State",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Reporting",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not reporting",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "16ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "LastHeartbeat",
+              "label": "Last heartbeat"
+            },
+            {
+              "columnId": "MinutesAgo",
+              "label": "Minutes ago"
+            }
+          ]
+        }
+      },
+      "name": "heartbeat-grid"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "*Counts are live. **Reporting** means a heartbeat in the last 10 to 15 minutes. Arc servers without the Azure Monitor Agent appear in the inventory, tagging and SQL sections but not in the software or telemetry views.*"
+      },
+      "name": "footer"
+    }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

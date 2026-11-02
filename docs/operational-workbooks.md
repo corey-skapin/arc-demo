@@ -169,7 +169,7 @@ workbook links to the published one, so publish both for the links to resolve.
 The first impression: which Arc machines exist, whether they are connected and sending telemetry, how busy they are,
 what changed and what needs attention. Unlike the two workbooks above it is a **static, self-contained template**
 (`workbooks/arc-demo-overview.workbook.json`, no deploy-time tokens), so `Deploy-ArcDemo.ps1` Phase 11 publishes it as
-is and no roster or rendering step is involved.
+is, apart from pinning its Log Analytics items to the deployment workspace, and no roster or rendering step is involved.
 
 - **Story, top to bottom.** Eight *Estate* tiles (Arc machines, Reporting now, Windows, Linux, SQL instances, Tagged,
   Updates pending, Alerts fired); *Hosts reporting over time*, which reads zero when parked and draws the Arc inventory as

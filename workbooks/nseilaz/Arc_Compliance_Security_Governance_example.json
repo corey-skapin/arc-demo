@@ -71,26 +71,6 @@
               "showDefault": false
             },
             "defaultValue": "value::all"
-          },
-          {
-            "id": "p_workspace",
-            "version": "KqlParameterItem/1.0",
-            "name": "LogAnalyticsWorkspace",
-            "type": 5,
-            "label": "📊 Log Analytics Workspace",
-            "isRequired": false,
-            "query": "resources\n| where type =~ 'microsoft.operationalinsights/workspaces'\n| project id, name, resourceGroup, subscriptionId\n| order by name asc",
-            "crossComponentResources": [
-              "value::all"
-            ],
-            "typeSettings": {
-              "resourceTypeFilter": {
-                "microsoft.operationalinsights/workspaces": true
-              },
-              "showDefault": false
-            },
-            "queryType": 1,
-            "resourceType": "microsoft.resourcegraph/resources"
           }
         ]
       }
@@ -459,9 +439,7 @@
               "size": 3,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "crossComponentResources": [
-                "{LogAnalyticsWorkspace}"
-              ],
+              "crossComponentResources": [],
               "visualization": "tiles",
               "tileSettings": {
                 "titleContent": {
@@ -488,9 +466,7 @@
               "size": 0,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "crossComponentResources": [
-                "{LogAnalyticsWorkspace}"
-              ],
+              "crossComponentResources": [],
               "visualization": "table",
               "gridSettings": {
                 "formatters": [
@@ -563,9 +539,7 @@
               "size": 0,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "crossComponentResources": [
-                "{LogAnalyticsWorkspace}"
-              ],
+              "crossComponentResources": [],
               "visualization": "table",
               "gridSettings": {
                 "formatters": [

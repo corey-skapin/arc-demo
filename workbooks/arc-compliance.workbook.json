@@ -1,0 +1,995 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Arc compliance, security and governance\n*How do the Arc-enabled servers measure up on Azure Policy, Microsoft Defender for Cloud and Azure Update Manager? This lab is deliberately left un-hardened, so low scores are the honest starting point to improve from, not a fault. Policy, Defender and patch data are live from Azure Resource Graph; privileged activity and configuration changes come from Log Analytics. Queries adapted from Nic Seilaz's Arc workbooks (MIT licence).*"
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "4bde3c22-fa1c-58a6-8d11-25e81c302240",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range (security monitoring)",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 2592000000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                }
+              ],
+              "allowCustom": true
+            }
+          }
+        ]
+      },
+      "name": "filters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Posture at a glance\nFour scores, each from a different source. Red is low and green is high; in this un-hardened lab most start low on purpose."
+      },
+      "name": "posture-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| summarize Total = count(), Pass = countif(tostring(properties.complianceState) == 'Compliant')\n| extend k = 1\n| join kind=leftouter (\n    securityresources\n    | where type == 'microsoft.security/securescores'\n    | summarize ScoreNow = max(todouble(properties.score.current)), ScoreMax = max(todouble(properties.score.max))\n    | extend k = 1\n) on k\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Policy compliance', 'Value', iff(Total == 0, 0.0, round(100.0 * Pass / Total, 1)), 'Note', strcat(tostring(Pass), ' of ', tostring(Total), ' checks pass')),\n    pack('Order', 2, 'Label', 'Secure score', 'Value', iff(isnull(ScoreMax) or ScoreMax == 0, 0.0, round(100.0 * ScoreNow / ScoreMax, 1)), 'Note', iff(isnull(ScoreMax), 'not reported yet', strcat(tostring(round(ScoreNow, 1)), ' of ', tostring(toint(ScoreMax)), ' points'))))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Policy and secure score",
+        "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen"
+            },
+            "numberFormat": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 1
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "posture-policy-score",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name in~ ('MDE.Windows', 'MDE.Linux') and tostring(properties.provisioningState) =~ 'Succeeded'\n    | project machineId = tolower(tostring(split(id, '/extensions/')[0])), HasAgent = 1\n) on machineId\n| join kind=leftouter (\n    patchassessmentresources\n    | where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n    | project machineId = tolower(tostring(split(tolower(id), '/patchassessmentresults/')[0])), Status = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical), Security = toint(properties.availablePatchCountByClassification.security)\n) on machineId\n| summarize Servers = count(), Patched = countif(Status =~ 'Succeeded' and Critical == 0 and Security == 0), WithAgent = countif(HasAgent == 1)\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Fully patched', 'Value', iff(Servers == 0, 0.0, round(100.0 * Patched / Servers, 1)), 'Note', strcat(tostring(Patched), ' of ', tostring(Servers), ' servers')),\n    pack('Order', 2, 'Label', 'Defender agent', 'Value', iff(Servers == 0, 0.0, round(100.0 * WithAgent / Servers, 1)), 'Note', strcat('on ', tostring(WithAgent), ' of ', tostring(Servers), ' servers')))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Patching and Defender agent",
+        "noDataMessage": "No Arc-enabled servers were found in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen"
+            },
+            "numberFormat": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 1
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "posture-patch-agent",
+      "customWidth": "50"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Server scorecard\nOne row per Arc server, worst policy compliance first. Findings are unhealthy Defender for Cloud recommendations by severity."
+      },
+      "name": "scorecard-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| extend Server = tolower(tostring(split(tostring(properties.resourceId), '/')[8]))\n| summarize Checks = count(), Failing = countif(tostring(properties.complianceState) == 'NonCompliant') by Server\n| join kind=leftouter (\n    securityresources\n    | where type == 'microsoft.security/assessments' and id has 'microsoft.hybridcompute/machines' and tostring(properties.status.code) == 'Unhealthy'\n    | extend Server = tolower(tostring(split(id, '/')[8])), Display = tostring(split(id, '/')[8]), Severity = tostring(properties.metadata.severity)\n    | summarize High = countif(Severity == 'High'), Medium = countif(Severity == 'Medium'), Low = countif(Severity == 'Low'), Display = take_any(Display) by Server\n) on Server\n| project Server = coalesce(Display, Server), PolicyCompliance = iff(Checks == 0, 0.0, round(100.0 * (Checks - Failing) / Checks, 1)), FailingChecks = Failing, HighFindings = coalesce(High, 0), MediumFindings = coalesce(Medium, 0), LowFindings = coalesce(Low, 0)\n| order by PolicyCompliance asc, Server asc",
+        "size": 0,
+        "title": "Compliance by server",
+        "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "PolicyCompliance",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "min": 0,
+                "customColumnWidthSetting": "20ch",
+                "max": 100
+              }
+            },
+            {
+              "columnMatch": "FailingChecks",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "HighFindings",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": ">",
+                    "thresholdValue": "0",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "Blank",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "MediumFindings",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "LowFindings",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "PolicyCompliance",
+              "label": "Policy compliance %"
+            },
+            {
+              "columnId": "FailingChecks",
+              "label": "Failing checks"
+            },
+            {
+              "columnId": "HighFindings",
+              "label": "High findings"
+            },
+            {
+              "columnId": "MediumFindings",
+              "label": "Medium findings"
+            },
+            {
+              "columnId": "LowFindings",
+              "label": "Low findings"
+            }
+          ]
+        }
+      },
+      "name": "server-scorecard"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Azure Policy\nCompliance of the Arc servers against the initiatives assigned to this subscription: the Microsoft cloud security benchmark, NIST SP 800-53 and Defender for SQL provisioning. Each check is one policy evaluated on one server. An initiative inherited from a management group counts too, so the same check can appear under two assignments."
+      },
+      "name": "policy-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| extend state = tostring(properties.complianceState), server = tolower(tostring(split(tostring(properties.resourceId), '/')[8]))\n| summarize Failing = countif(state == 'NonCompliant'), Passing = countif(state == 'Compliant'), Servers = dcount(server), Assignments = dcount(tostring(properties.policyAssignmentName))\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Checks failing', 'Value', Failing, 'Note', 'non-compliant policy checks'),\n    pack('Order', 2, 'Label', 'Checks passing', 'Value', Passing, 'Note', 'compliant policy checks'),\n    pack('Order', 3, 'Label', 'Assignments', 'Value', Assignments, 'Note', 'policy assignments evaluated'),\n    pack('Order', 4, 'Label', 'Servers evaluated', 'Value', Servers, 'Note', 'Arc servers with results'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Policy results",
+        "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "policy-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| where tostring(properties.complianceState) == 'NonCompliant'\n| summarize FailingChecks = count() by key = tolower(tostring(split(tostring(properties.resourceId), '/')[8]))\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.hybridcompute/machines'\n    | project key = tolower(name), ServerName = name\n) on key\n| project Server = coalesce(ServerName, key), FailingChecks\n| order by FailingChecks desc, Server asc",
+        "size": 1,
+        "title": "Failing policy checks by server",
+        "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "policy-by-server",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Checks = count(), Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), Level = iff(scope startswith '/providers/microsoft.management', 'Inherited from management group', 'This subscription')\n| project Assignment, Level, Checks, Passing, Failing, CompliancePct = round(100.0 * Passing / Checks, 1)\n| order by Checks desc, Assignment asc",
+        "size": 0,
+        "title": "Compliance by policy assignment",
+        "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Assignment",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "30ch"
+              }
+            },
+            {
+              "columnMatch": "Level",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "24ch"
+              }
+            },
+            {
+              "columnMatch": "CompliancePct",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "min": 0,
+                "customColumnWidthSetting": "16ch",
+                "max": 100
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "CompliancePct",
+              "label": "Compliance %"
+            }
+          ]
+        }
+      },
+      "name": "policy-by-assignment",
+      "customWidth": "50"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Microsoft Defender for Cloud\nSecurity recommendations (assessments) and alerts for the Arc servers. Defender for Endpoint is deployed to the servers as an extension; the nested SQL guest also has Defender for SQL."
+      },
+      "name": "defender-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "securityresources\n| where type in ('microsoft.security/assessments', 'microsoft.security/locations/alerts')\n| extend isArc = id has 'microsoft.hybridcompute/machines', code = tostring(properties.status.code), severity = tostring(properties.metadata.severity)\n| summarize Unhealthy = countif(type == 'microsoft.security/assessments' and isArc and code == 'Unhealthy'), Healthy = countif(type == 'microsoft.security/assessments' and isArc and code == 'Healthy'), High = countif(type == 'microsoft.security/assessments' and isArc and code == 'Unhealthy' and severity == 'High'), Alerts = countif(type == 'microsoft.security/locations/alerts' and tostring(properties.Status) == 'Active')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Unhealthy checks', 'Value', Unhealthy, 'Note', 'failing recommendations'),\n    pack('Order', 2, 'Label', 'High severity', 'Value', High, 'Note', 'unhealthy and rated High'),\n    pack('Order', 3, 'Label', 'Healthy checks', 'Value', Healthy, 'Note', 'passing recommendations'),\n    pack('Order', 4, 'Label', 'Active alerts', 'Value', Alerts, 'Note', 'open in this subscription'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Defender results",
+        "noDataMessage": "Good news: Defender for Cloud reports no unhealthy security recommendations for the Arc servers.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "defender-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "securityresources\n| where type == 'microsoft.security/assessments' and id has 'microsoft.hybridcompute/machines'\n| where tostring(properties.status.code) == 'Unhealthy'\n| summarize Checks = count() by Severity = tostring(properties.metadata.severity)\n| extend Rank = case(Severity == 'High', 1, Severity == 'Medium', 2, 3)\n| order by Rank asc\n| project Severity, Checks",
+        "size": 1,
+        "title": "Unhealthy checks by severity",
+        "noDataMessage": "Good news: Defender for Cloud reports no unhealthy security recommendations for the Arc servers.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "defender-severity",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id), Server = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName))\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name in~ ('MDE.Windows', 'MDE.Linux')\n    | project machineId = tolower(tostring(split(id, '/extensions/')[0])), EndpointState = tostring(properties.provisioningState)\n) on machineId\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'MicrosoftDefenderForSQL'\n    | project machineId = tolower(tostring(split(id, '/extensions/')[0])), SqlState = tostring(properties.provisioningState)\n) on machineId\n| extend EndpointState = case(isempty(EndpointState), 'Not installed', EndpointState =~ 'Succeeded', 'Installed', EndpointState in~ ('Creating', 'Updating'), 'Installing', EndpointState), SqlState = case(isempty(SqlState), 'No SQL extension', SqlState =~ 'Succeeded', 'Installed', SqlState in~ ('Creating', 'Updating'), 'Installing', SqlState)\n| project Server, OS, DefenderForEndpoint = EndpointState, DefenderForSql = SqlState\n| order by tolower(Server) asc",
+        "size": 0,
+        "title": "Defender agent coverage",
+        "noDataMessage": "No Arc-enabled servers were found in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "OS",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "26ch"
+              }
+            },
+            {
+              "columnMatch": "DefenderForEndpoint",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Installed",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Installing",
+                    "representation": "pending",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not installed",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Failed",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "DefenderForSql",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Installed",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Installing",
+                    "representation": "pending",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Failed",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "none",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "18ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "DefenderForEndpoint",
+              "label": "Defender for Endpoint"
+            },
+            {
+              "columnId": "DefenderForSql",
+              "label": "Defender for SQL"
+            }
+          ]
+        }
+      },
+      "name": "defender-coverage",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "securityresources\n| where type == 'microsoft.security/assessments' and id has 'microsoft.hybridcompute/machines'\n| where tostring(properties.status.code) == 'Unhealthy'\n| extend Recommendation = tostring(properties.displayName), Severity = tostring(properties.metadata.severity), Server = tolower(tostring(split(id, '/')[8]))\n| summarize Servers = dcount(Server), AffectedServers = strcat_array(make_set(Server, 4), ', ') by Recommendation, Severity\n| extend Rank = case(Severity == 'High', 1, Severity == 'Medium', 2, 3)\n| order by Rank asc, Servers desc, Recommendation asc\n| take 15\n| project Recommendation, Severity, Servers, AffectedServers",
+        "size": 0,
+        "title": "Top findings to fix",
+        "noDataMessage": "Good news: Defender for Cloud reports no unhealthy security recommendations for the Arc servers.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Recommendation",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "70ch"
+              }
+            },
+            {
+              "columnMatch": "Severity",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "High",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Medium",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Low",
+                    "representation": "info",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Servers",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue",
+                "min": 0,
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "AffectedServers",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "40ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "AffectedServers",
+              "label": "Affected servers"
+            }
+          ]
+        }
+      },
+      "name": "defender-findings"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "securityresources\n| where type == 'microsoft.security/locations/alerts'\n| project Alert = tostring(properties.AlertDisplayName), Severity = tostring(properties.Severity), Status = tostring(properties.Status), Detected = todatetime(properties.TimeGeneratedUtc), Intent = tostring(properties.Intent)\n| order by Detected desc\n| take 20",
+        "size": 0,
+        "title": "Defender for Cloud alerts",
+        "noDataMessage": "Good news: Defender for Cloud has raised no security alerts for this subscription.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Alert",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "70ch"
+              }
+            },
+            {
+              "columnMatch": "Severity",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "High",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Medium",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Low",
+                    "representation": "info",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Informational",
+                    "representation": "info",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "16ch"
+              }
+            }
+          ],
+          "filter": true
+        }
+      },
+      "name": "defender-alerts"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Patch posture\nPending updates from the latest Azure Update Manager assessment of each Arc server. A server whose assessment failed or has not run is never counted as patched."
+      },
+      "name": "patch-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id), machineName = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), resourceGroup\n| join kind=leftouter (\n    patchassessmentresources\n    | where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n    | project machineId = tolower(tostring(split(tolower(id), '/patchassessmentresults/')[0])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical), Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup), Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime), RebootPending = tobool(properties.rebootPending)\n) on machineId\n| extend PatchState = case(\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed'\n)\n| summarize Total = count(), FullyPatched = countif(PatchState == 'Fully patched'), SecurityPending = countif(PatchState == 'Security updates pending'), CriticalPending = countif(PatchState == 'Critical updates pending'), Gaps = countif(PatchState in ('Not assessed', 'Assessment failed', 'Assessment in progress'))\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Fully patched', 'Value', FullyPatched, 'Note', strcat('of ', tostring(Total), ' servers')),\n    pack('Order', 2, 'Label', 'Security pending', 'Value', SecurityPending, 'Note', 'servers with security updates'),\n    pack('Order', 3, 'Label', 'Critical pending', 'Value', CriticalPending, 'Note', 'servers with critical updates'),\n    pack('Order', 4, 'Label', 'Assessment gaps', 'Value', Gaps, 'Note', 'failed or not yet assessed'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Patch status",
+        "noDataMessage": "No Arc-enabled servers were found in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "patch-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id), machineName = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), resourceGroup\n| join kind=leftouter (\n    patchassessmentresources\n    | where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n    | project machineId = tolower(tostring(split(tolower(id), '/patchassessmentresults/')[0])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical), Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup), Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime), RebootPending = tobool(properties.rebootPending)\n) on machineId\n| extend PatchState = case(\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed'\n)\n| where PatchState != 'Fully patched'\n| extend SortRank = case(Critical > 0 or Security > 0, 0, 1)\n| order by SortRank asc, Critical desc, Security desc, machineName asc\n| project Server = machineName, State = PatchState, OS, Critical, Security, UpdateRollup, Definition, LastAssessed, AssessmentStatus = iff(isempty(AssessmentStatus), 'Not assessed', AssessmentStatus), RebootPending = iff(isnull(RebootPending), '', iff(RebootPending, 'Yes', 'No'))",
+        "size": 0,
+        "title": "Arc servers with pending critical or security updates",
+        "noDataMessage": "Good news: every Arc server has been assessed and has no pending critical or security updates.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "State",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Critical updates pending",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Security updates pending",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Assessment failed",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Assessment in progress",
+                    "representation": "pending",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not assessed",
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "26ch"
+              }
+            },
+            {
+              "columnMatch": "OS",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "26ch"
+              }
+            },
+            {
+              "columnMatch": "Critical",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "Security",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "UpdateRollup",
+              "label": "Update rollup"
+            },
+            {
+              "columnId": "LastAssessed",
+              "label": "Last assessed"
+            },
+            {
+              "columnId": "AssessmentStatus",
+              "label": "Assessment status"
+            },
+            {
+              "columnId": "RebootPending",
+              "label": "Reboot pending"
+            }
+          ]
+        }
+      },
+      "name": "patch-table"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Security monitoring\nPrivileged activity and configuration changes collected by the Azure Monitor Agent over the selected time range. Servers without the agent, such as the nested SQL guest, are not included."
+      },
+      "name": "monitoring-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let Reporting = toscalar(Heartbeat | summarize dcount(Computer));\nlet Privileged = toscalar(union (Syslog | where Facility in ('auth', 'authpriv') and SyslogMessage has 'sudo' | project Computer), (Event | where EventLog == 'Security' and EventID in (4672, 4673, 4674) | project Computer) | count);\nlet Changes = toscalar(ConfigurationChange | where isnotempty(ConfigChangeType) | count);\nlet Software = toscalar(ConfigurationChange | where ConfigChangeType == 'Software' | count);\nprint data = pack_array(\n    pack('Order', 1, 'Label', 'Servers reporting', 'Value', Reporting, 'Note', 'sending telemetry'),\n    pack('Order', 2, 'Label', 'Privileged events', 'Value', Privileged, 'Note', 'sudo and Windows privilege use'),\n    pack('Order', 3, 'Label', 'Config changes', 'Value', Changes, 'Note', 'services, daemons and software'),\n    pack('Order', 4, 'Label', 'Software changes', 'Value', Software, 'Note', 'installed, updated or removed'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = tolong(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Monitoring activity",
+        "noDataMessage": "No Azure Monitor Agent data in the selected time range. Servers send nothing while the lab is parked, and the nested SQL guest has no Azure Monitor Agent.",
+        "noDataMessageStyle": 5,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "tiles",
+        "timeContextFromParameter": "TimeRange",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "monitoring-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "ConfigurationChange\n| where isnotempty(ConfigChangeType)\n| summarize SoftwareChanges = countif(ConfigChangeType == 'Software'), ServiceChanges = countif(ConfigChangeType in ('WindowsServices', 'Daemons')) by Server = Computer\n| order by SoftwareChanges + ServiceChanges desc, Server asc",
+        "size": 1,
+        "title": "Configuration changes by server",
+        "noDataMessage": "No Azure Monitor Agent data in the selected time range. Servers send nothing while the lab is parked, and the nested SQL guest has no Azure Monitor Agent.",
+        "noDataMessageStyle": 5,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "barchart",
+        "timeContextFromParameter": "TimeRange"
+      },
+      "name": "config-changes",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "union (Syslog | where Facility in ('auth', 'authpriv') and SyslogMessage has 'sudo' | project TimeGenerated, Computer, Source = 'sudo (Linux)'), (Event | where EventLog == 'Security' and EventID in (4672, 4673, 4674) | project TimeGenerated, Computer, Source = 'Privilege use (Windows)')\n| summarize Events = count(), LastActivity = max(TimeGenerated) by Server = Computer, Source\n| order by Events desc, Server asc",
+        "size": 0,
+        "title": "Privileged activity by server",
+        "noDataMessage": "No Azure Monitor Agent data in the selected time range. Servers send nothing while the lab is parked, and the nested SQL guest has no Azure Monitor Agent.",
+        "noDataMessageStyle": 5,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [],
+        "visualization": "table",
+        "timeContextFromParameter": "TimeRange",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Server",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Source",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "24ch"
+              }
+            },
+            {
+              "columnMatch": "Events",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue",
+                "min": 0,
+                "customColumnWidthSetting": "14ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "LastActivity",
+              "label": "Last activity"
+            }
+          ]
+        }
+      },
+      "name": "privileged-activity",
+      "customWidth": "50"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "*Policy compliance is re-evaluated about once a day and Defender recommendations refresh in the background, so a fix can take a while to show here. The Defender agent score counts servers whose Defender for Endpoint extension is installed, not the health of the sensor.*"
+      },
+      "name": "footer"
+    }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
