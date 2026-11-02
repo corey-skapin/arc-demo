@@ -103,7 +103,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), AppliedAt = iff(scope startswith '/providers/microsoft.management', 'Management group', 'Subscription'), Evaluated = Passing + Failing\n| project Assignment, AppliedAt, Evaluated, Passing, Failing, Unknown, CompliancePercent = iff(Evaluated == 0, 0.0, round(100.0 * Passing / Evaluated, 1))\n| order by Evaluated desc, Assignment asc",
-        "size": 0,
+        "size": 3,
         "title": "Compliance by policy assignment",
         "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
         "noDataMessageStyle": 4,
@@ -176,6 +176,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "AppliedAt",
@@ -276,7 +277,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "guestconfigurationresources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| project Machine = tostring(split(tostring(properties.targetResourceId), '/')[8]), Configuration = tostring(properties.guestConfiguration.name), Status = tostring(properties.complianceStatus), LastChecked = todatetime(properties.lastComplianceStatusChecked)\n| extend Rank = iff(Status == 'NonCompliant', 0, 1)\n| order by Rank asc, Machine asc, Configuration asc\n| project-away Rank",
-        "size": 0,
+        "size": 3,
         "title": "Guest configuration results",
         "noDataMessage": "No machine has a guest configuration assignment yet. Guest configuration audits settings inside the operating system and only machines with an assignment appear here.",
         "noDataMessageStyle": 4,
@@ -349,6 +350,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "LastChecked",

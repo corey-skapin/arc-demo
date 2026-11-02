@@ -159,7 +159,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| extend Server = tolower(tostring(split(tostring(properties.resourceId), '/')[8]))\n| summarize Checks = count(), Failing = countif(tostring(properties.complianceState) == 'NonCompliant') by Server\n| join kind=leftouter (\n    securityresources\n    | where type == 'microsoft.security/assessments' and id has 'microsoft.hybridcompute/machines' and tostring(properties.status.code) == 'Unhealthy'\n    | extend Server = tolower(tostring(split(id, '/')[8])), Display = tostring(split(id, '/')[8]), Severity = tostring(properties.metadata.severity)\n    | summarize High = countif(Severity == 'High'), Medium = countif(Severity == 'Medium'), Low = countif(Severity == 'Low'), Display = take_any(Display) by Server\n) on Server\n| project Server = coalesce(Display, Server), PolicyCompliance = iff(Checks == 0, 0.0, round(100.0 * (Checks - Failing) / Checks, 1)), FailingChecks = Failing, HighFindings = coalesce(High, 0), MediumFindings = coalesce(Medium, 0), LowFindings = coalesce(Low, 0)\n| order by PolicyCompliance asc, Server asc",
-        "size": 0,
+        "size": 3,
         "title": "Compliance by server",
         "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
         "noDataMessageStyle": 4,
@@ -242,6 +242,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "PolicyCompliance",
@@ -316,7 +317,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Checks = count(), Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), AppliedAt = iff(scope startswith '/providers/microsoft.management', 'Management group', 'Subscription')\n| project Assignment, AppliedAt, Checks, Passing, Failing, CompliancePct = round(100.0 * Passing / Checks, 1)\n| order by Checks desc, Assignment asc",
-        "size": 0,
+        "size": 3,
         "title": "Compliance by policy assignment",
         "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
         "noDataMessageStyle": 4,
@@ -382,6 +383,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "AppliedAt",
@@ -463,7 +465,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id), Server = name, Platform = iff(tolower(tostring(properties.osType)) == 'linux', 'Linux', 'Windows')\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name in~ ('MDE.Windows', 'MDE.Linux')\n    | project machineId = tolower(tostring(split(id, '/extensions/')[0])), EndpointState = tostring(properties.provisioningState)\n) on machineId\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'MicrosoftDefenderForSQL'\n    | project machineId = tolower(tostring(split(id, '/extensions/')[0])), SqlState = tostring(properties.provisioningState)\n) on machineId\n| extend EndpointState = case(isempty(EndpointState), 'Not installed', EndpointState =~ 'Succeeded', 'Installed', EndpointState in~ ('Creating', 'Updating'), 'Installing', EndpointState), SqlState = case(isempty(SqlState), 'No SQL extension', SqlState =~ 'Succeeded', 'Installed', SqlState in~ ('Creating', 'Updating'), 'Installing', SqlState)\n| project Server, Platform, EndpointAgent = EndpointState, SqlAgent = SqlState\n| order by tolower(Server) asc",
-        "size": 0,
+        "size": 3,
         "title": "Defender agent coverage",
         "noDataMessage": "No Arc-enabled servers were found in the subscriptions you can see.",
         "noDataMessageStyle": 4,
@@ -565,6 +567,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "EndpointAgent",
@@ -585,7 +588,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "securityresources\n| where type == 'microsoft.security/assessments' and id has 'microsoft.hybridcompute/machines'\n| where tostring(properties.status.code) == 'Unhealthy'\n| extend Recommendation = tostring(properties.displayName), Severity = tostring(properties.metadata.severity), Server = tolower(tostring(split(id, '/')[8]))\n| summarize Servers = dcount(Server), AffectedServers = strcat_array(make_set(Server, 4), ', ') by Recommendation, Severity\n| extend Rank = case(Severity == 'High', 1, Severity == 'Medium', 2, 3)\n| order by Rank asc, Servers desc, Recommendation asc\n| take 15\n| project Recommendation, Severity, Servers, AffectedServers",
-        "size": 0,
+        "size": 3,
         "title": "Top findings to fix",
         "noDataMessage": "Good news: Defender for Cloud reports no unhealthy security recommendations for the Arc servers.",
         "noDataMessageStyle": 4,
@@ -671,7 +674,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "securityresources\n| where type == 'microsoft.security/locations/alerts'\n| project Alert = tostring(properties.AlertDisplayName), Severity = tostring(properties.Severity), Status = tostring(properties.Status), Detected = todatetime(properties.TimeGeneratedUtc), Intent = tostring(properties.Intent)\n| order by Detected desc\n| take 20",
-        "size": 0,
+        "size": 3,
         "title": "Defender for Cloud alerts",
         "noDataMessage": "Good news: Defender for Cloud has raised no security alerts for this subscription.",
         "noDataMessageStyle": 4,
@@ -795,7 +798,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id), machineName = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), resourceGroup\n| join kind=leftouter (\n    patchassessmentresources\n    | where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n    | project machineId = tolower(tostring(split(tolower(id), '/patchassessmentresults/')[0])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical), Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup), Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime), RebootPending = tobool(properties.rebootPending)\n) on machineId\n| extend PatchState = case(\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed'\n)\n| where PatchState != 'Fully patched'\n| extend SortRank = case(Critical > 0 or Security > 0, 0, 1), OsName = replace_regex(OS, @' (Datacenter|Standard)( Azure Edition| Evaluation)?$', '')\n| order by SortRank asc, Critical desc, Security desc, machineName asc\n| project Server = machineName, State = PatchState, OS = OsName, Critical = iff(AssessmentStatus =~ 'Succeeded', Critical, int(null)), Security = iff(AssessmentStatus =~ 'Succeeded', Security, int(null)), UpdateRollup = iff(AssessmentStatus =~ 'Succeeded', UpdateRollup, int(null)), Definition = iff(AssessmentStatus =~ 'Succeeded', Definition, int(null)), LastAssessed, AssessmentStatus = iff(isempty(AssessmentStatus), 'Not assessed', AssessmentStatus), RebootPending = iff(AssessmentStatus =~ 'Succeeded' and isnotnull(RebootPending), iff(RebootPending, 'Yes', 'No'), '')",
-        "size": 0,
+        "size": 3,
         "title": "Arc servers with pending critical or security updates",
         "noDataMessage": "Good news: every Arc server has been assessed and has no pending critical or security updates.",
         "noDataMessageStyle": 4,
@@ -894,6 +897,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "UpdateRollup",
@@ -1003,7 +1007,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "union (Syslog | where Facility in ('auth', 'authpriv') and SyslogMessage has 'sudo' | project TimeGenerated, Computer, Source = 'sudo (Linux)'), (Event | where EventLog == 'Security' and EventID in (4672, 4673, 4674) | project TimeGenerated, Computer, Source = 'Privilege use (Windows)')\n| summarize Events = count(), LastActivity = max(TimeGenerated) by Server = Computer, Source\n| order by Events desc, Server asc",
-        "size": 0,
+        "size": 3,
         "title": "Privileged activity by server",
         "noDataMessage": "No Azure Monitor Agent data in the selected time range. Servers send nothing while the lab is parked, and the nested SQL guest has no Azure Monitor Agent.",
         "noDataMessageStyle": 5,
@@ -1050,6 +1054,7 @@
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "LastActivity",
