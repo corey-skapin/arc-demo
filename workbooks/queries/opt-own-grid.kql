@@ -1,12 +1,17 @@
 // Live ownership and hygiene evidence for the published roster (Resource Graph): current tags, not the tags captured at publication.
 // Blank tags are missing ownership evidence, not proof that nobody owns a machine. Filtered like the telemetry views, using the current tags.
+// All (an empty list, the literal All marker or *) never filters, so a machine tagged after publication is still listed.
+// Resource Graph has no let statement, so each filter list is written inline.
 Resources
 | where type =~ "microsoft.hybridcompute/machines"
 | where tolower(id) in (__ROSTER_IDS__)
 | extend Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter), Environment = tostring(coalesce(tags.env, tags.environment)),
     Application = tostring(coalesce(tags.application, tags.app, tags.workload, tags.role)),
     Os = iff(tostring(properties.osType) =~ "linux", "Linux", iff(tostring(properties.osType) =~ "windows", "Windows", "Unknown"))
-| where Os in ({OsFilter}) and iff(isempty(Environment), "(untagged)", Environment) in ({EnvironmentFilter}) and iff(isempty(Application), "(untagged)", Application) in ({ApplicationFilter})
+| extend EnvironmentKey = iff(isempty(Environment), "(untagged)", Environment), ApplicationKey = iff(isempty(Application), "(untagged)", Application)
+| where (array_length(dynamic([{OsFilter}])) == 0 or set_has_element(dynamic([{OsFilter}]), 'value::all') or set_has_element(dynamic([{OsFilter}]), '*') or set_has_element(dynamic([{OsFilter}]), Os))
+    and (array_length(dynamic([{EnvironmentFilter}])) == 0 or set_has_element(dynamic([{EnvironmentFilter}]), 'value::all') or set_has_element(dynamic([{EnvironmentFilter}]), '*') or set_has_element(dynamic([{EnvironmentFilter}]), EnvironmentKey))
+    and (array_length(dynamic([{ApplicationFilter}])) == 0 or set_has_element(dynamic([{ApplicationFilter}]), 'value::all') or set_has_element(dynamic([{ApplicationFilter}]), '*') or set_has_element(dynamic([{ApplicationFilter}]), ApplicationKey))
 | extend Missing = trim(", ", strcat(iff(isempty(Owner), "owner, ", ""), iff(isempty(CostCentre), "cost centre, ", ""),
     iff(isempty(Environment), "environment, ", ""), iff(isempty(Application), "application or role, ", "")))
 | extend Ownership = iff(isempty(Missing), "Tags present", strcat("Missing: ", Missing))

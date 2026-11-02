@@ -205,10 +205,13 @@ let AllMachines = print Data = dynamic($data)
 let OsFilter = dynamic([{OsFilter}]);
 let EnvironmentFilter = dynamic([{EnvironmentFilter}]);
 let ApplicationFilter = dynamic([{ApplicationFilter}]);
+let OsAll = array_length(OsFilter) == 0 or set_has_element(OsFilter, 'value::all') or set_has_element(OsFilter, '*');
+let EnvironmentAll = array_length(EnvironmentFilter) == 0 or set_has_element(EnvironmentFilter, 'value::all') or set_has_element(EnvironmentFilter, '*');
+let ApplicationAll = array_length(ApplicationFilter) == 0 or set_has_element(ApplicationFilter, 'value::all') or set_has_element(ApplicationFilter, '*');
 let Machines = AllMachines
-| where (array_length(OsFilter) == 0 or Os in (OsFilter))
-| where (array_length(EnvironmentFilter) == 0 or Environment in (EnvironmentFilter))
-| where (array_length(ApplicationFilter) == 0 or Application in (ApplicationFilter));
+| where (OsAll or Os in (OsFilter))
+| where (EnvironmentAll or Environment in (EnvironmentFilter))
+| where (ApplicationAll or Application in (ApplicationFilter));
 let WindowStart = todatetime('{TimeRange:startISO}');
 let WindowEnd = todatetime('{TimeRange:endISO}');
 let CpuHigh = {CpuHigh};
@@ -328,7 +331,9 @@ function Get-DemoOperationalOptions {
         default { throw "Unknown option list $Kind." }
     }
     $options = @($values | Sort-Object -Unique | ForEach-Object { [ordered]@{ value = [string]$_; label = [string]$_ } })
-    ConvertTo-Json -InputObject $options -Compress -AsArray
+    # One object at a time, joined by hand: ConvertTo-Json -InputObject <array> -AsArray wraps the array in a second
+    # array on current PowerShell 7 builds, and the portal then sees a single unusable option and cannot expand All.
+    '[' + (@($options | ForEach-Object { ConvertTo-Json -InputObject $_ -Compress }) -join ',') + ']'
 }
 
 function Update-DemoTemplateNode {

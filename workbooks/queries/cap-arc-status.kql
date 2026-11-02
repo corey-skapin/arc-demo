@@ -1,5 +1,7 @@
 // Live Arc inventory for the published roster (Resource Graph). Connection state is evidence about the agent, not about telemetry.
 // Filtered like the telemetry views by operating system, environment and application, using each machine's current tags.
+// All (an empty list, the literal All marker or *) never filters, so a machine tagged after publication is still listed.
+// Resource Graph has no let statement, so each filter list is written inline.
 Resources
 | where type =~ "microsoft.hybridcompute/machines"
 | where tolower(id) in (__ROSTER_IDS__)
@@ -7,7 +9,9 @@ Resources
     EnvironmentTag = case(isnotempty(tostring(tags.env)), tostring(tags.env), isnotempty(tostring(tags.environment)), tostring(tags.environment), "(untagged)"),
     ApplicationTag = case(isnotempty(tostring(tags.application)), tostring(tags.application), isnotempty(tostring(tags.app)), tostring(tags.app),
         isnotempty(tostring(tags.workload)), tostring(tags.workload), isnotempty(tostring(tags.role)), tostring(tags.role), "(untagged)")
-| where Os in ({OsFilter}) and EnvironmentTag in ({EnvironmentFilter}) and ApplicationTag in ({ApplicationFilter})
+| where (array_length(dynamic([{OsFilter}])) == 0 or set_has_element(dynamic([{OsFilter}]), 'value::all') or set_has_element(dynamic([{OsFilter}]), '*') or set_has_element(dynamic([{OsFilter}]), Os))
+    and (array_length(dynamic([{EnvironmentFilter}])) == 0 or set_has_element(dynamic([{EnvironmentFilter}]), 'value::all') or set_has_element(dynamic([{EnvironmentFilter}]), '*') or set_has_element(dynamic([{EnvironmentFilter}]), EnvironmentTag))
+    and (array_length(dynamic([{ApplicationFilter}])) == 0 or set_has_element(dynamic([{ApplicationFilter}]), 'value::all') or set_has_element(dynamic([{ApplicationFilter}]), '*') or set_has_element(dynamic([{ApplicationFilter}]), ApplicationTag))
 | project Machine = name, ArcStatus = tostring(properties.status), LastStatusChange = todatetime(properties.lastStatusChange), Os,
     OsSku = tostring(properties.osSku), Vcpu = toint(properties.detectedProperties.logicalCoreCount),
     MemoryGb = toint(properties.detectedProperties.totalPhysicalMemoryInGigabytes), AgentVersion = tostring(properties.agentVersion)
