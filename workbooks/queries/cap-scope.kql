@@ -1,0 +1,48 @@
+// include: hosts
+// Scope and evidence quality: can this view be relied on? One tile per question: how many machines are in scope, what is reporting,
+// how fresh the newest sample is, how much evidence is adequate and how much of the window was observed.
+// The lab runs on demand, so low coverage is parked time: unknown, never idle. Missing is never zero.
+let Counts = Hosts
+| summarize Total = count(), Guests = countif(Layer == "guest"), GuestNames = strcat_array(make_list_if(Machine, Layer == "guest", 3), ", "),
+    Reporting = countif(ReportingState == "Reporting"), Silent = countif(ReportingState == "Not reporting"), Absent = countif(ReportingState == "No telemetry"),
+    NotReportingNames = strcat_array(make_list_if(Machine, ReportingState != "Reporting", 5), ", "),
+    Newest = max(HostLastSeen), Adequate = countif(EvidenceState == "Adequate"),
+    Limited = countif(AnyTelemetry and EvidenceState != "Adequate"),
+    LimitedNames = strcat_array(make_list_if(Machine, AnyTelemetry and EvidenceState != "Adequate", 5), ", "),
+    MedianCoverage = percentile(iff(HasCpu, CoveragePercent, real(null)), 50)
+| extend K = 1, NewestAge = datetime_diff("minute", WindowEnd, Newest), AtNow = abs(datetime_diff("minute", now(), WindowEnd)) <= 5;
+datatable(SortKey:long)[0, 1, 2, 3, 4, 5]
+| extend K = 1
+| join kind=inner Counts on K
+| project SortKey,
+    Label = case(
+        SortKey == 0, "🖥️ Machines in scope",
+        SortKey == 1, iff(AtNow, "📡 Reporting now", "📡 Reporting at the window end"),
+        SortKey == 2, case(isnull(Newest), "🕒 Latest sample", NewestAge < 180, "🕒 Minutes since the latest sample", "🕒 Hours since the latest sample"),
+        SortKey == 3, "✅ Adequate evidence",
+        SortKey == 4, "🟡 Limited evidence",
+        "📶 Window coverage (median %)"),
+    Machines = case(
+        SortKey == 0, tolong(Total),
+        SortKey == 1, tolong(Reporting),
+        SortKey == 2, case(isnull(Newest), long(null), NewestAge < 180, tolong(max_of(NewestAge, long(0))), tolong(round(NewestAge / 60.0, 0))),
+        SortKey == 3, tolong(Adequate),
+        SortKey == 4, tolong(Limited),
+        iff(isnull(MedianCoverage), long(null), tolong(round(MedianCoverage, 0)))),
+    Names = case(
+        SortKey == 0, iff(Guests > 0,
+            strcat(tostring(Total - Guests), " independent + ", tostring(Guests), " declared guest (", GuestNames, "), counted once and never as extra capacity"),
+            strcat(tostring(Total), " independent machines")),
+        SortKey == 1, case(
+            Total == 0, "no machine matches the current filters",
+            Reporting == Total, "every machine sent a sample within 15 minutes of the window end",
+            Reporting == 0, "none within 15 minutes of the window end: the estate is parked or silent, so the figures below describe the last observed data",
+            strcat(tostring(Silent), " silent and ", tostring(Absent), " never reported: ", NotReportingNames)),
+        SortKey == 2, iff(isnull(Newest), "no sample from any machine in scope in this window: unknown, not zero",
+            strcat("newest sample ", format_datetime(Newest, "yyyy-MM-dd HH:mm"), " UTC; the window ends ", format_datetime(WindowEnd, "yyyy-MM-dd HH:mm"), " UTC")),
+        SortKey == 3, strcat("of ", tostring(Total), ": at least ", tostring(MinObservedHours), " observed hours of CPU, memory and disk, with 80% sampling while active"),
+        SortKey == 4, iff(Limited == 0, "none", strcat(LimitedNames, " (thin, partial, sparse, invalid or parent: see the Evidence column)")),
+        iff(isnull(MedianCoverage), "no CPU samples in this window",
+            "observed minutes of CPU over elapsed minutes of the window. This lab runs on demand: low coverage is parked time, unknown and not idle"))
+| sort by SortKey asc
+| project Label, Machines, Names

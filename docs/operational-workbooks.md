@@ -115,14 +115,18 @@ environment and application/role, plus the threshold selectors.
 
 | Section | Shows |
 |---|---|
-| Estate summary tiles | Machines in scope (with the guest caption), then the five assessments |
+| Scope and evidence quality tiles | Can this view be relied on? Machines in scope (with the guest caption), reporting now, minutes or hours since the latest sample, adequate evidence, limited evidence (named) and median window coverage. Coverage counts only machines with CPU samples and is parked time, not idle time |
+| Estate capacity summary tiles | The five assessments, which add up to the machines in scope |
 | Status and evidence table | One row per machine, worst first: state, assessment, evidence, CPU P95 and peak, pattern, observed trend, memory, free space, history hours, reason. Selecting a row drives *Resource detail* |
 | Declared parent and guest | The pair side by side, never summed |
 | CPU tab | P95 and peak charts with the threshold line; sustained-versus-brief table |
 | Memory tab | Memory in use P95, lowest available MB, per-machine evidence with the basis |
 | Disk tab | Lowest free space over time; per-volume table with size, change and state |
-| Resource detail tab | Tiles, CPU, memory, available memory, per-volume disk, parent/guest context, every counter's evidence |
+| Resource detail tab | Seven tiles (assessment, reporting, evidence, CPU, memory, tightest volume and the application context: application, environment, owner, cost centre, size), CPU, memory, available memory, per-volume disk, parent/guest context, every counter's evidence |
 | Evidence and method tab | How figures are built, rules and constants, coverage matrix, counters by OS, live Arc inventory |
+
+*Reporting now* means a sample within 15 minutes of the window end; for a custom past range the tile says
+*at the window end*. With every machine parked it reads 0 and says the figures below describe the last observed data.
 
 ## Optimisation opportunities
 
@@ -150,6 +154,20 @@ the reduction. No guest scenario is offered. `Get-DemoOperationalScenario` is th
 The live Arc inventory and ownership tables read Resource Graph for the exact roster IDs and follow the same
 operating-system, environment and application selectors using each machine's **current** tags.
 
+Each workbook links to the other: *Capacity and headroom* from the header and the consolidation and review-detail
+tabs of *Optimisation opportunities* (the plan's links to capacity and dependency evidence), and *Optimisation
+opportunities* from the header and the resource-detail tab of *Capacity and headroom*. They are plain portal
+hyperlinks that open the sibling with its own default scope, and a draft links to the draft while a published
+workbook links to the published one, so publish both for the links to resolve.
+
+## Look and feel
+
+Both follow the Estate Overview header convention (title, then an italic story line). Expected empty states, such as
+a filter with no match, a missing selection or a parked gap, are calm informational bars; amber appears only where an
+absent result is itself a finding (no CPU samples, no Arc machines for the roster), and green where emptiness is good
+news. Status icons and colours use only the documented grid icon names and the colour and palette names of the
+official sample workbooks; an offline test enforces that, because an unknown name renders as nothing.
+
 ## Publish, review and promote
 
 Preview is the default and writes nothing. Publication is a separate approved operation with the same explicit
@@ -166,7 +184,7 @@ tag changes or a newly onboarded nested guest.
 ## Validation boundaries
 
 - Offline Pester (`tests/OperationalWorkbooks.Tests.ps1`) covers rendering, scoping, roster and topology rules, size bounds,
-  draft handling and scenario arithmetic.
+  draft handling, sibling links, the documented icon, colour and palette names, empty-state styles and scenario arithmetic.
 - `tests/OperationalWorkbookQueries.Tests.ps1` is explicit opt-in and read-only. It runs the production item queries against
   deterministic literal tables (spike versus sustained, missing counters, thin history, parked gaps, invalid samples, Linux
   names and pseudo mounts, parent/guest, tags, scenario arithmetic) with the telemetry sources swapped inside the query text.

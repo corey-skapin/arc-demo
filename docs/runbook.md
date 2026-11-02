@@ -109,6 +109,8 @@ jobs and disappear with the Arc group on approved normal removal. Existing
 lifecycle/readiness gates are unchanged. Re-publishing changed source or
 refreshing roster/topology requires new approval, not an incidental wake.
 The roster is bounded to 1-50 exact Arc IDs because every item query embeds it.
+Each workbook links to the other (a draft to the draft, a published workbook to the published one), so publish both
+for the links to resolve; the portal URL carries the confirmed tenant.
 
 **Coverage before conclusions:** each table starts with every selected Arc ID,
 including hosts without samples. One canonical source is selected per host and

@@ -69,7 +69,7 @@ if ($Action -ne 'Remove') {
         }
     }
     $book = Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $WorkspaceResourceId -Machines $machines -Topology $topology `
-        -Draft:$Draft -DisplayUtcOffsetHours $DisplayUtcOffsetHours
+        -Draft:$Draft -DisplayUtcOffsetHours $DisplayUtcOffsetHours -TenantId $TenantId.ToString()
 }
 $raw = Invoke-DemoAz -Arguments @('resource', 'show', '--ids', $identity.ResourceId, '-o', 'json') -AllowNotFound
 $existing = if ($raw) { $raw | ConvertFrom-Json } else { $null }

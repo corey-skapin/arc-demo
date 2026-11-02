@@ -78,6 +78,8 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             volumes = New-FixtureRequest 'cap-disk-volumes'
             memory = New-FixtureRequest 'cap-mem-grid'
             capTiles = New-FixtureRequest 'cap-tiles'
+            scopeTiles = New-FixtureRequest 'cap-scope'
+            detailTiles = New-FixtureRequest 'cap-detail-tiles' @{ SelectedHost = 'devidle' }
             candidates = New-FixtureRequest 'opt-candidates'
             optTiles = New-FixtureRequest 'opt-tiles'
             card = New-FixtureRequest 'opt-detail-card' @{ SelectedHost = 'devidle' }
@@ -113,6 +115,8 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $volumes = $results.volumes
         $memory = $results.memory
         $capTiles = $results.capTiles
+        $scopeTiles = $results.scopeTiles
+        $detailTiles = $results.detailTiles
         $candidates = $results.candidates
         $optTiles = $results.optTiles
         $card = $results.card
@@ -253,16 +257,53 @@ Describe 'Operational workbook queries executed against deterministic literal ta
     }
 
     Context 'Summary tiles' {
+        It 'answers scope and evidence quality: machines, reporting, freshness, adequate evidence and coverage' {
+            $tile = { param($label) @($scopeTiles | Where-Object Label -like "*$label*")[0] }
+            $total = & $tile 'Machines in scope'
+            $total.Machines | Should -Be $definitions.Count
+            $total.Names | Should -Match '12 independent \+ 1 declared guest \(guest\), counted once and never as extra capacity'
+            # The silent and absent machines are named, and an invalid-only host still counts as reporting (it sent samples).
+            $reporting = & $tile 'Reporting'
+            $reporting.Label | Should -Match 'Reporting (now|at the window end)'
+            $reporting.Machines | Should -Be 11
+            $reporting.Names | Should -Match '1 silent and 1 never reported'
+            $reporting.Names | Should -Match 'parked'
+            $reporting.Names | Should -Match 'missing'
+            $latest = & $tile 'since the latest sample'
+            $latest.Label | Should -Be '🕒 Minutes since the latest sample'
+            $latest.Machines | Should -Be 0
+            $latest.Names | Should -Match 'newest sample \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC'
+            $adequate = & $tile 'Adequate evidence'
+            $adequate.Machines | Should -Be 7
+            $adequate.Names | Should -Match 'at least 24 observed hours'
+            $limited = & $tile 'Limited evidence'
+            $limited.Machines | Should -Be 5
+            @(($limited.Names -split ' \(thin')[0] -split ', ' | Sort-Object) | Should -Be @('guest', 'invalid', 'parent', 'parked', 'short')
+            ($adequate.Machines + $limited.Machines + 1) | Should -Be $definitions.Count
+            # Median of the machines that have CPU samples only: the invalid-only host and the one without telemetry are not counted as zero.
+            $coverage = & $tile 'Window coverage'
+            $coverage.Machines | Should -Be 100
+            $coverage.Names | Should -Match 'parked time, unknown and not idle'
+        }
+
         It 'counts mutually exclusive capacity assessments that add up to the machines in scope' {
             $count = { param($label) [int](@($capTiles | Where-Object Label -like "*$label*")[0].Machines) }
-            (& $count 'Machines in scope') | Should -Be $definitions.Count
+            @($capTiles | Where-Object Label -like '*Machines in scope*').Count | Should -Be 0
             (& $count 'Pressure observed') | Should -Be 1
             (& $count 'Apparent headroom') | Should -Be 5
             (& $count 'Within thresholds') | Should -Be 1
             (& $count 'Insufficient evidence') | Should -Be 5
             (& $count 'No telemetry') | Should -Be 1
             ((& $count 'Pressure observed') + (& $count 'Apparent headroom') + (& $count 'Within thresholds') + (& $count 'Insufficient evidence') + (& $count 'No telemetry')) |
-                Should -Be (& $count 'Machines in scope')
+                Should -Be $definitions.Count
+        }
+
+        It 'adds the application context to the selected-machine tiles' {
+            $context = @($detailTiles | Where-Object Label -eq 'Application context')[0]
+            $context.Value | Should -Be 'tools / dev'
+            $context.Note | Should -Match 'owner erin \| cost centre cc-5 \| Linux'
+            @($detailTiles).Count | Should -Be 7
+            (@($detailTiles | Where-Object Label -eq 'Evidence')[0]).Value | Should -Be 'Adequate'
         }
 
         It 'counts optimisation review reasons without implying a saving' {

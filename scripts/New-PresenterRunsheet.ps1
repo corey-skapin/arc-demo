@@ -107,7 +107,7 @@ foreach ($entry in $types.GetEnumerator()) {
 }
 $operationalLinks = @()
 if ($context.Contains('capacityWorkbookResourceId')) {
-    $operationalLinks += "[Capacity and headroom]($($values.capacityWorkbookUrl)): read the tiles first, then the colour-coded status grid and its Evidence column; use the CPU, Memory and Disk tabs to tell a sustained pressure from a brief spike, and select a machine for its own detail."
+    $operationalLinks += "[Capacity and headroom]($($values.capacityWorkbookUrl)): read the scope and evidence tiles first, then the assessment tiles and the colour-coded status grid with its Evidence column; use the CPU, Memory and Disk tabs to tell a sustained pressure from a brief spike, and select a machine for its own detail."
 }
 if ($context.Contains('optimisationWorkbookResourceId')) {
     $operationalLinks += "[Optimisation opportunities]($($values.optimisationWorkbookUrl)): start with the review-reason tiles and the evidence-quality chart, select a candidate to see why it was flagged, and explain a conversation starter rather than promising a resize or savings."

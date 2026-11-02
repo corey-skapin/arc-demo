@@ -401,6 +401,26 @@ function Get-DemoOperationalWorkbookIdentity {
     }
 }
 
+function Get-DemoOperationalWorkbookLink {
+    <#
+    .SYNOPSIS
+        Portal hyperlink to the sibling workbook for the text items: a draft links to the draft, a published workbook to the published one.
+    .DESCRIPTION
+        Plain navigation only; the target keeps its own default scope. Both workbooks must be published for the link to resolve.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('capacity', 'optimisation')][string]$Purpose,
+        [Parameter(Mandatory)][string]$WorkspaceResourceId,
+        [switch]$Draft,
+        [ValidatePattern('^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')][string]$TenantId = ''
+    )
+    $target = Get-DemoOperationalWorkbookIdentity -Purpose $Purpose -WorkspaceResourceId $WorkspaceResourceId -Draft:$Draft
+    $root = if ($TenantId) { "https://portal.azure.com/#@$TenantId/resource" } else { 'https://portal.azure.com/#resource' }
+    # Parentheses are legal in resource group names but would end a markdown link early.
+    ($root + $target.ResourceId + '/workbook').Replace('(', '%28').Replace(')', '%29')
+}
+
 function Get-DemoOperationalWorkbook {
     [CmdletBinding()]
     param(
@@ -409,7 +429,8 @@ function Get-DemoOperationalWorkbook {
         [Parameter(Mandatory)][object[]]$Machines,
         [object[]]$Topology = @(),
         [switch]$Draft,
-        [ValidateRange(-12, 14)][decimal]$DisplayUtcOffsetHours = 0
+        [ValidateRange(-12, 14)][decimal]$DisplayUtcOffsetHours = 0,
+        [ValidatePattern('^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')][string]$TenantId = ''
     )
     $scope = Get-DemoWorkbookScope $WorkspaceResourceId
     $identity = Get-DemoOperationalWorkbookIdentity -Purpose $Purpose -WorkspaceResourceId $WorkspaceResourceId -Draft:$Draft
@@ -425,7 +446,12 @@ function Get-DemoOperationalWorkbook {
     $defaults['UtcOffsetHours'] = $DisplayUtcOffsetHours.ToString('0.##', [cultureinfo]::InvariantCulture)
     $context = @{
         Roster = $roster; Scope = $scope; Workspace = $WorkspaceResourceId.ToLowerInvariant(); QueryRoot = (Join-Path $root 'queries')
-        Defaults = $defaults; Tokens = @{ SCOPE_NOTE = $note; PREPARED = $prepared }
+        Defaults = $defaults
+        Tokens = @{
+            SCOPE_NOTE = $note; PREPARED = $prepared
+            LINK_CAPACITY = (Get-DemoOperationalWorkbookLink -Purpose capacity -WorkspaceResourceId $WorkspaceResourceId -Draft:$Draft -TenantId $TenantId)
+            LINK_OPTIMISATION = (Get-DemoOperationalWorkbookLink -Purpose optimisation -WorkspaceResourceId $WorkspaceResourceId -Draft:$Draft -TenantId $TenantId)
+        }
     }
     if (-not $Draft) {
         $book.items = @($book.items | Where-Object { $_.name -ne 'draft-banner' })
@@ -433,7 +459,7 @@ function Get-DemoOperationalWorkbook {
     Update-DemoTemplateNode $book.items $context
     $book.fallbackResourceIds = @($WorkspaceResourceId.ToLowerInvariant())
     $serialized = $book | ConvertTo-Json -Depth 100 -Compress
-    if ($serialized -match '__(QUERY|OPTIONS|DEFAULT|SCOPE|PREPARED|ROSTER)[A-Z_]*(:[A-Za-z0-9_.-]+)?__') { throw 'Unresolved workbook token; no deployment.' }
+    if ($serialized -match '__(QUERY|OPTIONS|DEFAULT|SCOPE|PREPARED|ROSTER|LINK)[A-Z_]*(:[A-Za-z0-9_.-]+)?__') { throw 'Unresolved workbook token; no deployment.' }
     [pscustomobject]@{
         Name = $identity.Name
         ResourceId = $identity.ResourceId
@@ -444,5 +470,5 @@ function Get-DemoOperationalWorkbook {
     }
 }
 
-Export-ModuleMember -Function Get-DemoOperationalWorkbook, Get-DemoOperationalWorkbookIdentity, Get-DemoOperationalScenario, Get-DemoOperationalRoster,
+Export-ModuleMember -Function Get-DemoOperationalWorkbook, Get-DemoOperationalWorkbookIdentity, Get-DemoOperationalWorkbookLink, Get-DemoOperationalScenario, Get-DemoOperationalRoster,
     ConvertTo-DemoNestedTopology, Get-DemoOperationalQuery, Get-DemoOperationalArgQuery, Expand-DemoOperationalQuery

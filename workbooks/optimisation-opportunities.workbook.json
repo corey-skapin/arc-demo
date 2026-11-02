@@ -11,7 +11,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# Optimisation opportunities\n*Which machines are worth a conversation about cost or efficiency, why they were flagged, and what evidence is still missing. Candidates are not approved savings. Nothing here shuts down, resizes, tags or deletes anything: observation is separate from approval.*"
+        "json": "# Optimisation opportunities\n*Which machines are worth a conversation about cost or efficiency, why they were flagged, and what evidence is still missing. Candidates are not approved savings. Nothing here shuts down, resizes, tags or deletes anything: observation is separate from approval.*\n\n*Capacity and dependency evidence for the same machines: [Capacity and headroom](__LINK_CAPACITY__).*"
       },
       "name": "header"
     },
@@ -245,7 +245,7 @@
         "size": 3,
         "title": "Review reasons",
         "noDataMessage": "No machines match the current filters.",
-        "noDataMessageStyle": 5,
+        "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -320,7 +320,7 @@
         "title": "Review candidates (select a row for the review detail)",
         "description": "Flagged = a reason to start a conversation. Needs evidence = a missing measurement, not a clean result. Not flagged = nothing found with the evidence available.",
         "noDataMessage": "No machines match the current filters.",
-        "noDataMessageStyle": 5,
+        "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -472,7 +472,7 @@
                   {
                     "operator": "Default",
                     "thresholdValue": null,
-                    "representation": "gray",
+                    "representation": "unknown",
                     "text": "{0}{1}"
                   }
                 ],
@@ -506,7 +506,7 @@
                   {
                     "operator": "Default",
                     "thresholdValue": null,
-                    "representation": "gray",
+                    "representation": "unknown",
                     "text": "{0}{1}"
                   }
                 ],
@@ -540,7 +540,7 @@
                   {
                     "operator": "Default",
                     "thresholdValue": null,
-                    "representation": "gray",
+                    "representation": "unknown",
                     "text": "{0}{1}"
                   }
                 ],
@@ -568,7 +568,7 @@
                   {
                     "operator": "Default",
                     "thresholdValue": null,
-                    "representation": "gray",
+                    "representation": "unknown",
                     "text": "{0}{1}"
                   }
                 ],
@@ -596,7 +596,7 @@
                   {
                     "operator": "Default",
                     "thresholdValue": null,
-                    "representation": "gray",
+                    "representation": "unknown",
                     "text": "{0}{1}"
                   }
                 ],
@@ -830,7 +830,7 @@
               "size": 0,
               "title": "Underutilisation by machine",
               "noDataMessage": "No machines match the current filters.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -885,7 +885,7 @@
                         {
                           "operator": "Default",
                           "thresholdValue": null,
-                          "representation": "gray",
+                          "representation": "unknown",
                           "text": "{0}{1}"
                         }
                       ],
@@ -1221,7 +1221,7 @@
               "title": "Observed activity by local hour of day (average CPU %, shared 0-100 scale)",
               "description": "Darker = busier. A blank cell is an hour with no samples: unknown, not idle. Idle hours = full hours with average CPU below 5%.",
               "noDataMessage": "No machines match the current filters.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1313,7 +1313,7 @@
               "size": 0,
               "title": "Proposed off-window checked against observed activity",
               "noDataMessage": "No machines match the current filters.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1634,13 +1634,13 @@
                         {
                           "operator": "==",
                           "thresholdValue": "Not reporting",
-                          "representation": "warning",
+                          "representation": "orange",
                           "text": "{0}{1}"
                         },
                         {
                           "operator": "Default",
                           "thresholdValue": null,
-                          "representation": "unknown",
+                          "representation": "gray",
                           "text": "{0}{1}"
                         }
                       ],
@@ -1768,7 +1768,7 @@
           {
             "type": 1,
             "content": {
-              "json": "### Consolidation review\nGroups machines by application or role and operating system, and lists the low-utilisation members side by side. **Observed peaks are not additive and no placement is invented**: dependencies, licensing, performance peaks and ownership are not assessed here. Guests are never consolidation candidates."
+              "json": "### Consolidation review\nGroups machines by application or role and operating system, and lists the low-utilisation members side by side. **Observed peaks are not additive and no placement is invented**: dependencies, licensing, performance peaks and ownership are not assessed here. Guests are never consolidation candidates.\n\n*Capacity and dependency evidence (peaks, memory, disk, parent and guest): [Capacity and headroom](__LINK_CAPACITY__).*"
             },
             "name": "consol-header"
           },
@@ -1780,7 +1780,7 @@
               "size": 0,
               "title": "Groups",
               "noDataMessage": "No machines match the current filters.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -2032,7 +2032,7 @@
                         {
                           "operator": "Default",
                           "thresholdValue": null,
-                          "representation": "gray",
+                          "representation": "unknown",
                           "text": "{0}{1}"
                         }
                       ],
@@ -2105,7 +2105,7 @@
           {
             "type": 1,
             "content": {
-              "json": "### Review detail: {SelectedHost}\nObservation is separate from approval: this card never triggers an action."
+              "json": "### Review detail: {SelectedHost}\nObservation is separate from approval: this card never triggers an action.\n\n*Capacity evidence for this machine: [Capacity and headroom](__LINK_CAPACITY__) (select it in the status table).*"
             },
             "name": "detail-header",
             "conditionalVisibility": {
@@ -2191,7 +2191,7 @@
               "size": 1,
               "title": "Memory in use: mean and peak",
               "noDataMessage": "No memory samples for this machine in the window.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -2221,7 +2221,7 @@
               "size": 1,
               "title": "Free space per volume (volumes still reporting)",
               "noDataMessage": "No per-volume free-space samples for this machine in the window.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -2251,7 +2251,7 @@
               "size": 0,
               "title": "Evidence behind the flags (every counter, including missing ones)",
               "noDataMessage": "No evidence rows for this machine.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",

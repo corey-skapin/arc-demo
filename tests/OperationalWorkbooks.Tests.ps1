@@ -13,6 +13,10 @@ BeforeAll {
     function Get-Placeholders([string]$Text) {
         [regex]::Matches($Text, '\{([A-Za-z][A-Za-z0-9]*)(?::[A-Za-z]+)?\}') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
     }
+    function Get-JsonNodes($Node) {
+        if ($Node -is [System.Collections.IList]) { foreach ($child in $Node) { Get-JsonNodes $child } }
+        elseif ($Node -is [pscustomobject]) { $Node; foreach ($property in $Node.PSObject.Properties) { Get-JsonNodes $property.Value } }
+    }
     # Every {placeholder} must be a workbook parameter visible at that point (global, exported by a selection, or in an enclosing group).
     function Test-WorkbookScoping($items, [string[]]$scopeNames) {
         $local = [System.Collections.Generic.List[string]]::new($scopeNames)
@@ -129,6 +133,83 @@ Describe 'Scoped operational workbook rendering' {
         { Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines @() } | Should -Throw
         { Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines @(@{ id = "$scope/providers/Microsoft.Compute/virtualMachines/parent" }) } | Should -Throw '*Foreign*'
         { Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines @($machines[0], $machines[0]) } | Should -Throw '*duplicate*'
+    }
+
+    It 'uses only documented icon names, colour names and palettes for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        # Grid icon names are documented in Learn (workbooks grid visualizations); colour and palette names are the ones the official sample workbooks use.
+        $icons = @('cancelled', 'critical', 'disabled', 'error', 'failed', 'info', 'none', 'pending', 'stopped', 'question', 'success', 'unknown', 'warning', 'uninitialized',
+            'resource', 'up', 'down', 'left', 'right', 'trendup', 'trenddown', '4', '3', '2', '1', 'Sev0', 'Sev1', 'Sev2', 'Sev3', 'Sev4', 'Fired', 'Resolved',
+            'Available', 'Unavailable', 'Degraded', 'Unknown', 'Blank')
+        $colours = @('None', 'redBright', 'green', 'yellow', 'orange', 'lightBlue', 'gray', 'turquoise', 'red', 'blueDark', 'blue', 'grayBlue', 'magenta', 'greenDark',
+            'purple', 'brown', 'yellowDark', 'amethyst', 'pink', 'orangeDark')
+        $palettes = @('auto', 'blue', 'blueDark', 'green', 'greenRed', 'orange', 'red', 'redGreen', 'redBright', 'turquoise', 'yellow', 'gray', 'purple', 'pink', 'magenta')
+        $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
+        $formatters = @(Get-JsonNodes $book.items | Where-Object { $_.PSObject.Properties['formatter'] -and $_.PSObject.Properties['formatOptions'] })
+        $formatters.Count | Should -BeGreaterThan 20
+        $problems = foreach ($entry in $formatters) {
+            $options = $entry.formatOptions
+            if ($entry.formatter -eq 18) {
+                $kind = if ($options.PSObject.Properties['thresholdsOptions']) { $options.thresholdsOptions } else { 'colors' }
+                foreach ($rule in $options.thresholdsGrid) {
+                    if ($kind -eq 'icons' -and $rule.representation -cnotin $icons) { "$($entry.columnMatch): icon '$($rule.representation)'" }
+                    if ($kind -ne 'icons' -and $rule.representation -cnotin $colours) { "$($entry.columnMatch): colour '$($rule.representation)'" }
+                }
+            } elseif ($entry.formatter -in 8, 10, 12 -and $options.PSObject.Properties['palette'] -and $options.palette -cnotin $palettes) {
+                "$($entry.columnMatch): palette '$($options.palette)'"
+            }
+        }
+        @($problems) | Should -BeNullOrEmpty
+    }
+
+    It 'gives every query item a clear empty state, amber only where absence is itself a finding, for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
+        $warningAllowed = @('cpu-p95', 'cpu-peak', 'detail-cpu', 'arc-status', 'own-grid')
+        $items = @(Get-WorkbookItems $book.items | Where-Object { $_.type -eq 3 })
+        $items.Count | Should -BeGreaterThan 10
+        $missing = @($items | Where-Object { -not $_.content.PSObject.Properties['noDataMessage'] } | ForEach-Object name)
+        $missing | Should -BeNullOrEmpty
+        foreach ($item in $items) {
+            $item.content.noDataMessageStyle | Should -BeIn 3, 4, 5
+            if ($item.content.noDataMessageStyle -eq 5) { $item.name | Should -BeIn $warningAllowed }
+        }
+    }
+
+    It 'leads the capacity workbook with scope and evidence quality before the assessment tiles' {
+        $book = (Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
+        $names = @($book.items | ForEach-Object name)
+        $names.IndexOf('scope-tiles') | Should -BeGreaterThan $names.IndexOf('thresholds')
+        $names.IndexOf('scope-tiles') | Should -BeLessThan $names.IndexOf('overview-tiles')
+        $scope = $book.items | Where-Object name -eq 'scope-tiles'
+        $scope.content.visualization | Should -Be 'tiles'
+        $scope.content.query | Should -Match 'datatable\(SortKey:long\)'
+        $scope.content.query | Should -Match 'Reporting now'
+        $scope.content.query | Should -Match 'Window coverage'
+        ($book.items | Where-Object name -eq 'overview-tiles').content.query | Should -Not -MatchExactly 'Machines in scope"'
+        $scope.content.query | Should -MatchExactly 'Machines in scope"'
+    }
+
+    It 'links each workbook to its sibling, a draft to the draft and a published workbook to the published one' {
+        $tenant = '44444444-4444-4444-4444-444444444444'
+        foreach ($isDraft in $false, $true) {
+            $capacity = Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines $machines -Draft:$isDraft -TenantId $tenant
+            $optimisation = Get-DemoOperationalWorkbook -Purpose optimisation -WorkspaceResourceId $workspaceId -Machines $machines -Draft:$isDraft -TenantId $tenant
+            $other = Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines $machines -Draft:(-not $isDraft)
+            $capacity.SerializedData | Should -Match ([regex]::Escape("https://portal.azure.com/#@$tenant/resource$($optimisation.ResourceId)/workbook"))
+            $optimisation.SerializedData | Should -Match ([regex]::Escape("https://portal.azure.com/#@$tenant/resource$($capacity.ResourceId)/workbook"))
+            $optimisation.SerializedData | Should -Not -Match ([regex]::Escape($other.Name))
+        }
+        $plain = Get-DemoOperationalWorkbookLink -Purpose capacity -WorkspaceResourceId $workspaceId
+        $plain | Should -Match '^https://portal\.azure\.com/#resource/subscriptions/'
+        $plain | Should -Not -Match '#@'
+    }
+
+    It 'keeps the sibling link a valid markdown target and rejects a malformed tenant' {
+        $withParens = "$scope-(lab)/providers/Microsoft.OperationalInsights/workspaces/law-fixture"
+        $link = Get-DemoOperationalWorkbookLink -Purpose optimisation -WorkspaceResourceId $withParens
+        $link | Should -Not -Match '[()]'
+        $link | Should -Match '%28lab%29'
+        { Get-DemoOperationalWorkbookLink -Purpose capacity -WorkspaceResourceId $workspaceId -TenantId 'not-a-tenant' } | Should -Throw
+        { Get-DemoOperationalWorkbook -Purpose capacity -WorkspaceResourceId $workspaceId -Machines $machines -TenantId '](javascript:alert(1))' } | Should -Throw
     }
 
     It 'bounds the roster so every composed query stays well inside the Log Analytics request limit' {

@@ -11,7 +11,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# Capacity and headroom\n*Where is the estate under pressure, where does it appear to have headroom, and how far can the data be trusted? Evidence first: thresholds are illustrative, missing data is never zero, and nothing here resizes, stops or changes a machine.*"
+        "json": "# Capacity and headroom\n*Where is the estate under pressure, where does it appear to have headroom, and how far can the data be trusted? Evidence first: thresholds are illustrative, missing data is never zero, and nothing here resizes, stops or changes a machine.*\n\n*Next: [Optimisation opportunities](__LINK_OPTIMISATION__) turns the same evidence into review candidates.*"
       },
       "name": "header"
     },
@@ -233,7 +233,48 @@
     {
       "type": 1,
       "content": {
-        "json": "## Where should engineers look first?\nThe tiles count machines by assessment and add up to the machines in scope. **Select a machine** in the table to drive *Resource detail* below."
+        "json": "## Scope and evidence quality\nCan this view be relied on? Machines in scope, what is reporting, how fresh the newest sample is, and how much of the evidence is adequate. This lab runs on demand, so low coverage is parked time: unknown, not idle."
+      },
+      "name": "scope-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "__QUERY:cap-scope__",
+        "size": 3,
+        "title": "Scope and evidence",
+        "noDataMessage": "No machines match the current filters.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Machines",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Names",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "scope-tiles"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Where should engineers look first?\nThe five tiles count machines by assessment and add up to the machines in scope. **Select a machine** in the table to drive *Resource detail* below."
       },
       "name": "overview-header"
     },
@@ -243,9 +284,9 @@
         "version": "KqlItem/1.0",
         "query": "__QUERY:cap-tiles__",
         "size": 3,
-        "title": "Estate summary",
+        "title": "Estate capacity summary",
         "noDataMessage": "No machines match the current filters.",
-        "noDataMessageStyle": 5,
+        "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -280,7 +321,7 @@
         "title": "Status and evidence quality by machine (select a row)",
         "description": "Colour = status. Observed history is real sampled hours per counter; parked gaps are unknown time, not idle time.",
         "noDataMessage": "No machines match the current filters.",
-        "noDataMessageStyle": 5,
+        "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -965,7 +1006,7 @@
               "size": 0,
               "title": "Sustained versus brief: what the numbers say",
               "noDataMessage": "No machines match the current filters.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1244,7 +1285,7 @@
               "size": 1,
               "title": "Memory in use, 95th percentile by machine",
               "noDataMessage": "No memory samples for the machines and window selected. Linux memory exists only since the DCR counters were added.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1269,7 +1310,7 @@
               "size": 1,
               "title": "Lowest available memory (MB) by machine",
               "noDataMessage": "No available-memory samples for the machines and window selected.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1291,7 +1332,7 @@
               "size": 0,
               "title": "Memory evidence by machine",
               "noDataMessage": "No machines match the current filters.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1560,7 +1601,7 @@
               "size": 1,
               "title": "Lowest free space by machine (volumes still reporting)",
               "noDataMessage": "No per-volume free-space samples for the machines and window selected.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1584,7 +1625,7 @@
               "size": 0,
               "title": "Volumes",
               "noDataMessage": "No per-volume free-space samples for the machines and window selected.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1821,7 +1862,7 @@
           {
             "type": 1,
             "content": {
-              "json": "### Resource detail: {SelectedHost}\nSame window and thresholds as the rest of the page. Parent and guest are shown separately and are never added together."
+              "json": "### Resource detail: {SelectedHost}\nSame window and thresholds as the rest of the page. Parent and guest are shown separately and are never added together.\n\n*Review reasons for this machine: [Optimisation opportunities](__LINK_OPTIMISATION__) (select it in the candidates table).*"
             },
             "name": "detail-header",
             "conditionalVisibility": {
@@ -1903,7 +1944,7 @@
               "size": 1,
               "title": "Memory in use: mean and peak",
               "noDataMessage": "No memory samples for this machine in the window.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1933,7 +1974,7 @@
               "size": 1,
               "title": "Available memory (MB): lowest and mean",
               "noDataMessage": "No available-memory samples for this machine in the window.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1960,7 +2001,7 @@
               "size": 1,
               "title": "Free space per volume (volumes still reporting)",
               "noDataMessage": "No per-volume free-space samples for this machine in the window.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -2216,7 +2257,7 @@
               "size": 0,
               "title": "Evidence behind the assessment (every counter, including missing ones)",
               "noDataMessage": "No evidence rows for this machine.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -2380,7 +2421,7 @@
               "size": 0,
               "title": "Collection coverage: observed hours per counter (missing is shown as missing)",
               "noDataMessage": "No machines match the current filters.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -2503,7 +2544,7 @@
               "size": 0,
               "title": "Which counters feed the figures (by operating system)",
               "noDataMessage": "No samples in the window.",
-              "noDataMessageStyle": 5,
+              "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
