@@ -16,7 +16,7 @@ or realised savings. The Arc/Monitor story remains 20-30 minutes.
 
 | Reference | Use |
 | --- | --- |
-| [Nested SQL demo runbook](nested-sql-demo.md) | Proven scratch build, park, wake and remove; Jumpstart alternative |
+| [Nested SQL demo runbook](nested-sql-demo.md) | Parent preparation, proven scratch build, park, wake and remove; Jumpstart alternative |
 | [Arc runbook](runbook.md) | Base infrastructure, optional workbooks and presenter context |
 | [Lifecycle](lifecycle.md) | Explicit targets, retained data, config-driven nested guest and readiness |
 | [Troubleshooting](troubleshooting.md) | Practical build/wake failures and fixes |

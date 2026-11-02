@@ -7,28 +7,29 @@ identities, passed a real SQL query and extension/login checks, and uploaded fre
 inventory with four Online system databases. These are observed timings, not SLAs.
 
 This is an Azure-hosted nested **demo**, not a production support claim. The
-from-zero proof rebuilt the guest, **not** the prepared Azure parent, media,
-Hyper-V network or onboarding application. Use approved Windows/SQL
+timings below rebuilt the guest on a parent that was prepared by hand. The
+parent's size, data disk, Hyper-V role, network and media are now code
+([Prepare the parent](#prepare-the-parent)); a live run of that script on a fresh
+parent is not yet recorded here. Use approved Windows/SQL
 media and terms; Developer/Evaluation editions are not production licences.
 The normal fleet's `MSFT_ARC_TEST=true` simulation is a separate path.
 
-## Prepare once
+## Prepare the parent
 
-Keep the existing Windows Hyper-V parent, switch/NAT, mounted Windows Server 2022
-and SQL Server 2022 media, and the onboarding application with its approved
-permissions. Each build ensures the application's `Azure Connected Machine
-Onboarding` role at the Arc resource group, adds a uniquely named one-day
-application credential, delivers it only through the protected Connect
-parameter, and removes that credential in `finally`, verifying the pre-build
-key IDs are unchanged (the same `Initialize-DemoOnboardingIdentity` helper
-Deploy uses). No vault or private-endpoint inputs are needed. Do not rotate
-existing credentials, change Defender policy/pricing, or rebuild a retained
-parent to wake the guest.
-The parent needs sufficient memory, nested-virtualization support and space for
-the guest's 64-GiB OS and 32-GiB data disks.
+The guest runs under Hyper-V inside one Azure VM, the **parent**. The fleet's
+B-series sizes cannot run Hyper-V guests, so the parent needs a nested-capable
+size (default `Standard_D4s_v5`), a data disk for the guest and installer media
+(it becomes `D:`; this size has no temp disk), the Hyper-V role, an internal
+switch with a NAT, and the Windows Server 2022 Evaluation and SQL Server 2022
+Developer ISOs. All of it is code:
+
+| Part | Done by | Result |
+| --- | --- | --- |
+| Size, data disk, security type | `Deploy-ArcDemo.ps1`, from the skin's `nestedSqlGuest` block | `Standard_D4s_v5`, a 128 GiB `StandardSSD_LRS` disk at LUN 0, security type `Standard`; a later Deploy refuses to resize or detach them |
+| `D:` volume, Hyper-V role, switch and NAT, ISOs, build input | `Prepare-NestedSqlParent.ps1` | `D:` (NTFS, `NestedSQL`), Hyper-V running, `NestedSqlSwitch` and NAT `172.31.240.0/24`, both ISOs hash-verified in `D:\NestedSQL\Media`, `.local\nested-sql-build.json` |
 
 Copy the selected skin to `.local\demo-skin.json`; set its `azure.namePrefix` to
-the actual demo prefix and enable:
+the actual demo prefix, name an existing Windows fleet VM as the parent and enable:
 
 ```json
 "nestedSqlGuest": {
@@ -40,8 +41,10 @@ the actual demo prefix and enable:
 ```
 
 Use actual names privately; the scratch guest and Arc names must match. The same
-block drives normal Activate, Hibernate and Remove and the optional pair-only
-state helper. Both bundled skins leave it disabled.
+block drives Deploy, normal Activate, Hibernate and Remove and the optional
+pair-only state helper. Both bundled skins leave it disabled. Optional
+`parentVmSize`, `parentDataDiskGb` and `parentDataDiskStorageAccountType` replace
+the defaults, for example to match an existing parent exactly.
 
 If an unused alternative parent remains in the same infra group, explicitly list
 its name under `operations.keepParkedVmNames` in the private skin, for example
@@ -50,13 +53,73 @@ be deallocated and outside the active fleet. Whole-estate Activate leaves it
 parked, readiness checks that state, and Hibernate still parks all group compute.
 This does not permit starting unknown VMs or touching their nested guests.
 
-Put the build's nonsecret arguments in `.local\nested-sql-build.json`: explicit
-`SubscriptionId`, `TenantId`, retained `ParentVmId`, `Location`, parent-side
-`WindowsIsoPath` and `SqlIsoPath`, `SwitchName`, `GuestAddress`, `Gateway`,
-`DnsServer`, and `OnboardingApplicationId`. All IDs, addresses, media paths and
-results stay outside git. The build obtains and removes the one-day credential;
-the credential value is never a build-file input. `Get-Help
-.\scripts\New-NestedSqlDemo.ps1 -Full` lists these inputs.
+With the lab Active (a fresh Deploy leaves it Active), preview and then prepare.
+The subscription and tenant stay private:
+
+```powershell
+$prep = @{ SubscriptionId = $sub; TenantId = $tenant; SkinPath = '.local\demo-skin.json' }
+.\scripts\Prepare-NestedSqlParent.ps1 @prep -WhatIf
+.\scripts\Prepare-NestedSqlParent.ps1 @prep -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms -Confirm:$false
+```
+
+Each phase checks first and changes only what is missing, so a rerun on a
+prepared parent mutates and restarts nothing. `-Phase` selects some phases;
+Preflight always runs.
+
+| Phase | Does | Skips or refuses |
+| --- | --- | --- |
+| Preflight | Read-only: exact context and inventory, VM state, lab Active | A parked lab (run the approved Activate first: it never starts compute without explicit outbound networking) or a VM that is mid-transition |
+| Size | Deallocate, resize to the declared size, start again | Skips when already that size (Deploy declared it); refuses while a nested guest runs |
+| Disk | Create and attach the declared data disk at LUN 0 | Skips when attached as declared; refuses when LUN 0 or the disk name belongs to something else, and never resizes, converts or moves a disk |
+| Volume | Initialise the blank LUN 0 disk as `D:` (NTFS, `NestedSQL`) with `VMs` and `Media` folders | Skips when already so; refuses a `D:` that is something else |
+| HyperV | Install the role with management tools; the restart is issued from Azure (`az vm restart`), never from inside the guest | Skips when the role and hypervisor run; refuses while a nested guest runs, with Trusted Launch, or on an untested size (`-AllowUntestedSize`) |
+| Network | Internal switch, host address `172.31.240.1`, NAT for `172.31.240.0/24` | Skips when matching; refuses a range that overlaps the Azure address space or a route, or conflicts with an existing switch or NAT |
+| Media | Runs `Stage-DemoMedia.ps1` for both ISOs into `D:\NestedSQL\Media` | Skips both when present with the pinned size and SHA-256 |
+| Verify | Read-only checks, including both ISO hashes; on a pass writes the build input | Never starts a VM; stops with an error when a required check fails |
+
+- `-WhatIf` reads Azure only: no guest command, no start, no download.
+- Staging media needs both `-AcceptWindowsEvaluationTerms` and
+  `-AcceptSqlDeveloperTerms`. Acceptance is recorded privately and never assumed;
+  both ISOs are pinned in `config\demo-media.json` and checked before use (see
+  [media staging](sql-engine-workload.md#approval-fit-and-media)).
+- It uses classic Run Command, so it does not consume the parent's 25 saved
+  managed commands. Do not run it while Activate, Hibernate, Deploy or a nested
+  build is using the parent.
+- It stops at the first failing phase and keeps partial progress; fix the cause
+  and rerun ([symptoms](troubleshooting.md#preparing-the-nested-sql-parent-stops)).
+- The result object has `status` (`pass`, `pending` or `fail`), each phase as
+  `satisfied`, `changed` or `skipped` with seconds, and the checks; `-ResultPath`
+  saves it outside git.
+- By hand this took about 31 minutes wall clock (about 16 minutes of productive
+  steps: resize, disk, role and restart, network, two ISO downloads). The
+  scripted end-to-end time on a fresh parent is not yet recorded.
+
+A parent prepared by hand needs no change: declare its actual size and disk in the
+skin ([Deploy refuses a retained VM's size or data
+disk](troubleshooting.md#deploy-refuses-a-retained-vms-size-or-data-disk)) and
+Prepare only verifies it, without a restart.
+
+When Verify passes it writes the build's nonsecret arguments to
+`.local\nested-sql-build.json`, keeping other keys already in that file:
+`SubscriptionId`, `TenantId`, `ParentVmId` (the Azure VM id), `Location`,
+`WindowsIsoPath`, `SqlIsoPath`, `SwitchName`, `GuestAddress`, `Gateway`,
+`DnsServer`, and `OnboardingApplicationId` (looked up by the display name
+`sp-<prefix>-onboard`, which Deploy creates, or pass `-OnboardingApplicationId`).
+For a parent prepared another way, write the same keys by hand; `Get-Help
+.\scripts\New-NestedSqlDemo.ps1 -Full` lists these inputs. All IDs, addresses,
+media paths and results stay outside git.
+
+The build needs the onboarding application `sp-<prefix>-onboard`, which Deploy
+creates when it is absent. Each build ensures the application's `Azure Connected
+Machine Onboarding` role at the Arc resource group, adds a uniquely named one-day
+application credential, delivers it only through the protected Connect parameter,
+and removes that credential in `finally`, verifying the pre-build key IDs are
+unchanged (the same `Initialize-DemoOnboardingIdentity` helper Deploy uses); the
+credential value is never a build-file input. No vault or private-endpoint inputs
+are needed. Do not rotate existing credentials, change Defender policy/pricing, or
+rebuild a retained parent to wake the guest. The parent needs sufficient memory,
+nested-virtualization support and space for the guest's 64-GiB OS and 32-GiB data
+disks.
 
 ## Build
 
