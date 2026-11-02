@@ -36,8 +36,8 @@ reset faults or run destructive rehearsals incidentally.
   actual engine/transaction evidence, a live bounded lock-timeout/Sev2/automatic
   Review investigation rehearsal and capture limits, live-verified operational
   event v2/alert routing and guarded emitter update; separate from nested Arc SQL.
-- [LOB sample](../samples/lob-arc-app/README.md): live bounded warning,
-  original-worker restoration and automatic-investigation limitations.
+- [LOB sample](../samples/lob-arc-app/README.md): bounded warning and representative
+  follow-up, original-worker restoration and automatic-investigation limitations.
 - [Container App](container-app-fault.md) and [AKS](aks-break-scenario.md):
   separately prepared scenarios.
 - [SQL support decision](sql-arc-spike.md), [SQL-shaped simulator](sql-workload-simulation.md),
