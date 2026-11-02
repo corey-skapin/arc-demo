@@ -35,6 +35,9 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
 - Governance: the Governance Health Score tile projects the `Compliant` column its
   tile reads. A few titles and headings that held a replacement character (U+FFFD)
   in Governance and Machine Intelligence Center now carry an emoji.
+- Compliance, Security & Governance: the patch scorecard and the pending-updates table read
+  Update Manager assessments (`patchassessmentresources`) instead of the upstream
+  connection-state estimate, and report a failed or never-assessed machine as such.
 - SQL Estate Dashboard: the version and licence charts understand Arc SQL text
   values such as `SQL Server 2022` and `Free`, not only numeric versions. The BPA
   tiles remain explained placeholders because this lab collects no BPA data.
