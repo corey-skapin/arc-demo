@@ -18,7 +18,7 @@ lookup constants and required upstream attribution are retained.
 | `Arc_Compliance_Security_Governance_example.json` | Compliance, Security & Governance | Estate inventory, NIST CSF v2 compliance, patch posture, privileged activity, TLS hardening, Defender alerts, configuration drift. Not deployed: the lab publishes the rebuilt `workbooks/arc-compliance.workbook.json`. |
 | `ArcMachineIntelligenceCenter.json` | Arc Machine Intelligence Center | One Arc machine in one place: identity, CPU, memory and disk (Windows and Linux), Defender checks, software changes, SQL, extensions and policy, events and uptime. Opens on a Windows host with telemetry; machines with no Azure Monitor Agent are labelled. |
 | `Asset_Inventory_Workbook_Example.json` | Asset Inventory | Estate-wide hardware/software inventory roll-up. |
-| `GovernanceComplianceWorkbook_Experiment.json` | Governance & Compliance (experimental) | Larger compliance workbook with deeper drill-downs. |
+| `GovernanceComplianceWorkbook_Experiment.json` | Governance & Compliance (experimental) | Larger compliance workbook with deeper drill-downs. Not deployed: the lab publishes the rebuilt `workbooks/arc-governance.workbook.json`. |
 | `SQL_Estate_Dashboard.json` | SQL Estate Dashboard | SQL under one view: the Arc SQL inventory beside the monitored SQL workload, lock-timeout incidents and alert rule; best practices assessment guarded (not enabled in this lab). |
 
 ## Local changes to the vendored snapshot
@@ -64,6 +64,12 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   guarded union and show a "not enabled" note while this lab collects no BPA data, the version and
   licence charts understand Arc SQL text values such as `SQL Server 2022` and `Free`, and its Log Analytics
   tiles carry no workspace picker (Phase 11 pins them at publish). `tests/SqlEstateWorkbook.Tests.ps1` guards it.
+- Governance & Compliance (experimental) is no longer deployed from this folder either. It is rebuilt in
+  `workbooks/arc-governance.workbook.json` (attribution kept in its header): policy compliance for all resources
+  next to the Arc servers, compliance by resource group and assignment, guest configuration, tag coverage and
+  remediation tasks, all from Resource Graph. The upstream business-case text with invented dollar and ROI
+  figures, the hospital framing and the always-empty vulnerability tiles are replaced by a "not applicable in
+  this lab" note (`tests/GovernanceWorkbook.Tests.ps1` guards it). The upstream file stays here as the snapshot.
 
 ## How they get into your workspace
 

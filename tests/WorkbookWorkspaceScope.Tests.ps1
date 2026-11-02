@@ -2,7 +2,7 @@ BeforeDiscovery {
     $books = @(
         @{ Name = 'Arc - Asset Inventory'; Path = 'workbooks\arc-asset-inventory.workbook.json' }
         @{ Name = 'Arc - Compliance, Security & Governance'; Path = 'workbooks\arc-compliance.workbook.json' }
-        @{ Name = 'Arc - Governance & Compliance (experimental)'; Path = 'workbooks\nseilaz\GovernanceComplianceWorkbook_Experiment.json' }
+        @{ Name = 'Arc - Governance & Compliance (experimental)'; Path = 'workbooks\arc-governance.workbook.json' }
         @{ Name = 'Arc - Machine Intelligence Center'; Path = 'workbooks\nseilaz\ArcMachineIntelligenceCenter.json' }
         @{ Name = 'Arc - SQL Estate Dashboard'; Path = 'workbooks\nseilaz\SQL_Estate_Dashboard.json' }
     )
