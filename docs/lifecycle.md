@@ -461,18 +461,62 @@ parked state actually observed, not future activation or fresh deployment.
 Run full/destructive smoke cycles only in an explicitly approved disposable lab,
 never incidentally against an in-use demo.
 
-The retained-estate default wake from merged main completed on 2 November 2026
-with all eight guest checks passing and new-host patch assessments submitted;
-independent Active readiness still had six Linux extension models `Updating`.
-See the [dated evidence](nested-sql-demo.md) rather than treating script exit 0
-as full Ready. Drift, denial and partial-failure predicates remain mocked:
-the successful wake does not exercise every failure path or prove fresh
-deployment, patch completion, full removal or rebuild.
+An earlier retained-estate wake on 2 November 2026 used the old Run Command host
+checks; all eight passed, but independent readiness still reported six Linux
+extension models `Updating`. See the [earlier dated evidence](nested-sql-demo.md).
+The shared Heartbeat wait replaced those host checks afterwards.
 
-The shared Heartbeat wait replaced those Run Command host checks afterwards. It has
-mocked coverage and a read-only run against the awake estate (eight fresh Heartbeats
-while six Linux extension models were still `Updating`: all eight hosts passed in
-the first poll with warnings). A full wake timing has not been recorded yet.
+### Default shared-wait park/wake proof: 2 November 2026
+
+An explicitly approved cycle used a clean checkout of merged main `3a70e96`,
+including the shared-wait, best-effort parking and nested-parent lifecycle changes.
+Default Hibernate ran from 03:00:50 to 03:09:25 UTC: **8 minutes 35.2 seconds**.
+Direct post-park reads verified all nine backing VMs deallocated, the named NAT
+gateway and public IP absent, and all 35 retained Container App revisions inactive
+and `Stopped`. For independent revision reads, use
+`az containerapp revision list --all`: the default list hides inactive revisions.
+
+Default Activate ran from 03:13:25 to 03:28:19 UTC: **14 minutes 54.1 seconds**
+wall-clock, exit 0 and result `pass`. No skip flags, host-check Run Commands, explicit
+service restarts or repair fallback were used. The shared 12-minute host deadline
+is not an end-to-end wake-time promise: preflight, network restoration, compute
+starts and final readiness also contribute to wall-clock time.
+
+All eight monitored hosts passed using `arm+heartbeat`; the saved results recorded
+Arc `Connected`, empty `restartedServices` and these post-start Heartbeats.
+Times below are UTC on 2 November, not a current-health snapshot.
+
+| Host | Method | lastHeartbeatUtc |
+| --- | --- | --- |
+| win-sql-01 | arm+heartbeat | 03:22:31.5745042 |
+| win-sql-02 | arm+heartbeat | 03:23:13.0873741 |
+| win-app-01 | arm+heartbeat | 03:22:48.6951573 |
+| win-app-02 | arm+heartbeat | 03:22:51.0222153 |
+| win-app-03 | arm+heartbeat | 03:22:54.3905789 |
+| lnx-app-01 | arm+heartbeat | 03:18:38.4845995 |
+| lnx-app-02 | arm+heartbeat | 03:17:04.7261035 |
+| lnx-app-03 | arm+heartbeat | 03:18:47.4256979 |
+
+The nested guest's separate parent Run Command ran concurrently from
+03:16:57.544 to 03:18:09.964 UTC, about **72.42 seconds**, within its five-minute
+budget. Its start result and Arc connection passed. Five Windows patch assessments
+were submitted; the three Linux submissions reported `already-in-progress`
+conflicts, without retry or cancellation. Submission is not completion.
+
+Independent read-only Active readiness passed at 03:38:50 UTC with no required
+non-pass rows. Six Linux AMA/Change Tracking VM-extension models still reported
+`Updating` as non-required warnings. The activation REST snapshots had reported
+`Succeeded` for the same extension paths; the cause of the differing readbacks
+was not established. This is not proof of extension completion. Required
+Heartbeats passed, and no extension or sensor repair was attempted.
+
+This proves one short retained-estate park/wake, including fresh post-start
+Heartbeats without the old explicit service restarts. Arc records still read
+`Connected` before wake while their backing VMs were parked, so an observed
+`Disconnected` to `Connected` transition, long-park reconnection and guest service
+health were not proven. Fresh deployment, double-deploy idempotency, AKS,
+assessment completion, full removal and rebuild remain outside this proof;
+drift, denial and partial-failure paths remain mocked. The estate was left awake.
 
 The best-effort parking and shared-wait changes have local coverage for
 missing manifests, unlisted VMs, OS/skin drift, foreign NAT, partial deallocation,

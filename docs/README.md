@@ -20,7 +20,7 @@ or realised savings. The Arc/Monitor story remains 20-30 minutes.
 | [Arc runbook](runbook.md) | Base infrastructure, optional workbooks and presenter context |
 | [Ordered build wrapper](runbook.md#build-everything-in-order-optional-wrapper) | Plan-first build of the whole estate in order, plus read-only snapshot and parity |
 | [Private build folder](private-config.md) | The one private folder: build config, state and evidence |
-| [Lifecycle](lifecycle.md) | Explicit targets, retained data, config-driven nested guest and readiness |
+| [Lifecycle](lifecycle.md) | Explicit targets, retained data, config-driven nested guest, readiness and measured shared-wait park/wake limits |
 | [Troubleshooting](troubleshooting.md) | Practical build/wake failures and fixes |
 | [AI handoff](ai-deploy-handbook.md) | Ask an assistant to prepare the demo |
 | [Cost](cost.md) | Selected-workload estimates and retained charges |
