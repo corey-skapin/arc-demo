@@ -4,7 +4,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# Arc Machine Intelligence Centre\n*One Azure Arc machine in one place: identity, live performance, security, software changes, SQL, extensions, policy and uptime. The page opens on a Windows host with the Azure Monitor Agent; use **Machine** to switch. A machine with no Azure Monitor Agent (such as the nested SQL guest) is labelled and still shows its Arc, Defender and SQL inventory.*"
+        "json": "# Arc Machine Intelligence Center\n*One Azure Arc machine in one place: identity, live performance, security, software changes, SQL, extensions, policy and uptime. The page opens on a Windows host with the Azure Monitor Agent; use **Machine** to switch. A machine with no Azure Monitor Agent (such as the nested SQL guest) is labelled and still shows its Arc, Defender and SQL inventory.*"
       },
       "name": "title"
     },
@@ -89,7 +89,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines' and tolower(name) == tolower(tostring(split('{Machine}', '/')[-1]))\n| extend Status = tostring(properties.status), AgentVersion = tostring(properties.agentVersion), Changed = todatetime(properties.lastStatusChange),\n    Cores = toint(properties.detectedProperties.logicalCoreCount), MemGb = toreal(properties.detectedProperties.totalPhysicalMemoryInGigabytes),\n    OsSku = tostring(properties.osSku), OsType = tostring(properties.osType), Role = tostring(tags['role']), Env = tostring(tags['env'])\n| extend ChangedMin = datetime_diff('minute', now(), Changed)\n| extend ChangedText = case(ChangedMin < 120, strcat(ChangedMin, ' min ago'), ChangedMin < 2880, strcat(round(ChangedMin / 60.0, 1), ' h ago'), strcat(round(ChangedMin / 1440.0, 1), ' d ago'))\n| project data = pack_array(\n    pack('Label', 'Arc connection', 'Value', Status, 'Note', strcat('changed ', ChangedText), 'Order', 1),\n    pack('Label', 'Operating system', 'Value', iff(OsType =~ 'windows', 'Windows', iff(OsType =~ 'linux', 'Linux', OsType)), 'Note', substring(OsSku, 0, 38), 'Order', 2),\n    pack('Label', 'Compute', 'Value', strcat(Cores, ' vCPU'), 'Note', strcat(toint(round(MemGb, 0)), ' GB memory'), 'Order', 3),\n    pack('Label', 'Arc agent', 'Value', strcat('v', AgentVersion), 'Note', 'Azure Connected Machine agent', 'Order', 4),\n    pack('Label', 'Role', 'Value', iff(isempty(Role), 'untagged', Role), 'Note', strcat('environment: ', iff(isempty(Env), 'untagged', Env)), 'Order', 5))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines' and tolower(name) == tolower(tostring(split('{Machine}', '/')[-1]))\n| extend Status = tostring(properties.status), AgentVersion = tostring(properties.agentVersion), Changed = todatetime(properties.lastStatusChange),\n    Cores = toint(properties.detectedProperties.logicalCoreCount), MemGb = toreal(properties.detectedProperties.totalPhysicalMemoryInGigabytes),\n    OsSku = tostring(properties.osSku), OsType = tostring(properties.osType), Role = tostring(tags['role']), Env = tostring(tags['env'])\n| extend OsShort = replace_string(replace_string(replace_string(OsSku, 'Windows Server ', 'Server '), ' Evaluation', ' Eval'), ' Edition', '')\n| extend ChangedMin = datetime_diff('minute', now(), Changed)\n| extend ChangedText = case(ChangedMin < 120, strcat(ChangedMin, ' min ago'), ChangedMin < 2880, strcat(toint(round(ChangedMin / 60.0, 0)), ' h ago'), strcat(toint(round(ChangedMin / 1440.0, 0)), ' d ago'))\n| project data = pack_array(\n    pack('Label', 'Arc connection', 'Value', Status, 'Note', strcat('changed ', ChangedText), 'Order', 1),\n    pack('Label', 'Operating system', 'Value', iff(OsType =~ 'windows', 'Windows', iff(OsType =~ 'linux', 'Linux', OsType)), 'Note', substring(OsShort, 0, 30), 'Order', 2),\n    pack('Label', 'Compute', 'Value', strcat(Cores, ' vCPU'), 'Note', strcat(toint(round(MemGb, 0)), ' GB memory'), 'Order', 3),\n    pack('Label', 'Arc agent', 'Value', strcat('v', AgentVersion), 'Note', 'Connected Machine agent', 'Order', 4),\n    pack('Label', 'Role', 'Value', iff(isempty(Role), 'untagged', Role), 'Note', strcat('environment: ', iff(isempty(Env), 'untagged', Env)), 'Order', 5))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
         "size": 3,
         "title": "Arc identity",
         "noDataMessage": "This machine is not an Azure Arc machine in the subscriptions you can read, so there is no Arc identity to show.",
@@ -122,7 +122,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet CpuRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| where ObjectName in ('Processor Information', 'Processor') and CounterName == '% Processor Time' and InstanceName in ('_Total', 'total');\nlet CpuObject = toscalar(CpuRaw | summarize Info = countif(ObjectName == 'Processor Information') | project iff(Info > 0, 'Processor Information', 'Processor'));\nlet Cpu = CpuRaw | where ObjectName == CpuObject | project TimeGenerated, Value = todouble(CounterValue);\nlet MemRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName == 'Memory';\nlet MemPct = MemRaw | where CounterName in ('% Committed Bytes In Use', '% Used Memory') | project TimeGenerated, Value = todouble(CounterValue);\nlet MemAvailGb = MemRaw | where CounterName in ('Available MBytes', 'Available MBytes Memory') | project TimeGenerated, Value = todouble(CounterValue) / 1024.0;\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nlet Beats = Heartbeat | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M;\nlet LastBeat = toscalar(Beats | summarize max(TimeGenerated));\nlet CpuNow = toscalar(Cpu | summarize arg_max(TimeGenerated, Value) | project Value);\nlet CpuP95 = toscalar(Cpu | summarize percentile(Value, 95));\nlet CpuPeak = toscalar(Cpu | summarize max(Value));\nlet MemNow = toscalar(MemPct | summarize arg_max(TimeGenerated, Value) | project Value);\nlet AvailNow = toscalar(MemAvailGb | summarize arg_max(TimeGenerated, Value) | project Value);\nlet DiskLowest = DiskVolumes | where Metric == 'Pct' | summarize arg_max(TimeGenerated, Value) by Volume | summarize arg_min(Value, Volume);\nlet DiskPct = toscalar(DiskLowest | project Value);\nlet DiskVol = toscalar(DiskLowest | project Volume);\nlet WinEvents = Event | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, IsError = EventLevelName in ('Error', 'Critical');\nlet LinuxLogs = Syslog | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, IsError = SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error');\nlet Logs = union WinEvents, LinuxLogs | summarize Total = count(), Errors = countif(IsError);\nlet LogTotal = toscalar(Logs | project Total);\nlet LogErrors = toscalar(Logs | project Errors);\nlet HasBeat = isnotnull(LastBeat);\nprint Dummy = 1\n| project data = pack_array(\n    pack('Label', 'Last heartbeat', 'Value', iff(HasBeat, AgeText(LastBeat), 'No heartbeat'), 'Note', iff(HasBeat, iff(datetime_diff('minute', now(), LastBeat) <= 5, 'agent is reporting', 'not reporting now'), 'No agent heartbeat in this range'), 'Order', 1),\n    pack('Label', 'CPU (latest)', 'Value', iff(isnotnull(CpuNow), strcat(Num(CpuNow, 1), '%'), 'No data'), 'Note', iff(isnotnull(CpuNow), strcat('P95 ', Num(CpuP95, 0), '% / peak ', Num(CpuPeak, 0), '%'), 'No CPU samples in this range'), 'Order', 2),\n    pack('Label', 'Memory in use', 'Value', iff(isnotnull(MemNow), strcat(Num(MemNow, 1), '%'), 'No data'), 'Note', iff(isnotnull(AvailNow), strcat(Num(AvailNow, 1), ' GB available'), 'No memory samples in this range'), 'Order', 3),\n    pack('Label', 'Lowest disk free', 'Value', iff(isnotnull(DiskPct), strcat(Num(DiskPct, 0), '%'), 'No data'), 'Note', iff(isnotnull(DiskPct), strcat('on volume ', DiskVol), 'No disk samples in this range'), 'Order', 4),\n    pack('Label', 'Log events', 'Value', iff(isnotnull(LogTotal) and LogTotal > 0, tostring(LogTotal), 'No data'), 'Note', iff(isnotnull(LogTotal) and LogTotal > 0, strcat(LogErrors, ' errors in this range'), 'No Event or Syslog rows in this range'), 'Order', 5))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+        "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet CpuRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| where ObjectName in ('Processor Information', 'Processor') and CounterName == '% Processor Time' and InstanceName in ('_Total', 'total');\nlet CpuObject = toscalar(CpuRaw | summarize Info = countif(ObjectName == 'Processor Information') | project iff(Info > 0, 'Processor Information', 'Processor'));\nlet Cpu = CpuRaw | where ObjectName == CpuObject | project TimeGenerated, Value = todouble(CounterValue);\nlet MemRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName == 'Memory';\nlet MemPct = MemRaw | where CounterName in ('% Committed Bytes In Use', '% Used Memory') | project TimeGenerated, Value = todouble(CounterValue);\nlet MemAvailGb = MemRaw | where CounterName in ('Available MBytes', 'Available MBytes Memory') | project TimeGenerated, Value = todouble(CounterValue) / 1024.0;\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nlet Beats = Heartbeat | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M;\nlet LastBeat = toscalar(Beats | summarize max(TimeGenerated));\nlet CpuNow = toscalar(Cpu | summarize arg_max(TimeGenerated, Value) | project Value);\nlet CpuP95 = toscalar(Cpu | summarize percentile(Value, 95));\nlet CpuPeak = toscalar(Cpu | summarize max(Value));\nlet MemNow = toscalar(MemPct | summarize arg_max(TimeGenerated, Value) | project Value);\nlet AvailNow = toscalar(MemAvailGb | summarize arg_max(TimeGenerated, Value) | project Value);\nlet DiskLowest = DiskVolumes | where Metric == 'Pct' | summarize arg_max(TimeGenerated, Value) by Volume | summarize arg_min(Value, Volume);\nlet DiskPct = toscalar(DiskLowest | project Value);\nlet DiskVol = toscalar(DiskLowest | project Volume);\nlet WinEvents = Event | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, IsError = EventLevelName in ('Error', 'Critical');\nlet LinuxLogs = Syslog | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, IsError = SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error');\nlet Logs = union WinEvents, LinuxLogs | summarize Total = count(), Errors = countif(IsError);\nlet LogTotal = toscalar(Logs | project Total);\nlet LogErrors = toscalar(Logs | project Errors);\nlet HasBeat = isnotnull(LastBeat);\nprint Dummy = 1\n| project data = pack_array(\n    pack('Label', 'Last heartbeat', 'Value', iff(HasBeat, AgeText(LastBeat), 'No heartbeat'), 'Note', iff(HasBeat, iff(datetime_diff('minute', now(), LastBeat) <= 5, 'agent is reporting', 'not reporting now'), 'no heartbeat in this range'), 'Order', 1),\n    pack('Label', 'CPU (latest)', 'Value', iff(isnotnull(CpuNow), strcat(Num(CpuNow, 1), '%'), 'No data'), 'Note', iff(isnotnull(CpuNow), strcat('P95 ', Num(CpuP95, 0), '% / peak ', Num(CpuPeak, 0), '%'), 'No CPU samples in this range'), 'Order', 2),\n    pack('Label', 'Memory in use', 'Value', iff(isnotnull(MemNow), strcat(Num(MemNow, 1), '%'), 'No data'), 'Note', iff(isnotnull(AvailNow), strcat(Num(AvailNow, 1), ' GB available'), 'No memory samples in range'), 'Order', 3),\n    pack('Label', 'Lowest disk free', 'Value', iff(isnotnull(DiskPct), strcat(Num(DiskPct, 0), '%'), 'No data'), 'Note', iff(isnotnull(DiskPct), strcat('on volume ', DiskVol), 'No disk samples in this range'), 'Order', 4),\n    pack('Label', 'Log events', 'Value', iff(isnotnull(LogTotal) and LogTotal > 0, tostring(LogTotal), 'No data'), 'Note', iff(isnotnull(LogTotal) and LogTotal > 0, strcat(LogErrors, ' errors in this range'), 'No log rows in this range'), 'Order', 5))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
         "size": 3,
         "title": "Newest telemetry",
         "noDataMessage": "No Azure Monitor data for this machine in the selected time range.",
@@ -216,7 +216,7 @@
           {
             "type": 1,
             "content": {
-              "json": "### Performance\nCPU, memory and disk for this machine from Azure Monitor (the `Perf` table, same counters as the capacity workbook, Windows and Linux). Gaps are parked or silent periods: unknown, never zero."
+              "json": "### Performance\nCPU, memory and disk for this machine from Azure Monitor (the `Perf` table, same counters as the capacity workbook, Windows and Linux). Each column is one time interval; a blank stretch is a parked or silent period: unknown, never zero."
             },
             "name": "perf-header"
           },
@@ -224,43 +224,116 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet CpuRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| where ObjectName in ('Processor Information', 'Processor') and CounterName == '% Processor Time' and InstanceName in ('_Total', 'total');\nlet CpuObject = toscalar(CpuRaw | summarize Info = countif(ObjectName == 'Processor Information') | project iff(Info > 0, 'Processor Information', 'Processor'));\nlet Cpu = CpuRaw | where ObjectName == CpuObject | project TimeGenerated, Value = todouble(CounterValue);\nCpu\n| make-series Mean = avg(Value) default = real(null), P95 = percentile(Value, 95) default = real(null), Peak = max(Value) default = real(null)\n    on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Mean, P95, Peak",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet CpuRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| where ObjectName in ('Processor Information', 'Processor') and CounterName == '% Processor Time' and InstanceName in ('_Total', 'total');\nlet CpuObject = toscalar(CpuRaw | summarize Info = countif(ObjectName == 'Processor Information') | project iff(Info > 0, 'Processor Information', 'Processor'));\nlet Cpu = CpuRaw | where ObjectName == CpuObject | project TimeGenerated, Value = todouble(CounterValue);\nCpu\n| make-series Average = avg(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Average",
               "size": 1,
-              "title": "CPU: mean, 95th percentile and peak",
+              "title": "CPU: average per interval (%)",
               "noDataMessage": "No CPU samples from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": false,
+                "showMetrics": false,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Average",
+                    "label": "Average CPU %",
+                    "color": "blue"
+                  }
+                ],
                 "ySettings": {
                   "min": 0,
-                  "max": 100
-                },
-                "customThresholdLine": "80",
-                "customThresholdLineStyle": 1
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                }
               }
             },
-            "name": "perf-cpu",
+            "name": "perf-cpu-avg",
             "customWidth": "50"
           },
           {
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet MemRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName == 'Memory';\nlet MemPct = MemRaw | where CounterName in ('% Committed Bytes In Use', '% Used Memory') | project TimeGenerated, Value = todouble(CounterValue);\nlet MemAvailGb = MemRaw | where CounterName in ('Available MBytes', 'Available MBytes Memory') | project TimeGenerated, Value = todouble(CounterValue) / 1024.0;\nMemPct\n| make-series Mean = avg(Value) default = real(null), Peak = max(Value) default = real(null)\n    on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Mean, Peak",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet CpuRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| where ObjectName in ('Processor Information', 'Processor') and CounterName == '% Processor Time' and InstanceName in ('_Total', 'total');\nlet CpuObject = toscalar(CpuRaw | summarize Info = countif(ObjectName == 'Processor Information') | project iff(Info > 0, 'Processor Information', 'Processor'));\nlet Cpu = CpuRaw | where ObjectName == CpuObject | project TimeGenerated, Value = todouble(CounterValue);\nCpu\n| make-series Peak = max(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Peak",
               "size": 1,
-              "title": "Memory in use: mean and peak",
+              "title": "CPU: peak per interval (%)",
+              "noDataMessage": "No CPU samples from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range.",
+              "noDataMessageStyle": 4,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart",
+              "chartSettings": {
+                "showLegend": false,
+                "showMetrics": false,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Peak",
+                    "label": "Peak CPU %",
+                    "color": "orange"
+                  }
+                ],
+                "ySettings": {
+                  "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  },
+                  "max": 100
+                },
+                "customThresholdLine": "80",
+                "customThresholdLineStyle": 1
+              }
+            },
+            "name": "perf-cpu-peak",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet MemRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName == 'Memory';\nlet MemPct = MemRaw | where CounterName in ('% Committed Bytes In Use', '% Used Memory') | project TimeGenerated, Value = todouble(CounterValue);\nlet MemAvailGb = MemRaw | where CounterName in ('Available MBytes', 'Available MBytes Memory') | project TimeGenerated, Value = todouble(CounterValue) / 1024.0;\nMemPct\n| make-series Average = avg(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Average",
+              "size": 1,
+              "title": "Memory in use: average (%)",
               "noDataMessage": "No memory samples from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range. Windows reports committed bytes in use; Linux reports used memory.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": false,
+                "showMetrics": false,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Average",
+                    "label": "Memory in use %",
+                    "color": "blue"
+                  }
+                ],
                 "ySettings": {
                   "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  },
                   "max": 100
                 },
                 "customThresholdLine": "85",
@@ -274,18 +347,35 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet MemRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName == 'Memory';\nlet MemPct = MemRaw | where CounterName in ('% Committed Bytes In Use', '% Used Memory') | project TimeGenerated, Value = todouble(CounterValue);\nlet MemAvailGb = MemRaw | where CounterName in ('Available MBytes', 'Available MBytes Memory') | project TimeGenerated, Value = todouble(CounterValue) / 1024.0;\nMemAvailGb\n| make-series Mean = avg(Value) default = real(null), Lowest = min(Value) default = real(null)\n    on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Mean, Lowest",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet MemRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName == 'Memory';\nlet MemPct = MemRaw | where CounterName in ('% Committed Bytes In Use', '% Used Memory') | project TimeGenerated, Value = todouble(CounterValue);\nlet MemAvailGb = MemRaw | where CounterName in ('Available MBytes', 'Available MBytes Memory') | project TimeGenerated, Value = todouble(CounterValue) / 1024.0;\nMemAvailGb\n| make-series Lowest = min(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Lowest",
               "size": 1,
-              "title": "Available memory (GB): mean and lowest",
+              "title": "Available memory: lowest (GB)",
               "noDataMessage": "No available-memory samples from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": false,
+                "showMetrics": false,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Lowest",
+                    "label": "Lowest available GB",
+                    "color": "orange"
+                  }
+                ],
                 "ySettings": {
-                  "min": 0
+                  "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  }
                 }
               }
             },
@@ -296,18 +386,35 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nDiskVolumes\n| union DiskAggregate\n| where Metric == 'Pct'\n| make-series FreePercent = avg(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Volume",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nDiskVolumes\n| union DiskAggregate\n| where Metric == 'Pct'\n| make-series Lowest = min(Value) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Lowest",
               "size": 1,
-              "title": "Free space per volume (%)",
+              "title": "Lowest free disk space (%)",
               "noDataMessage": "No disk samples from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range. Windows volumes come from VM insights, Linux mounts from the Perf table.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": false,
+                "showMetrics": false,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Lowest",
+                    "label": "Lowest free space %",
+                    "color": "blue"
+                  }
+                ],
                 "ySettings": {
                   "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  },
                   "max": 100
                 },
                 "customThresholdLine": "15",
@@ -321,8 +428,8 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet CpuRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| where ObjectName in ('Processor Information', 'Processor') and CounterName == '% Processor Time' and InstanceName in ('_Total', 'total');\nlet CpuObject = toscalar(CpuRaw | summarize Info = countif(ObjectName == 'Processor Information') | project iff(Info > 0, 'Processor Information', 'Processor'));\nlet Cpu = CpuRaw | where ObjectName == CpuObject | project TimeGenerated, Value = todouble(CounterValue);\nlet Total = toscalar(Cpu | count);\nCpu\n| extend Bucket = case(Value < 20, 1, Value < 40, 2, Value < 60, 3, Value < 80, 4, 5)\n| summarize Samples = count() by Bucket\n| extend Range = case(Bucket == 1, '0 to 20%', Bucket == 2, '20 to 40%', Bucket == 3, '40 to 60%', Bucket == 4, '60 to 80%', '80 to 100%')\n| extend SharePct = round(100.0 * Samples / Total, 1)\n| order by Bucket asc\n| project Range, SharePct, Samples",
-              "size": 0,
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet CpuRaw = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| where ObjectName in ('Processor Information', 'Processor') and CounterName == '% Processor Time' and InstanceName in ('_Total', 'total');\nlet CpuObject = toscalar(CpuRaw | summarize Info = countif(ObjectName == 'Processor Information') | project iff(Info > 0, 'Processor Information', 'Processor'));\nlet Cpu = CpuRaw | where ObjectName == CpuObject | project TimeGenerated, Value = todouble(CounterValue);\nlet Total = toscalar(Cpu | count);\nCpu\n| extend Bucket = case(Value < 20, 1, Value < 40, 2, Value < 60, 3, Value < 80, 4, 5)\n| summarize Samples = count() by Bucket\n| extend Range = case(Bucket == 1, '0 to 20%', Bucket == 2, '20 to 40%', Bucket == 3, '40 to 60%', Bucket == 4, '60 to 80%', '80 to 100%')\n| extend SharePct = round(100.0 * Samples / Total, 1)\n| order by Bucket asc\n| project Range, SharePct, Samples",
+              "size": 3,
               "title": "Time spent at each CPU level",
               "description": "Neutral blue bars: how the samples spread across CPU ranges. It is not a good-or-bad score.",
               "noDataMessage": "No CPU samples from this machine in the selected time range, so there is no spread to show: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range.",
@@ -337,7 +444,7 @@
                     "columnMatch": "Range",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "14ch"
+                      "customColumnWidthSetting": "16ch"
                     }
                   },
                   {
@@ -348,6 +455,14 @@
                       "min": 0,
                       "max": 100,
                       "customColumnWidthSetting": "30ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 1
+                      }
                     }
                   },
                   {
@@ -355,6 +470,14 @@
                     "formatter": 1,
                     "formatOptions": {
                       "customColumnWidthSetting": "12ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 0
+                      }
                     }
                   }
                 ],
@@ -378,8 +501,8 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nlet Pct = DiskVolumes | union DiskAggregate | where Metric == 'Pct' | summarize arg_max(TimeGenerated, Value), LowestPct = min(Value), LastSample = max(TimeGenerated) by Volume | project Volume, FreePct = round(Value, 1), LowestPct = round(LowestPct, 1), LastSample;\nlet Free = DiskVolumes | where Metric == 'FreeMB' | summarize arg_max(TimeGenerated, Value), SizeMB = take_any(SizeMB) by Volume | project Volume, FreeGb = round(Value / 1024.0, 1), SizeMB;\nPct\n| join kind=leftouter Free on Volume\n| extend FreePctSafe = iff(FreePct > 0, FreePct, double(null))\n| extend SizeGb = round(iff(isnotnull(SizeMB), SizeMB / 1024.0, FreeGb / (FreePctSafe / 100.0)), 1)\n| extend FreeGb = iff(isnull(FreeGb) or FreeGb > 1000000, double(null), FreeGb)\n| extend SizeGb = iff(isnull(FreeGb), double(null), SizeGb)\n| extend Level = case(FreePct < 15, 'Low free space', FreePct < 30, 'Watch', 'Healthy')\n| project Volume, Level, FreePct, LowestPct, FreeGb, SizeGb, LastSample\n| order by FreePct asc",
-              "size": 0,
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nlet Pct = DiskVolumes | union DiskAggregate | where Metric == 'Pct' | summarize arg_max(TimeGenerated, Value), LowestPct = min(Value), LastSample = max(TimeGenerated) by Volume | project Volume, FreePct = round(Value, 1), LowestPct = round(LowestPct, 1), LastSample;\nlet Free = DiskVolumes | where Metric == 'FreeMB' | summarize arg_max(TimeGenerated, Value), SizeMB = take_any(SizeMB) by Volume | project Volume, FreeGb = round(Value / 1024.0, 1), SizeMB;\nPct\n| join kind=leftouter Free on Volume\n| extend FreePctSafe = iff(FreePct > 0, FreePct, double(null))\n| extend SizeGb = round(iff(isnotnull(SizeMB), SizeMB / 1024.0, FreeGb / (FreePctSafe / 100.0)), 1)\n| extend FreeGb = iff(isnull(FreeGb) or FreeGb > 1000000, double(null), FreeGb)\n| extend SizeGb = iff(isnull(FreeGb), double(null), SizeGb)\n| extend Level = case(FreePct < 15, 'Low free space', FreePct < 30, 'Watch', 'Healthy')\n| project Volume, Level, FreePct, LowestPct, FreeGb, SizeGb, LastSample\n| order by FreePct asc",
+              "size": 3,
               "title": "Volumes",
               "noDataMessage": "No disk samples from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range.",
               "noDataMessageStyle": 4,
@@ -427,7 +550,7 @@
                           "text": "{0}{1}"
                         }
                       ],
-                      "customColumnWidthSetting": "16ch"
+                      "customColumnWidthSetting": "20ch"
                     }
                   },
                   {
@@ -437,7 +560,15 @@
                       "palette": "redGreen",
                       "min": 0,
                       "max": 100,
-                      "customColumnWidthSetting": "11ch"
+                      "customColumnWidthSetting": "12ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 1
+                      }
                     }
                   },
                   {
@@ -447,33 +578,69 @@
                       "palette": "redGreen",
                       "min": 0,
                       "max": 100,
-                      "customColumnWidthSetting": "11ch"
+                      "customColumnWidthSetting": "14ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 1
+                      }
                     }
                   },
                   {
                     "columnMatch": "FreeGb",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "10ch"
+                      "customColumnWidthSetting": "12ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 1
+                      }
                     }
                   },
                   {
                     "columnMatch": "SizeGb",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "10ch"
+                      "customColumnWidthSetting": "12ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 1
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "LastSample",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "23ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": null,
+                      "formatName": "shortDateTimeNoMsPattern"
                     }
                   }
                 ],
                 "filter": true,
+                "rowLimit": 25,
                 "labelSettings": [
                   {
                     "columnId": "FreePct",
-                    "label": "Free now %"
+                    "label": "Free %"
                   },
                   {
                     "columnId": "LowestPct",
-                    "label": "Lowest free % in range"
+                    "label": "Lowest %"
                   },
                   {
                     "columnId": "FreeGb",
@@ -490,8 +657,7 @@
                 ]
               }
             },
-            "name": "perf-volumes",
-            "customWidth": "50"
+            "name": "perf-volumes"
           }
         ]
       },
@@ -552,9 +718,9 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "securityresources\n| where type == 'microsoft.security/assessments'\n| extend rname = tolower(tostring(properties.resourceDetails.ResourceName)), rtype = tolower(tostring(properties.resourceDetails.ResourceType)), nid = tolower(tostring(properties.resourceDetails.NativeResourceId))\n| where rname == tolower(tostring(split('{Machine}', '/')[-1])) and (rtype contains 'hybridcompute' or nid contains 'hybridcompute')\n| extend Status = tostring(properties.status.code), Severity = tostring(properties.metadata.severity), Recommendation = tostring(properties.displayName)\n| where Status == 'Unhealthy'\n| extend SeverityRank = case(Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| project Recommendation, Severity, Status, Category = tostring(properties.metadata.categories[0]), Since = todatetime(properties.status.statusChangeDate), SeverityRank\n| order by SeverityRank asc, Recommendation asc\n| take 30\n| project Recommendation, Severity, Category, Since",
-              "size": 0,
-              "title": "Open recommendations (highest severity first)",
+              "query": "securityresources\n| where type == 'microsoft.security/assessments'\n| extend rname = tolower(tostring(properties.resourceDetails.ResourceName)), rtype = tolower(tostring(properties.resourceDetails.ResourceType)), nid = tolower(tostring(properties.resourceDetails.NativeResourceId))\n| where rname == tolower(tostring(split('{Machine}', '/')[-1])) and (rtype contains 'hybridcompute' or nid contains 'hybridcompute')\n| extend Status = tostring(properties.status.code), Severity = tostring(properties.metadata.severity), Recommendation = tostring(properties.displayName)\n| where Status == 'Unhealthy'\n| extend SeverityRank = case(Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| project Recommendation, Severity, Status, Category = tostring(properties.metadata.categories[0]), Since = todatetime(properties.status.statusChangeDate), SeverityRank\n| order by SeverityRank asc, Recommendation asc\n| take 20\n| project Recommendation, Severity, Category, Since",
+              "size": 3,
+              "title": "Open recommendations (top 20, highest severity first)",
               "noDataMessage": "No open recommendations for this machine. Either every assessed check is healthy, or Defender for Cloud has no assessments for it.",
               "noDataMessageStyle": 4,
               "queryType": 1,
@@ -569,7 +735,7 @@
                     "columnMatch": "Recommendation",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "70ch"
+                      "customColumnWidthSetting": "72ch"
                     }
                   },
                   {
@@ -603,7 +769,7 @@
                           "text": "{0}{1}"
                         }
                       ],
-                      "customColumnWidthSetting": "12ch"
+                      "customColumnWidthSetting": "14ch"
                     }
                   },
                   {
@@ -612,13 +778,24 @@
                     "formatOptions": {
                       "customColumnWidthSetting": "14ch"
                     }
+                  },
+                  {
+                    "columnMatch": "Since",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "23ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": null,
+                      "formatName": "shortDateTimeNoMsPattern"
+                    }
                   }
                 ],
                 "filter": true,
                 "labelSettings": [
                   {
                     "columnId": "Since",
-                    "label": "Since"
+                    "label": "Open since"
                   }
                 ]
               }
@@ -643,7 +820,7 @@
           {
             "type": 1,
             "content": {
-              "json": "### Software and configuration changes\nChange Tracking and Inventory: installs, removals and modifications on this machine, by day. Windows reports software and services, Linux reports software and daemons."
+              "json": "### Software and configuration changes\nChange Tracking and Inventory: installs, removals and modifications on this machine, per time interval. Windows reports software and services, Linux reports software and daemons."
             },
             "name": "software-header"
           },
@@ -651,7 +828,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nConfigurationChange\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and isnotempty(ConfigChangeType)\n| extend Kind = case(ConfigChangeType == 'Software', 'Software', ConfigChangeType == 'WindowsServices', 'Windows services', ConfigChangeType == 'Daemons', 'Linux daemons', ConfigChangeType)\n| make-series Changes = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Kind",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nConfigurationChange\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and isnotempty(ConfigChangeType)\n| extend Kind = case(ConfigChangeType == 'Software', 'Software', ConfigChangeType == 'WindowsServices', 'Windows services', ConfigChangeType == 'Daemons', 'Linux daemons', ConfigChangeType)\n| make-series Changes = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Kind",
               "size": 1,
               "title": "Changes over time",
               "noDataMessage": "No configuration changes recorded for this machine in the selected time range. Change Tracking needs the Azure Monitor Agent and the ChangeTracking extension.",
@@ -659,10 +836,23 @@
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
                 "ySettings": {
-                  "min": 0
+                  "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  }
                 }
               }
             },
@@ -672,9 +862,9 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nConfigurationChange\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and isnotempty(ConfigChangeType)\n| extend Kind = case(ConfigChangeType == 'Software', 'Software', ConfigChangeType == 'WindowsServices', 'Windows service', ConfigChangeType == 'Daemons', 'Linux daemon', ConfigChangeType)\n| extend Item = coalesce(column_ifexists('SoftwareName', ''), column_ifexists('SvcDisplayName', ''), column_ifexists('SvcName', ''), '')\n| extend Detail = coalesce(column_ifexists('Publisher', ''), column_ifexists('SvcState', ''), '')\n| project TimeGenerated, Change = ChangeCategory, Kind, Item, Detail\n| order by TimeGenerated desc\n| take 30",
-              "size": 0,
-              "title": "Recent changes",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nConfigurationChange\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and isnotempty(ConfigChangeType)\n| extend Kind = case(ConfigChangeType == 'Software', 'Software', ConfigChangeType == 'WindowsServices', 'Windows service', ConfigChangeType == 'Daemons', 'Linux daemon', ConfigChangeType)\n| extend Item = coalesce(column_ifexists('SoftwareName', ''), column_ifexists('SvcDisplayName', ''), column_ifexists('SvcName', ''), '')\n| extend Detail = coalesce(column_ifexists('Publisher', ''), column_ifexists('SvcState', ''), '')\n| project TimeGenerated, Change = ChangeCategory, Kind, Item, Detail\n| order by TimeGenerated desc\n| take 20",
+              "size": 3,
+              "title": "Recent changes (latest 20)",
               "noDataMessage": "No configuration changes recorded for this machine in the selected time range. Change Tracking needs the Azure Monitor Agent and the ChangeTracking extension.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
@@ -684,31 +874,42 @@
               "gridSettings": {
                 "formatters": [
                   {
+                    "columnMatch": "TimeGenerated",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "23ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": null,
+                      "formatName": "shortDateTimeNoMsPattern"
+                    }
+                  },
+                  {
                     "columnMatch": "Change",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "12ch"
+                      "customColumnWidthSetting": "14ch"
                     }
                   },
                   {
                     "columnMatch": "Kind",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "16ch"
+                      "customColumnWidthSetting": "18ch"
                     }
                   },
                   {
                     "columnMatch": "Item",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "36ch"
+                      "customColumnWidthSetting": "38ch"
                     }
                   },
                   {
                     "columnMatch": "Detail",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "24ch"
+                      "customColumnWidthSetting": "26ch"
                     }
                   }
                 ],
@@ -783,7 +984,7 @@
             "content": {
               "version": "KqlItem/1.0",
               "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| where tolower(tostring(properties.containerResourceId)) endswith strcat('/machines/', tolower(tostring(split('{Machine}', '/')[-1])))\n| project Instance = name, Version = tostring(properties.version), Edition = tostring(properties.edition), Licence = tostring(properties.licenseType), Status = tostring(properties.status),\n    Defender = tostring(properties.azureDefenderStatus), VCores = toint(properties.vCore), PatchLevel = tostring(properties.patchLevel), LastInventory = todatetime(properties.lastInventoryUploadTime)\n| order by Instance asc",
-              "size": 0,
+              "size": 3,
               "title": "Arc-enabled SQL Server instances",
               "noDataMessage": "This machine has no Arc-enabled SQL Server instance. One appears here once the Arc SQL extension (WindowsAgent.SqlServer) is installed and the instance registers.",
               "noDataMessageStyle": 4,
@@ -800,6 +1001,27 @@
                     "formatter": 1,
                     "formatOptions": {
                       "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Version",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "20ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Edition",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "14ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Licence",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "12ch"
                     }
                   },
                   {
@@ -827,7 +1049,7 @@
                           "text": "{0}{1}"
                         }
                       ],
-                      "customColumnWidthSetting": "12ch"
+                      "customColumnWidthSetting": "18ch"
                     }
                   },
                   {
@@ -849,11 +1071,37 @@
                           "text": "{0}{1}"
                         }
                       ],
-                      "customColumnWidthSetting": "12ch"
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "VCores",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "10ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "PatchLevel",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "LastInventory",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "23ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": null,
+                      "formatName": "shortDateTimeNoMsPattern"
                     }
                   }
                 ],
                 "filter": true,
+                "rowLimit": 25,
                 "labelSettings": [
                   {
                     "columnId": "VCores",
@@ -877,7 +1125,7 @@
             "content": {
               "version": "KqlItem/1.0",
               "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| where tolower(tostring(properties.containerResourceId)) endswith strcat('/machines/', tolower(tostring(split('{Machine}', '/')[-1])))\n| project InstanceId = tolower(id), Instance = name\n| join kind=inner (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n    | extend InstanceId = tolower(tostring(substring(id, 0, indexof(tolower(id), '/databases/'))))\n    | project InstanceId, Database = name, State = tostring(properties.state), SizeMB = todouble(properties.sizeMB), Recovery = tostring(properties.recoveryMode), CompatibilityLevel = toint(properties.compatibilityLevel)) on InstanceId\n| project Instance, Database, State, SizeMB = round(SizeMB, 1), Recovery, CompatibilityLevel\n| order by Instance asc, Database asc",
-              "size": 0,
+              "size": 3,
               "title": "Databases in those instances",
               "noDataMessage": "No databases to list because this machine has no Arc-enabled SQL Server instance.",
               "noDataMessageStyle": 4,
@@ -922,11 +1170,41 @@
                           "text": "{0}{1}"
                         }
                       ],
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "SizeMB",
+                    "formatter": 1,
+                    "formatOptions": {
                       "customColumnWidthSetting": "12ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 1
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Recovery",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "14ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "CompatibilityLevel",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
                     }
                   }
                 ],
                 "filter": true,
+                "rowLimit": 25,
                 "labelSettings": [
                   {
                     "columnId": "SizeMB",
@@ -945,7 +1223,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nEvent\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| make-series Healthy = countif(EventID == 6000) default = 0, LockTimeouts = countif(EventID == 6201) default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Healthy, LockTimeouts",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nEvent\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| make-series Healthy = countif(EventID == 6000) default = 0, LockTimeouts = countif(EventID == 6201) default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Healthy, LockTimeouts",
               "size": 1,
               "title": "SQL commit and read health from Azure Monitor (events per interval)",
               "noDataMessage": "No ArcSqlEngineDemo events from this machine in the selected time range. Only the host running the demo SQL worker writes them; a machine without one has nothing to chart.",
@@ -953,10 +1231,35 @@
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Healthy",
+                    "label": "Healthy commit and read (6000)",
+                    "color": "blue"
+                  },
+                  {
+                    "seriesName": "LockTimeouts",
+                    "label": "Lock timeout (6201)",
+                    "color": "redBright"
+                  }
+                ],
                 "ySettings": {
-                  "min": 0
+                  "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  }
                 }
               }
             },
@@ -967,8 +1270,8 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nEvent\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Source == 'ArcSqlEngineDemo'\n| summarize Events = count(), Last = max(TimeGenerated) by EventID, Level = EventLevelName\n| extend Meaning = case(EventID == 6000, 'Normal commit and read succeeded', EventID == 6201, 'Lock timeout (SQL error 1222)', EventID == 6001, 'Recovered after the lock timeout', EventID == 6200, 'Worker failure', 'Other')\n| project EventID, Meaning, Level, Events, Last\n| order by EventID asc",
-              "size": 0,
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nEvent\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Source == 'ArcSqlEngineDemo'\n| summarize Events = count(), Last = max(TimeGenerated) by EventID, Level = EventLevelName\n| extend What = case(EventID == 6000, 'Healthy commit and read', EventID == 6201, 'Lock timeout (error 1222)', EventID == 6001, 'Recovery verified', EventID == 6200, 'Worker failure', 'Other')\n| extend Event = strcat(EventID, ' ', What)\n| order by EventID asc\n| project Event, Level, Events, LastSeen = AgeText(Last)",
+              "size": 3,
               "title": "SQL worker events in the range",
               "noDataMessage": "No ArcSqlEngineDemo events from this machine in the selected time range. Only the host running the demo SQL worker writes them.",
               "noDataMessageStyle": 4,
@@ -978,6 +1281,13 @@
               "visualization": "table",
               "gridSettings": {
                 "formatters": [
+                  {
+                    "columnMatch": "Event",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "27ch"
+                    }
+                  },
                   {
                     "columnMatch": "Level",
                     "formatter": 18,
@@ -1009,25 +1319,36 @@
                           "text": "{0}{1}"
                         }
                       ],
-                      "customColumnWidthSetting": "14ch"
+                      "customColumnWidthSetting": "18ch"
                     }
                   },
                   {
-                    "columnMatch": "Meaning",
+                    "columnMatch": "Events",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "36ch"
+                      "customColumnWidthSetting": "10ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 0
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "LastSeen",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "14ch"
                     }
                   }
                 ],
                 "filter": false,
                 "labelSettings": [
                   {
-                    "columnId": "EventID",
-                    "label": "Event ID"
-                  },
-                  {
-                    "columnId": "Last",
+                    "columnId": "LastSeen",
                     "label": "Last seen"
                   }
                 ]
@@ -1063,7 +1384,7 @@
             "content": {
               "version": "KqlItem/1.0",
               "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines/extensions'\n| extend Machine = tolower(tostring(split(id, '/')[8]))\n| where Machine == tolower(tostring(split('{Machine}', '/')[-1]))\n| project Extension = name, State = tostring(properties.provisioningState), Type = tostring(properties.type), Publisher = tostring(properties.publisher), Version = tostring(properties.typeHandlerVersion), AutoUpgrade = iff(tobool(properties.enableAutomaticUpgrade) == true, 'Yes', 'No')\n| order by Extension asc",
-              "size": 0,
+              "size": 3,
               "title": "Installed extensions",
               "noDataMessage": "No extensions are installed on this Arc machine. Extensions such as the Azure Monitor Agent, Change Tracking and Microsoft Defender appear here once they are installed.",
               "noDataMessageStyle": 4,
@@ -1119,7 +1440,7 @@
                           "text": "{0}{1}"
                         }
                       ],
-                      "customColumnWidthSetting": "14ch"
+                      "customColumnWidthSetting": "16ch"
                     }
                   },
                   {
@@ -1133,18 +1454,26 @@
                     "columnMatch": "Publisher",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "36ch"
+                      "customColumnWidthSetting": "34ch"
                     }
                   },
                   {
                     "columnMatch": "Version",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "12ch"
+                      "customColumnWidthSetting": "14ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "AutoUpgrade",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
                     }
                   }
                 ],
                 "filter": true,
+                "rowLimit": 25,
                 "labelSettings": [
                   {
                     "columnId": "AutoUpgrade",
@@ -1192,8 +1521,8 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend ResourceId = tolower(tostring(properties.resourceId)), Compliance = tostring(properties.complianceState)\n| where ResourceId contains '/microsoft.hybridcompute/machines/'\n| extend ResourceName = tostring(split(ResourceId, '/')[8])\n| where ResourceName == tolower(tostring(split('{Machine}', '/')[-1])) and Compliance in ('Compliant', 'NonCompliant', 'Conflict')\n| where Compliance == 'NonCompliant'\n| project Policy = coalesce(tostring(properties.policyDefinitionName), ''), Assignment = tostring(properties.policyAssignmentName), Initiative = tostring(properties.policySetDefinitionName), Evaluated = todatetime(properties.timestamp)\n| order by Evaluated desc\n| take 25",
-              "size": 0,
+              "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend ResourceId = tolower(tostring(properties.resourceId)), Compliance = tostring(properties.complianceState)\n| where ResourceId contains '/microsoft.hybridcompute/machines/'\n| extend ResourceName = tostring(split(ResourceId, '/')[8])\n| where ResourceName == tolower(tostring(split('{Machine}', '/')[-1])) and Compliance in ('Compliant', 'NonCompliant', 'Conflict')\n| where Compliance == 'NonCompliant'\n| extend DefId = tolower(tostring(properties.policyDefinitionName)), SetId = tolower(tostring(properties.policySetDefinitionName)), RefId = tostring(properties.policyDefinitionReferenceId)\n| extend Policy = case(\n    DefId == '6ba6d016-e7c3-4842-b8f2-4992ebc0d72d', 'SQL servers on machines should have vulnerability findings resolved',\n    DefId == 'f85bf3e0-d513-442e-89c3-1784ad63382b', 'System updates should be installed on your machines (powered by Update Center)',\n    DefId == '72650e9f-97bc-4b2a-ab5f-9781a9fcecbc', 'Windows machines should meet requirements of the Azure compute security baseline',\n    DefId == 'bed48b13-6647-468e-aa2f-1af1d3f4dd40', 'Windows Defender Exploit Guard should be enabled on your machines',\n    DefId == '5752e6d6-1206-46d8-8ab1-ecc2f71a8112', 'Windows machines should be configured to use secure communication protocols',\n    DefId == '630c64f9-8b6b-4c64-b511-6544ceff6fd6', 'Authentication to Linux machines should require SSH keys',\n    DefId == 'fc9b3da7-8347-4380-8e70-0a0361d8dedd', 'Linux machines should meet requirements for the Azure compute security baseline',\n    DefId == 'bd876905-5b84-4f73-ab2d-2e7a7c4568d9', 'Machines should be configured to periodically check for missing system updates',\n    DefId == '65503269-6a54-4553-8a28-0065a8e6d929', 'Configure Arc-enabled SQL Servers to automatically install Microsoft Defender for SQL',\n    isnotempty(RefId) and not(tolower(RefId) matches regex '^[0-9a-f]+-[0-9a-f]+-[0-9a-f]+-[0-9a-f]+-[0-9a-f]+$'), RefId,\n    strcat('Built-in policy ', substring(DefId, 0, 8)))\n| extend Initiative = case(\n    SetId == '1f3afdf9-d0c9-4c3d-847f-89da613e70a8', 'Microsoft cloud security benchmark',\n    SetId == '179d1daa-458f-4e47-8086-2a68d0d6c38f', 'NIST SP 800-53 Rev. 5',\n    SetId == 'c1529623-9fc2-45bc-b84b-b14cd0b7484e', 'Defender for SQL on machines',\n    isempty(SetId), 'Assigned directly',\n    strcat('Initiative ', substring(SetId, 0, 8)))\n| project Policy, Initiative, Assignment = tostring(properties.policyAssignmentName), Evaluated = todatetime(properties.timestamp)\n| order by Policy asc, Assignment asc\n| take 25",
+              "size": 3,
               "title": "Non-compliant policies",
               "noDataMessage": "No non-compliant policies for this machine: every evaluated policy passes, or none has been evaluated yet (see the Azure Policy tile above).",
               "noDataMessageStyle": 4,
@@ -1209,29 +1538,41 @@
                     "columnMatch": "Policy",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "50ch"
-                    }
-                  },
-                  {
-                    "columnMatch": "Assignment",
-                    "formatter": 1,
-                    "formatOptions": {
-                      "customColumnWidthSetting": "36ch"
+                      "customColumnWidthSetting": "70ch"
                     }
                   },
                   {
                     "columnMatch": "Initiative",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "36ch"
+                      "customColumnWidthSetting": "32ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Assignment",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "24ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Evaluated",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "23ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": null,
+                      "formatName": "shortDateTimeNoMsPattern"
                     }
                   }
                 ],
                 "filter": true,
+                "rowLimit": 25,
                 "labelSettings": [
                   {
                     "columnId": "Evaluated",
-                    "label": "Evaluated"
+                    "label": "Last evaluated"
                   }
                 ]
               }
@@ -1256,7 +1597,7 @@
           {
             "type": 1,
             "content": {
-              "json": "### Events and uptime\nHow steadily the machine reports, and which log sources are loud. Windows reads the Event log, Linux reads Syslog."
+              "json": "### Events and uptime\nHow steadily the machine reports, and which log sources are loud. Windows reads the Event log, Linux reads Syslog. Each column is one time interval; a blank stretch means the machine was parked or silent."
             },
             "name": "events-header"
           },
@@ -1264,7 +1605,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nHeartbeat\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| make-series Beats = count() default = 0 on TimeGenerated from bin(WindowStart, Step) + Step to bin(WindowEnd, Step) step Step\n| mv-expand TimeGenerated to typeof(datetime), Beats to typeof(long)\n| project TimeGenerated, ReportingPercent = min_of(100.0, round(100.0 * Beats / (Step / 1m), 0))",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nHeartbeat\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M\n| make-series Beats = count() default = 0 on TimeGenerated from bin(WindowStart, Step) + Step to bin(WindowEnd, Step) step Step\n| mv-expand TimeGenerated to typeof(datetime), Beats to typeof(long)\n| project TimeGenerated, ReportingPercent = min_of(100.0, round(100.0 * Beats / (Step / 1m), 0))",
               "size": 1,
               "title": "Agent reporting (100% = heartbeat every minute)",
               "noDataMessage": "No heartbeats from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range.",
@@ -1272,10 +1613,27 @@
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": false,
+                "showMetrics": false,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "ReportingPercent",
+                    "label": "Reporting %",
+                    "color": "blue"
+                  }
+                ],
                 "ySettings": {
                   "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  },
                   "max": 100
                 }
               }
@@ -1287,7 +1645,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet WinEvents = Event | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | where EventLevelName in ('Error', 'Critical', 'Warning') | project TimeGenerated, Severity = iff(EventLevelName == 'Warning', 'Warning', 'Error');\nlet LinuxLogs = Syslog | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | where SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error', 'warning') | project TimeGenerated, Severity = iff(SeverityLevel == 'warning', 'Warning', 'Error');\nunion WinEvents, LinuxLogs\n| make-series Events = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Severity",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet WinEvents = Event | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | where EventLevelName in ('Error', 'Critical', 'Warning') | project TimeGenerated, Severity = iff(EventLevelName == 'Warning', 'Warning', 'Error');\nlet LinuxLogs = Syslog | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | where SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error', 'warning') | project TimeGenerated, Severity = iff(SeverityLevel == 'warning', 'Warning', 'Error');\nunion WinEvents, LinuxLogs\n| make-series Events = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Severity",
               "size": 1,
               "title": "Errors and warnings over time",
               "noDataMessage": "No error or warning events from this machine in the selected time range. Either it is healthy, or it sends no Event or Syslog data (no Azure Monitor Agent).",
@@ -1295,10 +1653,35 @@
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
-              "visualization": "timechart",
+              "visualization": "barchart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
+                "simpleLegendSettings": {
+                  "position": "bottom"
+                },
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Error",
+                    "label": "Errors",
+                    "color": "redBright"
+                  },
+                  {
+                    "seriesName": "Warning",
+                    "label": "Warnings",
+                    "color": "orange"
+                  }
+                ],
                 "ySettings": {
-                  "min": 0
+                  "min": 0,
+                  "numberFormatSettings": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "useGrouping": true,
+                      "maximumFractionDigits": 1
+                    }
+                  }
                 }
               }
             },
@@ -1309,8 +1692,8 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet WinEvents = Event | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, Log = EventLog, Source, Severity = case(EventLevelName in ('Error', 'Critical'), 'Error', EventLevelName == 'Warning', 'Warning', 'Information');\nlet LinuxLogs = Syslog | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, Log = Facility, Source = ProcessName, Severity = case(SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error'), 'Error', SeverityLevel == 'warning', 'Warning', 'Information');\nunion WinEvents, LinuxLogs\n| summarize Errors = countif(Severity == 'Error'), Warnings = countif(Severity == 'Warning'), Information = countif(Severity == 'Information'), Last = max(TimeGenerated) by Log, Source\n| order by Errors desc, Warnings desc, Information desc\n| take 25",
-              "size": 0,
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet WinEvents = Event | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, Log = EventLog, Source, Severity = case(EventLevelName in ('Error', 'Critical'), 'Error', EventLevelName == 'Warning', 'Warning', 'Information');\nlet LinuxLogs = Syslog | where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M | project TimeGenerated, Log = Facility, Source = ProcessName, Severity = case(SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error'), 'Error', SeverityLevel == 'warning', 'Warning', 'Information');\nunion WinEvents, LinuxLogs\n| summarize Errors = countif(Severity == 'Error'), Warnings = countif(Severity == 'Warning'), Information = countif(Severity == 'Information'), Last = max(TimeGenerated) by Log, Source\n| order by Errors desc, Warnings desc, Information desc\n| take 25",
+              "size": 3,
               "title": "Log sources (errors first)",
               "noDataMessage": "No Event or Syslog rows from this machine in the selected time range: no Azure Monitor Agent (such as the nested SQL guest), or the machine was off for the whole range.",
               "noDataMessageStyle": 4,
@@ -1324,7 +1707,7 @@
                     "columnMatch": "Log",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "14ch"
+                      "customColumnWidthSetting": "16ch"
                     }
                   },
                   {
@@ -1341,7 +1724,15 @@
                       "palette": "red",
                       "min": 0,
                       "max": 50,
-                      "customColumnWidthSetting": "10ch"
+                      "customColumnWidthSetting": "12ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 0
+                      }
                     }
                   },
                   {
@@ -1351,18 +1742,46 @@
                       "palette": "orange",
                       "min": 0,
                       "max": 50,
-                      "customColumnWidthSetting": "10ch"
+                      "customColumnWidthSetting": "14ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 0
+                      }
                     }
                   },
                   {
                     "columnMatch": "Information",
                     "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "12ch"
+                      "customColumnWidthSetting": "16ch"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "useGrouping": true,
+                        "maximumFractionDigits": 0
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Last",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "23ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": null,
+                      "formatName": "shortDateTimeNoMsPattern"
                     }
                   }
                 ],
                 "filter": true,
+                "rowLimit": 25,
                 "labelSettings": [
                   {
                     "columnId": "Last",
@@ -1385,7 +1804,7 @@
     {
       "type": 1,
       "content": {
-        "json": "---\n*Adapted from the Arc Machine Intelligence Centre by Nic Seilaz (MIT licence), [github.com/nseilaz/AzureArc_Workbooks](https://github.com/nseilaz/AzureArc_Workbooks). Reworked for the Arc demo lab: query-backed machine picker with a default, Perf-based metrics for Windows and Linux, honest empty states.*"
+        "json": "---\n*Adapted from Nic Seilaz's Arc Machine Intelligence workbook (MIT licence), [github.com/nseilaz/AzureArc_Workbooks](https://github.com/nseilaz/AzureArc_Workbooks). Reworked for the Arc demo lab: query-backed machine picker with a default, Perf-based metrics for Windows and Linux, honest empty states.*"
       },
       "name": "footer"
     }

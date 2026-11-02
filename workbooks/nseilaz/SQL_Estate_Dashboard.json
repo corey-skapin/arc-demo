@@ -98,7 +98,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| summarize Instances = count(), Versions = strcat_array(make_set(tostring(properties.version)), ', '), Editions = strcat_array(make_set(tostring(properties.edition)), ', '),\n    Licences = strcat_array(make_set(tostring(properties.licenseType)), ', '), Builds = strcat_array(make_set(tostring(properties.currentVersion)), ', ')\n| project Label = 'SQL instances', Value = tostring(Instances), Note = 'Arc-enabled, in scope', Order = 1\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Versions = strcat_array(make_set(tostring(properties.version)), ', '), Builds = strcat_array(make_set(tostring(properties.currentVersion)), ', ')\n    | project Label = 'SQL version', Value = Versions, Note = strcat('build ', Builds), Order = 3)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Editions = strcat_array(make_set(tostring(properties.edition)), ', ')\n    | project Label = 'Edition', Value = Editions, Note = 'as registered with Arc', Order = 4)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Licences = strcat_array(make_set(tostring(properties.licenseType)), ', ')\n    | project Label = 'Licence', Value = Licences, Note = 'licence type in Arc', Order = 5)\n| union (resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'WindowsAgent.SqlServer'\n    | summarize Modes = strcat_array(make_set(tostring(properties.settings.LicenseType)), ', ')\n    | project Label = 'Arc SQL mode', Value = iff(isempty(Modes), 'Unknown', Modes), Note = 'inventory only when LicenseOnly', Order = 6)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n    | extend InstanceId = tolower(substring(id, 0, indexof(tolower(id), '/databases/')))\n    | join kind=inner (resources | where type =~ 'microsoft.azurearcdata/sqlserverinstances' | project InstanceId = tolower(id)) on InstanceId\n    | summarize Total = count(), SystemDbs = countif(name in~ ('master', 'model', 'msdb', 'tempdb'))\n    | project Label = 'Databases', Value = tostring(Total), Note = strcat(Total - SystemDbs, ' user, ', SystemDbs, ' system'), Order = 2)\n| order by Order asc\n| project Label, Value, Note",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| summarize Instances = count(), Versions = strcat_array(make_set(tostring(properties.version)), ', '), Editions = strcat_array(make_set(tostring(properties.edition)), ', '),\n    Licences = strcat_array(make_set(tostring(properties.licenseType)), ', '), Builds = strcat_array(make_set(tostring(properties.currentVersion)), ', ')\n| project Label = 'SQL instances', Value = tostring(Instances), Note = 'Arc-enabled, in scope', Order = 1\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Versions = strcat_array(make_set(tostring(properties.version)), ', '), Builds = strcat_array(make_set(tostring(properties.currentVersion)), ', ')\n    | project Label = 'SQL version', Value = Versions, Note = strcat('build ', Builds), Order = 3)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Editions = strcat_array(make_set(tostring(properties.edition)), ', ')\n    | project Label = 'Edition', Value = Editions, Note = 'as registered with Arc', Order = 4)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Licences = strcat_array(make_set(tostring(properties.licenseType)), ', ')\n    | project Label = 'Licence', Value = Licences, Note = 'licence type in Arc', Order = 5)\n| union (resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'WindowsAgent.SqlServer'\n    | summarize Modes = strcat_array(make_set(tostring(properties.settings.LicenseType)), ', ')\n    | project Label = 'Arc SQL mode', Value = iff(isempty(Modes), 'Unknown', Modes), Note = 'LicenseOnly = inventory only', Order = 6)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n    | extend InstanceId = tolower(substring(id, 0, indexof(tolower(id), '/databases/')))\n    | join kind=inner (resources | where type =~ 'microsoft.azurearcdata/sqlserverinstances' | project InstanceId = tolower(id)) on InstanceId\n    | summarize Total = count(), SystemDbs = countif(name in~ ('master', 'model', 'msdb', 'tempdb'))\n    | project Label = 'Databases', Value = tostring(Total), Note = strcat(Total - SystemDbs, ' user, ', SystemDbs, ' system'), Order = 2)\n| order by Order asc\n| project Label, Value, Note",
         "size": 3,
         "title": "Arc inventory",
         "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected. An instance appears once the Arc SQL extension (WindowsAgent.SqlServer) is installed on a server and the instance registers.",
@@ -131,7 +131,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nlet Healthy = Worker | where EventID == 6000;\nlet LastEvent = toscalar(Healthy | summarize max(TimeGenerated));\nlet LastCommit = toscalar(Healthy | summarize max(LastCommit));\nlet LastHost = toscalar(Healthy | summarize arg_max(TimeGenerated, Computer) | project Computer);\nlet LastDb = toscalar(Healthy | summarize arg_max(TimeGenerated, Database) | project Database);\nlet Recent = Healthy | where TimeGenerated > LastEvent - 1h | summarize N = count(), SpanMin = (max(TimeGenerated) - min(TimeGenerated)) / 1m, AvgMs = avg(Elapsed), MaxMs = max(Elapsed);\nlet Rate = toscalar(Recent | extend R = N / (SpanMin + 1.0) | project R);\nlet AvgMs = toscalar(Recent | project AvgMs);\nlet MaxMs = toscalar(Recent | project MaxMs);\nlet Incidents = Worker | where EventID == 6201 | summarize Count = count(), Last = max(TimeGenerated);\nlet IncidentCount = toscalar(Incidents | project Count);\nlet LastIncident = toscalar(Incidents | project Last);\nlet HasWork = isnotnull(LastEvent);\nprint Dummy = 1\n| project data = pack_array(\n    pack('Label', 'Last commit', 'Value', iff(HasWork, AgeText(LastCommit), 'No events'), 'Note', iff(HasWork, strcat(LastHost, ' / ', LastDb), 'No ArcSqlEngineDemo events in range'), 'Order', 1),\n    pack('Label', 'Commit events/min', 'Value', iff(HasWork, Num(Rate, 1), 'No events'), 'Note', iff(HasWork, 'healthy commit and read (6000)', 'No ArcSqlEngineDemo events in range'), 'Order', 2),\n    pack('Label', 'Commit latency', 'Value', iff(HasWork, strcat(Num(AvgMs, 0), ' ms'), 'No events'), 'Note', iff(HasWork, strcat('slowest ', Num(MaxMs, 0), ' ms, last hour'), 'No ArcSqlEngineDemo events in range'), 'Order', 3),\n    pack('Label', 'Lock timeouts', 'Value', tostring(coalesce(IncidentCount, 0)), 'Note', 'SQL error 1222 in range', 'Order', 4),\n    pack('Label', 'Last lock timeout', 'Value', iff(isnotnull(LastIncident), AgeText(LastIncident), 'None in range'), 'Note', iff(isnotnull(LastIncident), 'event 6201 on the SQL host', 'no 6201 events in range'), 'Order', 5))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nlet Healthy = Worker | where EventID == 6000;\nlet LastEvent = toscalar(Healthy | summarize max(TimeGenerated));\nlet LastCommit = toscalar(Healthy | summarize max(LastCommit));\nlet LastHost = toscalar(Healthy | summarize arg_max(TimeGenerated, Computer) | project Computer);\nlet LastDb = toscalar(Healthy | summarize arg_max(TimeGenerated, Database) | project Database);\nlet Recent = Healthy | where TimeGenerated > LastEvent - 1h | summarize N = count(), SpanMin = (max(TimeGenerated) - min(TimeGenerated)) / 1m, AvgMs = avg(Elapsed), MaxMs = max(Elapsed);\nlet Rate = toscalar(Recent | extend R = N / (SpanMin + 1.0) | project R);\nlet AvgMs = toscalar(Recent | project AvgMs);\nlet MaxMs = toscalar(Recent | project MaxMs);\nlet Incidents = Worker | where EventID == 6201 | summarize Count = count(), Last = max(TimeGenerated);\nlet IncidentCount = toscalar(Incidents | project Count);\nlet LastIncident = toscalar(Incidents | project Last);\nlet HasWork = isnotnull(LastEvent);\nprint Dummy = 1\n| project data = pack_array(\n    pack('Label', 'Last commit', 'Value', iff(HasWork, AgeText(LastCommit), 'No events'), 'Note', iff(HasWork, strcat(LastHost, ' / ', LastDb), 'no events in this range'), 'Order', 1),\n    pack('Label', 'Commit events/min', 'Value', iff(HasWork, Num(Rate, 1), 'No events'), 'Note', iff(HasWork, 'healthy commit and read (6000)', 'no events in this range'), 'Order', 2),\n    pack('Label', 'Commit latency', 'Value', iff(HasWork, strcat(Num(AvgMs, 0), ' ms'), 'No events'), 'Note', iff(HasWork, strcat('slowest ', Num(MaxMs, 0), ' ms, last hour'), 'no events in this range'), 'Order', 3),\n    pack('Label', 'Lock timeouts', 'Value', tostring(coalesce(IncidentCount, 0)), 'Note', 'SQL error 1222 in range', 'Order', 4),\n    pack('Label', 'Last lock timeout', 'Value', iff(isnotnull(LastIncident), AgeText(LastIncident), 'None in range'), 'Note', iff(isnotnull(LastIncident), 'event 6201 on the SQL host', 'no 6201 events in range'), 'Order', 5))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
         "size": 3,
         "title": "Monitored SQL workload",
         "noDataMessage": "No ArcSqlEngineDemo events in the selected time range. The demo SQL worker writes them from its host through the Azure Monitor Agent.",
@@ -195,7 +195,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| extend Raised = todatetime(e.startDateTime), Condition = tostring(e.monitorCondition), AlertState = tostring(e.alertState), Sev = tostring(e.severity)\n| summarize Fired = count(), arg_max(Raised, Condition, AlertState, Sev)\n| project data = pack_array(\n    pack('Label', 'Alerts raised', 'Value', tostring(Fired), 'Note', strcat('latest ', format_datetime(Raised, 'yyyy-MM-dd HH:mm'), ' UTC'), 'Order', 1),\n    pack('Label', 'Latest alert', 'Value', Condition, 'Note', strcat(AlertState, ', ', Sev), 'Order', 2))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| extend Raised = todatetime(e.startDateTime), Condition = tostring(e.monitorCondition), AlertState = tostring(e.alertState), Sev = tostring(e.severity)\n| summarize Fired = count(), arg_max(Raised, Condition, AlertState, Sev)\n| extend RaisedMin = datetime_diff('minute', now(), Raised)\n| extend RaisedText = case(RaisedMin < 120, strcat(RaisedMin, ' min ago'), RaisedMin < 2880, strcat(toint(round(RaisedMin / 60.0, 0)), ' h ago'), strcat(toint(round(RaisedMin / 1440.0, 0)), ' d ago'))\n| project data = pack_array(\n    pack('Label', 'Alerts raised', 'Value', tostring(Fired), 'Note', strcat('latest ', RaisedText), 'Order', 1),\n    pack('Label', 'Latest alert', 'Value', Condition, 'Note', strcat(AlertState, ', ', Sev), 'Order', 2))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
         "size": 3,
         "title": "Alerts",
         "noDataMessage": "No alert has been raised by a SQL lock-timeout rule in the subscriptions selected. The rule only fires when a lock-timeout incident is rehearsed.",
@@ -235,8 +235,8 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend Host = tostring(split(tostring(properties.containerResourceId), '/')[8]), HostId = tolower(tostring(properties.containerResourceId))\n| project Instance = name, Host, HostId, Version = tostring(properties.version), Edition = tostring(properties.edition), Licence = tostring(properties.licenseType),\n    Status = tostring(properties.status), Defender = tostring(properties.azureDefenderStatus), VCores = toint(properties.vCore), PatchLevel = tostring(properties.patchLevel),\n    LastInventory = todatetime(properties.lastInventoryUploadTime)\n| join kind=leftouter (resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'WindowsAgent.SqlServer'\n    | project HostId = tolower(tostring(split(id, '/extensions/')[0])), ArcSqlMode = tostring(properties.settings.LicenseType)) on HostId\n| project Instance, Host, Version, Edition, Licence, ArcSqlMode, Status, Defender, VCores, PatchLevel, LastInventory\n| order by Host asc, Instance asc",
-        "size": 0,
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend Host = tostring(split(tostring(properties.containerResourceId), '/')[8]), HostId = tolower(tostring(properties.containerResourceId))\n| project Instance = name, Host, HostId, Version = tostring(properties.version), Edition = tostring(properties.edition), Licence = tostring(properties.licenseType),\n    Status = tostring(properties.status), Defender = tostring(properties.azureDefenderStatus), LastInventory = todatetime(properties.lastInventoryUploadTime)\n| join kind=leftouter (resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'WindowsAgent.SqlServer'\n    | project HostId = tolower(tostring(split(id, '/extensions/')[0])), ArcSqlMode = tostring(properties.settings.LicenseType)) on HostId\n| project Instance, Host, Version, Edition, Licence, ArcSqlMode, Status, Defender, LastInventory\n| order by Host asc, Instance asc",
+        "size": 3,
         "title": "SQL Server instances registered with Arc",
         "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected. An instance appears once the Arc SQL extension (WindowsAgent.SqlServer) is installed and the instance registers.",
         "noDataMessageStyle": 4,
@@ -259,7 +259,7 @@
               "columnMatch": "Host",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14ch"
               }
             },
             {
@@ -280,14 +280,14 @@
               "columnMatch": "Licence",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "10ch"
+                "customColumnWidthSetting": "12ch"
               }
             },
             {
               "columnMatch": "ArcSqlMode",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "16ch"
               }
             },
             {
@@ -315,7 +315,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "18ch"
               }
             },
             {
@@ -337,31 +337,35 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "LastInventory",
+              "formatter": 6,
+              "formatOptions": {
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
               }
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "ArcSqlMode",
               "label": "Arc SQL mode"
             },
             {
-              "columnId": "VCores",
-              "label": "vCores"
-            },
-            {
-              "columnId": "PatchLevel",
-              "label": "Patch level"
+              "columnId": "Defender",
+              "label": "Defender (Arc)"
             },
             {
               "columnId": "LastInventory",
               "label": "Last inventory"
-            },
-            {
-              "columnId": "Defender",
-              "label": "Defender (reported)"
             }
           ]
         }
@@ -373,7 +377,7 @@
       "content": {
         "version": "KqlItem/1.0",
         "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n| extend InstanceId = tolower(substring(id, 0, indexof(tolower(id), '/databases/')))\n| join kind=inner (resources | where type =~ 'microsoft.azurearcdata/sqlserverinstances' | project InstanceId = tolower(id), Instance = name) on InstanceId\n| project Instance, Database = name, Kind = iff(name in~ ('master', 'model', 'msdb', 'tempdb'), 'System', 'User'), State = tostring(properties.state), SizeMB = round(todouble(properties.sizeMB), 1),\n    Recovery = tostring(properties.recoveryMode), CompatibilityLevel = toint(properties.compatibilityLevel)\n| order by Instance asc, Kind desc, Database asc",
-        "size": 0,
+        "size": 3,
         "title": "Databases discovered by Arc",
         "noDataMessage": "No databases to list because no Arc-enabled SQL Server instance is registered in the subscriptions selected.",
         "noDataMessageStyle": 4,
@@ -424,7 +428,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "10ch"
+                "customColumnWidthSetting": "12ch"
               }
             },
             {
@@ -446,11 +450,41 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "10ch"
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "SizeMB",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              },
+              "numberFormat": {
+                "unit": 0,
+                "options": {
+                  "style": "decimal",
+                  "useGrouping": true,
+                  "maximumFractionDigits": 1
+                }
+              }
+            },
+            {
+              "columnMatch": "Recovery",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "CompatibilityLevel",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "18ch"
               }
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "SizeMB",
@@ -469,17 +503,32 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend edition = tostring(properties.edition)\n| summarize InstanceCount = count() by edition\n| order by InstanceCount desc",
-        "size": 1,
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend edition = tostring(properties.edition)\n| summarize InstanceCount = count() by edition\n| order by InstanceCount desc\n| project Label = iff(isempty(edition), 'Unknown', edition), Value = tostring(InstanceCount), Note = iff(InstanceCount == 1, 'instance with this edition', 'instances with this edition')",
+        "size": 3,
         "title": "Edition mix",
-        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to chart.",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to show.",
         "noDataMessageStyle": 4,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
           "{Subscription}"
         ],
-        "visualization": "piechart"
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
       },
       "name": "mix-edition",
       "customWidth": "33"
@@ -488,17 +537,32 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend version = tostring(properties.version)\n| extend versionMajor = case(\n    version startswith '10.', 'SQL 2008/R2',\n    version startswith '11.', 'SQL 2012',\n    version startswith '12.', 'SQL 2014',\n    version startswith '13.', 'SQL 2016',\n    version startswith '14.', 'SQL 2017',\n    version startswith '15.', 'SQL 2019',\n    version startswith '16.', 'SQL 2022',\n    version has '2022', 'SQL 2022',\n    version has '2019', 'SQL 2019',\n    version has '2017', 'SQL 2017',\n    version has '2016', 'SQL 2016',\n    version has '2014', 'SQL 2014',\n    version has '2012', 'SQL 2012',\n    version has '2008', 'SQL 2008/R2',\n    'Unknown'\n)\n| summarize InstanceCount = count() by versionMajor\n| order by versionMajor asc",
-        "size": 1,
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend version = tostring(properties.version)\n| extend versionMajor = case(\n    version startswith '10.', 'SQL 2008/R2',\n    version startswith '11.', 'SQL 2012',\n    version startswith '12.', 'SQL 2014',\n    version startswith '13.', 'SQL 2016',\n    version startswith '14.', 'SQL 2017',\n    version startswith '15.', 'SQL 2019',\n    version startswith '16.', 'SQL 2022',\n    version has '2022', 'SQL 2022',\n    version has '2019', 'SQL 2019',\n    version has '2017', 'SQL 2017',\n    version has '2016', 'SQL 2016',\n    version has '2014', 'SQL 2014',\n    version has '2012', 'SQL 2012',\n    version has '2008', 'SQL 2008/R2',\n    'Unknown'\n)\n| summarize InstanceCount = count() by versionMajor\n| order by versionMajor asc\n| project Label = versionMajor, Value = tostring(InstanceCount), Note = iff(InstanceCount == 1, 'instance on this version', 'instances on this version')",
+        "size": 3,
         "title": "Version mix",
-        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to chart.",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to show.",
         "noDataMessageStyle": 4,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
           "{Subscription}"
         ],
-        "visualization": "barchart"
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
       },
       "name": "mix-version",
       "customWidth": "33"
@@ -507,17 +571,32 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend licenseType = tostring(properties.licenseType)\n| extend licenseDisplay = case(\n    licenseType =~ 'PAYG', 'Pay-As-You-Go',\n    licenseType =~ 'Paid', 'Perpetual License',\n    licenseType =~ 'LicenseOnly', 'Azure Hybrid Benefit',\n    licenseType =~ 'Free', 'Free (Developer/Express)',\n    'Unknown'\n)\n| summarize InstanceCount = count() by licenseDisplay\n| order by InstanceCount desc",
-        "size": 1,
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend licenseType = tostring(properties.licenseType)\n| extend licenseDisplay = case(\n    licenseType =~ 'PAYG', 'Pay-as-you-go',\n    licenseType =~ 'Paid', 'Perpetual',\n    licenseType =~ 'LicenseOnly', 'Hybrid Benefit',\n    licenseType =~ 'Free', 'Free',\n    'Unknown'\n)\n| summarize InstanceCount = count() by licenseDisplay\n| order by InstanceCount desc\n| project Label = licenseDisplay, Value = tostring(InstanceCount), Note = iff(InstanceCount == 1, 'instance with this licence', 'instances with this licence')",
+        "size": 3,
         "title": "Licence mix",
-        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to chart.",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to show.",
         "noDataMessageStyle": 4,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
           "{Subscription}"
         ],
-        "visualization": "piechart"
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
       },
       "name": "mix-licence",
       "customWidth": "33"
@@ -525,7 +604,7 @@
     {
       "type": 1,
       "content": {
-        "json": "## What Azure Monitor observes\nA real SQL Server workload on a monitored Windows host (not an Arc SQL instance). Its worker commits orders and reads them back; **event 6000** is written to the Application log after a healthy commit and read (about once a minute), **6201** is an actual lock timeout (SQL error 1222) and **6001** is the verified recovery. Gaps mean no events were recorded: the host was parked or the worker stopped."
+        "json": "## What Azure Monitor observes\nA real SQL Server workload on a monitored Windows host (not an Arc SQL instance). Its worker commits orders and reads them back; **event 6000** is written to the Application log after a healthy commit and read (about once a minute), **6201** is an actual lock timeout (SQL error 1222) and **6001** is the verified recovery. Each column is one time interval; a blank stretch means no events were recorded: the host was parked or the worker stopped."
       },
       "name": "workload-header"
     },
@@ -533,7 +612,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Healthy = count() default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| mv-expand TimeGenerated to typeof(datetime), Healthy to typeof(real)\n| project TimeGenerated, CommitEventsPerMinute = round(Healthy / (Step / 1m), 2)",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Healthy = count() default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| mv-expand TimeGenerated to typeof(datetime), Healthy to typeof(real)\n| project TimeGenerated, CommitsPerMinute = round(Healthy / (Step / 1m), 1)",
         "size": 1,
         "title": "Healthy commit events per minute",
         "noDataMessage": "No ArcSqlEngineDemo healthy-commit events (6000) in the selected time range. The demo SQL worker writes them from its host through the Azure Monitor Agent, about one a minute; none means the host was parked or the worker stopped.",
@@ -541,43 +620,77 @@
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "timechart",
+        "visualization": "barchart",
         "chartSettings": {
+          "showLegend": false,
+          "showMetrics": false,
+          "seriesLabelSettings": [
+            {
+              "seriesName": "CommitsPerMinute",
+              "label": "Commits per minute",
+              "color": "blue"
+            }
+          ],
           "ySettings": {
-            "min": 0
+            "min": 0,
+            "numberFormatSettings": {
+              "unit": 0,
+              "options": {
+                "style": "decimal",
+                "useGrouping": true,
+                "maximumFractionDigits": 1
+              }
+            }
           }
         }
       },
       "name": "workload-commits",
-      "customWidth": "50"
+      "customWidth": "33"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Average = avg(Elapsed) default = real(null), Slowest = max(Elapsed) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Average, Slowest",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Slowest = max(Elapsed) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Slowest",
         "size": 1,
-        "title": "Commit and read latency (ms)",
+        "title": "Slowest commit and read per interval (ms)",
         "noDataMessage": "No ArcSqlEngineDemo healthy-commit events (6000) in the selected time range, so there is no latency to chart. Latency is the elapsedMs value in each event.",
         "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "timechart",
+        "visualization": "barchart",
         "chartSettings": {
+          "showLegend": false,
+          "showMetrics": false,
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Slowest",
+              "label": "Slowest commit and read (ms)",
+              "color": "orange"
+            }
+          ],
           "ySettings": {
-            "min": 0
+            "min": 0,
+            "numberFormatSettings": {
+              "unit": 0,
+              "options": {
+                "style": "decimal",
+                "useGrouping": true,
+                "maximumFractionDigits": 1
+              }
+            }
           }
         }
       },
       "name": "workload-latency",
-      "customWidth": "50"
+      "customWidth": "33"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID in (6201, 6001)\n| extend Kind = iff(EventID == 6201, 'Lock timeout (error 1222)', 'Recovery verified')\n| make-series Events = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Kind",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID in (6201, 6001)\n| extend Kind = iff(EventID == 6201, 'Lock timeout (error 1222)', 'Recovery verified')\n| make-series Events = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Kind",
         "size": 1,
         "title": "Lock timeouts and recoveries over time",
         "noDataMessage": "No lock-timeout (6201) or recovery (6001) events in the selected time range. That is the healthy case: incidents appear only when a rehearsal is run.",
@@ -585,23 +698,48 @@
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "timechart",
+        "visualization": "barchart",
         "chartSettings": {
+          "showLegend": true,
+          "showMetrics": false,
+          "simpleLegendSettings": {
+            "position": "bottom"
+          },
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Lock timeout (error 1222)",
+              "label": "Lock timeout (error 1222)",
+              "color": "redBright"
+            },
+            {
+              "seriesName": "Recovery verified",
+              "label": "Recovery verified",
+              "color": "green"
+            }
+          ],
           "ySettings": {
-            "min": 0
+            "min": 0,
+            "numberFormatSettings": {
+              "unit": 0,
+              "options": {
+                "style": "decimal",
+                "useGrouping": true,
+                "maximumFractionDigits": 1
+              }
+            }
           }
         }
       },
       "name": "workload-locks",
-      "customWidth": "50"
+      "customWidth": "33"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Detected = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID == 6201\n| extend j = parse_json(RenderedDescription)\n| project Detected = TimeGenerated, SqlHost = Computer, IncidentId = tostring(j.incidentId), Database = tostring(j.database), VictimSession = toint(j.victimSessionId), BlockerSession = toint(j.blockerSessionId),\n    WaitType = tostring(j.waitType), SqlError = toint(j.sqlErrorNumber), LockTimeoutMs = toint(j.lockTimeoutMs);\nlet Recovered = Event\n| where TimeGenerated between (WindowStart .. WindowEnd + 1h) and Source == 'ArcSqlEngineDemo' and EventID == 6001\n| extend j = parse_json(RenderedDescription)\n| project Recovered = TimeGenerated, IncidentId = tostring(j.incidentId);\nDetected\n| join kind=leftouter Recovered on IncidentId\n| extend RecoveredAfterSec = datetime_diff('second', Recovered, Detected)\n| project Detected, SqlHost, Database, SqlError, WaitType, LockTimeoutMs, VictimSession, BlockerSession, RecoveredAfterSec, IncidentId\n| order by Detected desc",
-        "size": 0,
-        "title": "Lock-timeout incidents",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Detected = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID == 6201\n| extend j = parse_json(RenderedDescription)\n| project Detected = TimeGenerated, SqlHost = Computer, IncidentId = tostring(j.incidentId), Database = tostring(j.database), VictimSession = toint(j.victimSessionId), BlockerSession = toint(j.blockerSessionId),\n    WaitType = tostring(j.waitType);\nlet Recovered = Event\n| where TimeGenerated between (WindowStart .. WindowEnd + 1h) and Source == 'ArcSqlEngineDemo' and EventID == 6001\n| extend j = parse_json(RenderedDescription)\n| project Recovered = TimeGenerated, IncidentId = tostring(j.incidentId);\nDetected\n| join kind=leftouter Recovered on IncidentId\n| extend RecoveredAfterSec = datetime_diff('second', Recovered, Detected)\n| order by Detected desc\n| take 25\n| project Detected, SqlHost, Database, WaitType, VictimSession, BlockerSession, RecoveredAfterSec",
+        "size": 3,
+        "title": "Lock-timeout incidents (SQL error 1222)",
         "noDataMessage": "No lock-timeout incidents (event 6201) in the selected time range. Incidents appear only when a rehearsal is run; widen the range to see earlier ones.",
         "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
@@ -611,24 +749,49 @@
         "gridSettings": {
           "formatters": [
             {
+              "columnMatch": "Detected",
+              "formatter": 6,
+              "formatOptions": {
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
+              }
+            },
+            {
               "columnMatch": "SqlHost",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "14ch"
               }
             },
             {
               "columnMatch": "Database",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "18ch"
               }
             },
             {
               "columnMatch": "WaitType",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "10ch"
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "VictimSession",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "20ch"
+              }
+            },
+            {
+              "columnMatch": "BlockerSession",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "20ch"
               }
             },
             {
@@ -638,11 +801,20 @@
                 "palette": "greenRed",
                 "min": 0,
                 "max": 60,
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "24ch"
+              },
+              "numberFormat": {
+                "unit": 0,
+                "options": {
+                  "style": "decimal",
+                  "useGrouping": true,
+                  "maximumFractionDigits": 0
+                }
               }
             }
           ],
           "filter": true,
+          "rowLimit": 25,
           "labelSettings": [
             {
               "columnId": "Detected",
@@ -653,45 +825,32 @@
               "label": "SQL host"
             },
             {
-              "columnId": "SqlError",
-              "label": "SQL error"
-            },
-            {
               "columnId": "WaitType",
               "label": "Wait type"
             },
             {
-              "columnId": "LockTimeoutMs",
-              "label": "Timeout ms"
-            },
-            {
               "columnId": "VictimSession",
-              "label": "Victim"
+              "label": "Victim session"
             },
             {
               "columnId": "BlockerSession",
-              "label": "Blocker"
+              "label": "Blocker session"
             },
             {
               "columnId": "RecoveredAfterSec",
               "label": "Recovered after (s)"
-            },
-            {
-              "columnId": "IncidentId",
-              "label": "Incident"
             }
           ]
         }
       },
-      "name": "workload-incidents",
-      "customWidth": "50"
+      "name": "workload-incidents"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
         "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| project Rule = tostring(split(tostring(e.alertRule), '/')[-1]), Severity = tostring(e.severity), Condition = tostring(e.monitorCondition), State = tostring(e.alertState),\n    Raised = todatetime(e.startDateTime), Resolved = todatetime(e.monitorConditionResolvedDateTime)\n| order by Raised desc\n| take 15",
-        "size": 0,
+        "size": 3,
         "title": "Alerts raised by the lock-timeout rule",
         "noDataMessage": "No alerts have been raised by a SQL lock-timeout rule in the subscriptions selected. The rule only fires when a lock-timeout incident is rehearsed.",
         "noDataMessageStyle": 4,
@@ -707,14 +866,14 @@
               "columnMatch": "Rule",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "30ch"
+                "customColumnWidthSetting": "32ch"
               }
             },
             {
               "columnMatch": "Severity",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "10ch"
+                "customColumnWidthSetting": "12ch"
               }
             },
             {
@@ -742,7 +901,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "14ch"
               }
             },
             {
@@ -776,11 +935,34 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "Raised",
+              "formatter": 6,
+              "formatOptions": {
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
+              }
+            },
+            {
+              "columnMatch": "Resolved",
+              "formatter": 6,
+              "formatOptions": {
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
               }
             }
           ],
           "filter": true,
+          "rowLimit": 15,
           "labelSettings": [
             {
               "columnId": "Raised",
@@ -806,7 +988,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Bpa = union isfuzzy=true SqlAssessment_CL, (print TimeGenerated = datetime(null), RawData = '', _ResourceId = '' | where false);\nBpa\n| where TimeGenerated between (WindowStart .. WindowEnd)\n| extend asmt = parse_csv(RawData)\n| extend AsmtId = tostring(asmt[1]), Severity = case(asmt[8] == 30, 'High', asmt[8] == 20, 'Medium', asmt[8] == 10, 'Low', asmt[8] == 2, 'Critical', asmt[8] == 1, 'Warning', 'Information'), Sev = toint(asmt[8])\n| join kind=inner (Bpa | extend asmt = parse_csv(RawData) | extend AsmtId = tostring(asmt[1]) | summarize arg_max(TimeGenerated, *) by _ResourceId | project AsmtId) on AsmtId\n| where Sev > 0\n| summarize IssueCount = count() by Severity, Sev\n| order by Sev desc\n| project Severity, IssueCount",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Bpa = union isfuzzy=true SqlAssessment_CL, (print TimeGenerated = datetime(null), RawData = '', _ResourceId = '' | where false);\nBpa\n| where TimeGenerated between (WindowStart .. WindowEnd)\n| extend asmt = parse_csv(RawData)\n| extend AsmtId = tostring(asmt[1]), Severity = case(asmt[8] == 30, 'High', asmt[8] == 20, 'Medium', asmt[8] == 10, 'Low', asmt[8] == 2, 'Critical', asmt[8] == 1, 'Warning', 'Information'), Sev = toint(asmt[8])\n| join kind=inner (Bpa | extend asmt = parse_csv(RawData) | extend AsmtId = tostring(asmt[1]) | summarize arg_max(TimeGenerated, *) by _ResourceId | project AsmtId) on AsmtId\n| where Sev > 0\n| summarize IssueCount = count() by Severity, Sev\n| order by Sev desc\n| project Severity, IssueCount",
         "size": 1,
         "title": "Issues by severity",
         "noDataMessage": "Best practices assessment is not enabled in this lab: the SqlAssessment_CL table has no data in this workspace, so there is nothing to chart. These tiles fill in automatically when assessment data arrives.",
@@ -816,6 +998,8 @@
         "resourceType": "microsoft.operationalinsights/workspaces",
         "visualization": "barchart",
         "chartSettings": {
+          "showLegend": false,
+          "showMetrics": false,
           "seriesLabelSettings": [
             {
               "seriesName": "Critical",
@@ -843,8 +1027,8 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Bpa = union isfuzzy=true SqlAssessment_CL, (print TimeGenerated = datetime(null), RawData = '', _ResourceId = '' | where false);\nBpa\n| where TimeGenerated between (WindowStart .. WindowEnd)\n| extend asmt = parse_csv(RawData)\n| extend AsmtId = tostring(asmt[1]), CheckId = tostring(asmt[2]), DisplayString = tostring(asmt[3]), Severity = case(asmt[8] == 30, 'High', asmt[8] == 20, 'Medium', asmt[8] == 10, 'Low', asmt[8] == 2, 'Critical', asmt[8] == 1, 'Warning', 'Information'), Sev = toint(asmt[8])\n| join kind=inner (Bpa | extend asmt = parse_csv(RawData) | extend AsmtId = tostring(asmt[1]) | summarize arg_max(TimeGenerated, *) by _ResourceId | project AsmtId) on AsmtId\n| where Sev > 0\n| summarize AffectedServers = dcount(_ResourceId), TotalIssues = count() by CheckId, DisplayString, Severity, Sev\n| top 10 by AffectedServers desc\n| project Issue = DisplayString, Severity, AffectedServers, TotalIssues\n| order by AffectedServers desc",
-        "size": 1,
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Bpa = union isfuzzy=true SqlAssessment_CL, (print TimeGenerated = datetime(null), RawData = '', _ResourceId = '' | where false);\nBpa\n| where TimeGenerated between (WindowStart .. WindowEnd)\n| extend asmt = parse_csv(RawData)\n| extend AsmtId = tostring(asmt[1]), CheckId = tostring(asmt[2]), DisplayString = tostring(asmt[3]), Severity = case(asmt[8] == 30, 'High', asmt[8] == 20, 'Medium', asmt[8] == 10, 'Low', asmt[8] == 2, 'Critical', asmt[8] == 1, 'Warning', 'Information'), Sev = toint(asmt[8])\n| join kind=inner (Bpa | extend asmt = parse_csv(RawData) | extend AsmtId = tostring(asmt[1]) | summarize arg_max(TimeGenerated, *) by _ResourceId | project AsmtId) on AsmtId\n| where Sev > 0\n| summarize AffectedServers = dcount(_ResourceId), TotalIssues = count() by CheckId, DisplayString, Severity, Sev\n| top 10 by AffectedServers desc\n| project Issue = DisplayString, Severity, AffectedServers, TotalIssues\n| order by AffectedServers desc",
+        "size": 3,
         "title": "Top 10 most common issues",
         "noDataMessage": "Best practices assessment is not enabled in this lab: the SqlAssessment_CL table has no data in this workspace, so there is nothing to chart. These tiles fill in automatically when assessment data arrives.",
         "noDataMessageStyle": 4,
@@ -854,6 +1038,13 @@
         "visualization": "table",
         "gridSettings": {
           "formatters": [
+            {
+              "columnMatch": "Issue",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "40ch"
+              }
+            },
             {
               "columnMatch": "Severity",
               "formatter": 18,
@@ -891,11 +1082,42 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "AffectedServers",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "20ch"
+              },
+              "numberFormat": {
+                "unit": 0,
+                "options": {
+                  "style": "decimal",
+                  "useGrouping": true,
+                  "maximumFractionDigits": 0
+                }
+              }
+            },
+            {
+              "columnMatch": "TotalIssues",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              },
+              "numberFormat": {
+                "unit": 0,
+                "options": {
+                  "style": "decimal",
+                  "useGrouping": true,
+                  "maximumFractionDigits": 0
+                }
               }
             }
           ],
           "filter": false,
+          "rowLimit": 10,
           "labelSettings": [
             {
               "columnId": "AffectedServers",
