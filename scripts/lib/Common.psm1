@@ -1443,4 +1443,218 @@ function Wait-DemoHostsReady {
         ElapsedSeconds = [int]((Get-Date).ToUniversalTime() - $loopStarted).TotalSeconds }
 }
 
+function Invoke-DemoGraphRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('GET', 'POST')][string]$Method,
+        [Parameter(Mandatory)][string]$Url,
+        [hashtable]$Body
+    )
+    $arguments = @('rest', '--method', $Method, '--url', $Url, '--output', 'json', '--only-show-errors')
+    $bodyPath = $null
+    if ($PSBoundParameters.ContainsKey('Body')) {
+        $bodyPath = Join-Path ([IO.Path]::GetTempPath()) "demo-graph-$([guid]::NewGuid().ToString('N')).json"
+        [IO.File]::WriteAllText($bodyPath, ($Body | ConvertTo-Json -Depth 5 -Compress), [Text.UTF8Encoding]::new($false))
+        $arguments += @('--headers', 'Content-Type=application/json', '--body', "@$bodyPath")
+    }
+    try {
+        $response = Invoke-DemoAz -Arguments $arguments
+        if ($null -eq $response -or @($response).Count -eq 0) { return $null }
+        if ($response -isnot [string] -and $response -isnot [array]) { return $response }
+        $text = @($response) -join "`n"
+        if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+        $text | ConvertFrom-Json
+    } finally {
+        if ($bodyPath -and (Test-Path -LiteralPath $bodyPath)) {
+            Remove-Item -LiteralPath $bodyPath -Force
+        }
+    }
+}
+
+function Get-DemoGraphApplication {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Url, [Parameter(Mandatory)][guid]$ApplicationId)
+    $application = Invoke-DemoGraphRequest -Method GET -Url $Url
+    if (-not $application -or [guid]$application.appId -ne $ApplicationId) {
+        throw 'Graph returned a different onboarding application.'
+    }
+    $application
+}
+
+function Get-DemoCredentialKeyIdSet {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Application)
+    @($Application.passwordCredentials | ForEach-Object { "$($_.keyId)".ToLowerInvariant() } | Sort-Object -Unique)
+}
+
+function Test-DemoCredentialSet {
+    [CmdletBinding()]
+    param([string[]]$Expected, [string[]]$Actual)
+    (@($Expected | Sort-Object -Unique) -join '|') -ceq (@($Actual | Sort-Object -Unique) -join '|')
+}
+
+function Invoke-DemoOnboardingCredential {
+    <#
+    .SYNOPSIS
+        Mints a one-day password credential on the onboarding application, runs -Action with it, then removes it.
+    .DESCRIPTION
+        The secret reaches the action only as a SecureString, after any -ActionArguments. The credential is removed
+        in a finally block, also when the action fails, and the original credential key IDs are verified unchanged.
+        Existing credentials are never read beyond their key IDs and never changed.
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The one-run Graph secret is immediately converted in memory before protected delivery.')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][guid]$ApplicationId,
+        [Parameter(Mandatory)][string]$DisplayName,
+        [Parameter(Mandatory)][scriptblock]$Action,
+        [object[]]$ActionArguments = @()
+    )
+    $appRoute = "applications%28appId%3D%27$ApplicationId%27%29"
+    $appUrl = "https://graph.microsoft.com/v1.0/$appRoute`?%24select=id,appId,passwordCredentials"
+    $application = Get-DemoGraphApplication -Url $appUrl -ApplicationId $ApplicationId
+    $baselineIds = @(Get-DemoCredentialKeyIdSet -Application $application)
+    $createdKeyId = $null
+    $secret = $null
+    $actionFailure = $null
+    $cleanupFailure = $null
+    $result = $null
+    try {
+        $expiry = [datetime]::UtcNow.AddDays(1)
+        try {
+            $credential = Invoke-DemoGraphRequest -Method POST -Url "https://graph.microsoft.com/v1.0/$appRoute/addPassword" -Body @{
+                passwordCredential = @{
+                    displayName = $DisplayName
+                    endDateTime = $expiry.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+                }
+            }
+        } catch {
+            throw "Could not add a one-day credential to the onboarding application: $($_.Exception.Message) The signed-in operator must own the application or hold an application administrator role; otherwise supply the current onboarding secret (Deploy: -OnboardingSecret)."
+        }
+        if (-not $credential.secretText -or -not $credential.keyId) {
+            throw 'Graph did not return the new credential secret and key ID.'
+        }
+        $createdKeyId = "$($credential.keyId)".ToLowerInvariant()
+        if ($createdKeyId -in $baselineIds) { throw 'Graph returned a pre-existing credential key ID.' }
+        $secretText = [string]$credential.secretText
+        $secret = ConvertTo-SecureString $secretText -AsPlainText -Force
+        $secretText = $null
+        $credential = $null
+
+        $afterMint = Get-DemoGraphApplication -Url $appUrl -ApplicationId $ApplicationId
+        $expectedMinted = @($baselineIds + $createdKeyId | Sort-Object -Unique)
+        if (-not (Test-DemoCredentialSet -Expected $expectedMinted -Actual @(Get-DemoCredentialKeyIdSet $afterMint))) {
+            throw 'Onboarding application credential IDs changed unexpectedly after minting.'
+        }
+        $afterMint = $null
+        try { $result = & $Action @ActionArguments $secret }
+        catch { $actionFailure = $_ }
+    } catch {
+        if (-not $actionFailure) { $actionFailure = $_ }
+    } finally {
+        if ($createdKeyId) {
+            try {
+                $null = Invoke-DemoGraphRequest -Method POST -Url "https://graph.microsoft.com/v1.0/$appRoute/removePassword" -Body @{
+                    keyId = $createdKeyId
+                }
+                $deadline = [datetime]::UtcNow.AddSeconds(90)
+                do {
+                    $remaining = Get-DemoGraphApplication -Url $appUrl -ApplicationId $ApplicationId
+                    $remainingIds = @(Get-DemoCredentialKeyIdSet $remaining)
+                    if (@($baselineIds | Where-Object { $_ -notin $remainingIds }).Count -gt 0 -or
+                        @($remainingIds | Where-Object { $_ -ne $createdKeyId -and $_ -notin $baselineIds }).Count -gt 0) {
+                        throw 'Onboarding application credential IDs changed beyond the minted credential.'
+                    }
+                    if ($createdKeyId -notin $remainingIds) {
+                        if (-not (Test-DemoCredentialSet -Expected $baselineIds -Actual $remainingIds)) {
+                            throw 'Existing onboarding credential IDs were not preserved exactly.'
+                        }
+                        break
+                    }
+                    if ([datetime]::UtcNow -ge $deadline) { throw 'Graph still reports the one-run credential after removal.' }
+                    Start-Sleep -Seconds 5
+                } while ($true)
+            } catch {
+                $cleanupFailure = $_
+            }
+        }
+        if ($secret) { $secret.Dispose() }
+        $secretText = $null
+        $credential = $null
+    }
+    if ($cleanupFailure) {
+        $message = "One-run onboarding credential cleanup/verification failed; it expires at $($expiry.ToString('u')). $($cleanupFailure.Exception.Message)"
+        if ($actionFailure) { $message += " Failure: $($actionFailure.Exception.Message)" }
+        throw $message
+    }
+    if ($actionFailure) { throw $actionFailure }
+    $result
+}
+
+function Initialize-DemoOnboardingIdentity {
+    <#
+    .SYNOPSIS
+        Runs -Action with a credential for the demo's Arc onboarding service principal that exists only for the call.
+    .DESCRIPTION
+        Existing service principal (found as sp-<NamePrefix>-onboard, or by -ApplicationId): its credentials are never
+        read, changed or reset. The Azure Connected Machine Onboarding role is ensured at the Arc resource group
+        (which must already exist: a rebuild deletes the old assignment with the group), a one-day credential is
+        minted through Graph, handed to -Action as a SecureString and removed in a finally block, and the original
+        key IDs are verified unchanged. -ExistingSecret skips minting and passes the supplied secret through.
+        No service principal: it is created with the role at the group, as before, and its initial secret is handed
+        to -Action; nothing is stored.
+        -Action receives the application ID (string) and the secret (SecureString).
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The secret returned by service principal creation is converted in memory before delivery.')]
+    [CmdletBinding(DefaultParameterSetName = 'ByPrefix')]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'ByPrefix')][string]$NamePrefix,
+        [Parameter(Mandatory, ParameterSetName = 'ByApplication')][guid]$ApplicationId,
+        [Parameter(Mandatory)][string]$ResourceGroup,
+        [Parameter(Mandatory)][scriptblock]$Action,
+        [securestring]$ExistingSecret,
+        [string]$DisplayName = '',
+        [ValidateRange(0, 600)][int]$RolePropagationSeconds = 90
+    )
+    if (-not $script:DemoSubscription) { throw 'Initialize the explicit demo context before the onboarding identity.' }
+    $roleName = 'Azure Connected Machine Onboarding'
+    $scope = "/subscriptions/$script:DemoSubscription/resourceGroups/$ResourceGroup"
+    if (-not (Invoke-DemoAz -Arguments @('group', 'exists', '-n', $ResourceGroup, '-o', 'json') | ConvertFrom-Json)) {
+        throw "Resource group $ResourceGroup does not exist yet. The onboarding role can only be granted after the group is created."
+    }
+    if ($PSCmdlet.ParameterSetName -eq 'ByPrefix') {
+        $spName = "sp-$NamePrefix-onboard"
+        $found = @(Invoke-DemoAz -Arguments @('ad', 'sp', 'list', '--display-name', $spName, '--query', "[?displayName=='$spName'].{id:id,appId:appId}", '-o', 'json') | ConvertFrom-Json)
+        if ($found.Count -gt 1) { throw 'Ambiguous onboarding service principal name. Resolve duplicates before deployment.' }
+        $principal = $found | Select-Object -First 1
+        if (-not $principal) {
+            $created = Invoke-DemoAz -Arguments @('ad', 'sp', 'create-for-rbac', '--name', $spName, '--role', $roleName, '--scopes', $scope, '--only-show-errors', '-o', 'json') | ConvertFrom-Json
+            $createdAppId = [string]$created.appId
+            $secret = ConvertTo-SecureString ([string]$created.password) -AsPlainText -Force
+            $created = $null
+            Write-Ok "Onboarding service principal created ($createdAppId); its secret is not stored"
+            Write-Step "Waiting $RolePropagationSeconds seconds for the new role assignment to propagate..."
+            Start-Sleep -Seconds $RolePropagationSeconds
+            try { return (& $Action $createdAppId $secret) } finally { $secret.Dispose() }
+        }
+    } else {
+        $principal = Invoke-DemoAz -Arguments @('ad', 'sp', 'show', '--id', "$ApplicationId", '--query', '{id:id,appId:appId}', '-o', 'json') | ConvertFrom-Json
+        if (-not $principal) { throw "No service principal exists for onboarding application $ApplicationId." }
+    }
+    $appId = [string]$principal.appId
+    $assignments = @(Invoke-DemoAz -Arguments @('role', 'assignment', 'list', '--assignee-object-id', $principal.id, '--scope', $scope, '--role', $roleName, '-o', 'json') | ConvertFrom-Json)
+    if (@($assignments | Where-Object { $_.scope -ieq $scope }).Count) {
+        Write-Ok "$roleName is already assigned on $ResourceGroup"
+    } else {
+        Invoke-DemoAz -Arguments @('role', 'assignment', 'create', '--assignee-object-id', $principal.id, '--assignee-principal-type', 'ServicePrincipal', '--role', $roleName, '--scope', $scope, '-o', 'none') | Out-Null
+        Write-Ok "Granted $roleName on $ResourceGroup"
+        Write-Step "Waiting $RolePropagationSeconds seconds for the new role assignment to propagate..."
+        Start-Sleep -Seconds $RolePropagationSeconds
+    }
+    if ($ExistingSecret) { return (& $Action $appId $ExistingSecret) }
+    if (-not $DisplayName) { $DisplayName = "onboarding-$([datetime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))-$([guid]::NewGuid().ToString('N').Substring(0, 8))" }
+    Write-Step 'Minting a one-day onboarding credential; it is removed when onboarding finishes.'
+    Invoke-DemoOnboardingCredential -ApplicationId $appId -DisplayName $DisplayName -Action $Action -ActionArguments @($appId)
+}
+
 Export-ModuleMember -Function * -Variable *

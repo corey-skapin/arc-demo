@@ -29,7 +29,7 @@
 - Keep the lab running unless parking/removal is requested; never exercise a live lifecycle incidentally during testing.
 - Surface denied/malformed/unknown reads and actual CLI/job failures; never substitute absence or bypass a denial with another tool.
 - Preserve credentials, workload fault flags, disks/data, identities, RBAC, logs and private vault access on routine lifecycle/reconcile.
-- Never rotate a retained VM/onboarding credential for convenience; follow the existing-secret contract in lifecycle.md.
+- Never rotate a retained VM credential for convenience; follow the existing-secret contract in lifecycle.md. Never reset or change an onboarding service principal's credentials: `Initialize-DemoOnboardingIdentity` ensures its Arc-group role, adds a one-day credential for the run and removes it afterwards.
 - Keep guest passwords private and reuse them on wake. Each new nested build uses a one-day credential on the existing onboarding app and deletes that new credential afterwards; wake does not enroll again. Leave existing credentials and the private vault untouched.
 - Define the nested guest once in `nestedSqlGuest` in the private skin. Activate starts the parent then guest; Hibernate gracefully stops the guest then parks compute; Remove uses the same configuration. Do not add parallel manifest/tuple/review workflows for the demo.
 

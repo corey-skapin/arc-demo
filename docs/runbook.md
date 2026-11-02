@@ -169,8 +169,10 @@ pass does not imply KQL execution or a published workbook.
 
 Use a demo subscription where the operator has effective subscription Owner or
 Contributor plus User Access Administrator, and permission to create an Arc
-onboarding identity if needed. PowerShell 7.4+, Azure CLI 2.60+ and Bicep are
-required. No Az PowerShell module, production framework or SRE Agent is required.
+onboarding identity if needed, or to add and remove a credential on the existing
+one (application owner or administrator). PowerShell 7.4+, Azure CLI 2.60+ and
+Bicep are required. No Az PowerShell module, production framework or SRE Agent
+is required.
 
 ```powershell
 az login --tenant <TENANT>
@@ -242,12 +244,14 @@ Incremental optional-only deployments do not delete earlier Arc hosts.
 
 `Deploy-ArcDemo.ps1` does not regenerate VM credentials on a routine redeploy. Reuse the existing
 Key Vault secret; old labs without it must supply their **current**
-`-AdminPassword` as a SecureString. New Arc onboarding with an existing SP
-requires its existing `-OnboardingSecret`; no routine SP credential reset.
-Resolve missing credentials with the operator, never silently rotate them.
-These are estate-deployment inputs, not nested-build prerequisites: the
-[nested build](nested-sql-demo.md) creates and removes a one-day app credential
-without a vault or a supplied onboarding secret.
+`-AdminPassword` as a SecureString. New Arc onboarding needs no supplied secret:
+Deploy ensures an existing SP's Arc-group role and uses a one-day credential it
+removes afterwards (see [credentials](lifecycle.md#credentials-and-partial-deployments));
+no routine SP credential reset. Resolve missing VM credentials with the
+operator, never silently rotate them. The VM password is an estate-deployment
+input, not a nested-build prerequisite: the
+[nested build](nested-sql-demo.md) needs no vault and uses the same one-day
+credential flow.
 
 Match the effective disk tier too: fresh deployments default to SSD, but an
 existing HDD lab requires `-OsDiskStorageAccountType Standard_LRS` or that value

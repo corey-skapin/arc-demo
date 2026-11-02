@@ -47,8 +47,11 @@
     an incidental conversion. HDD OS disks retire on 8 September 2028.
 
 .PARAMETER OnboardingSecret
-    Existing onboarding SP secret as a SecureString when new machines need
-    onboarding. Existing credentials are never reset by routine deployment.
+    Optional existing onboarding SP secret as a SecureString. Normally omit it:
+    when machines need onboarding, Deploy ensures the SP's Arc resource group role,
+    mints a one-day credential on the existing SP through Graph and removes it
+    afterwards. Existing credentials are never read, reset or changed. Supply it
+    only if the operator cannot manage the application's credentials.
 
 .PARAMETER Location
     Azure region. Default: australiaeast.
@@ -804,22 +807,11 @@ if ($DeployArcOnPrem -and $vmNames.Count -gt 0) {
 Write-Header 'Phase 4 — Arc onboarding service principal'
 $alreadyArc = @(az connectedmachine list -g $arcRg --query "[].name" -o tsv)
 $toOnboardFleet = @($deployedFleet | Where-Object { $_.name -notin $alreadyArc })
-$spnMatches = @(az ad sp list --display-name "sp-$NamePrefix-onboard" --query "[?displayName=='sp-$NamePrefix-onboard'].appId" -o tsv)
-if ($spnMatches.Count -gt 1) { throw 'Ambiguous onboarding service principal name. Resolve duplicates before deployment.' }
-$spnAppId = $spnMatches | Select-Object -First 1
-$spnSecret = ''
-if ($spnAppId -and $toOnboardFleet.Count) {
-    if (-not $OnboardingSecret) { throw 'New Arc onboarding is required. Supply the existing SP secret as -OnboardingSecret (SecureString); credentials are never reset automatically.' }
-    $spnSecret = [System.Net.NetworkCredential]::new('', $OnboardingSecret).Password
-} elseif (-not $spnAppId -and $toOnboardFleet.Count) {
-    $spnJson = az ad sp create-for-rbac --name "sp-$NamePrefix-onboard" `
-        --role "Azure Connected Machine Onboarding" `
-        --scopes "/subscriptions/$SubscriptionId/resourceGroups/$arcRg" `
-        --only-show-errors -o json | ConvertFrom-Json
-    $spnAppId  = $spnJson.appId
-    $spnSecret = $spnJson.password
-    Write-Ok "SPN created ($spnAppId)"
-}
+
+# Onboarding and the steps after it run in this block so the onboarding credential only exists while it runs.
+$onboardArcMachines = {
+param([string]$spnAppId, [securestring]$OnboardingCredential)
+$spnSecret = if ($OnboardingCredential) { [System.Net.NetworkCredential]::new('', $OnboardingCredential).Password } else { '' }
 
 # Helper script files
 $libDir   = Join-Path ([System.IO.Path]::GetTempPath()) "arc-demo-onboard-$(Get-Random)"
@@ -911,6 +903,12 @@ Write-Ok "Periodic assessment enabled on $($deployedFleet.Count) Arc machines"
 
 } finally {
     Remove-Item -LiteralPath $libDir -Recurse -Force
+}
+}
+if ($toOnboardFleet.Count) {
+    Initialize-DemoOnboardingIdentity -NamePrefix $NamePrefix -ResourceGroup $arcRg -ExistingSecret $OnboardingSecret -Action $onboardArcMachines
+} else {
+    & $onboardArcMachines '' $null
 }
 
 # Phase 6: AMA (Windows via Arc, Linux via Azure VM) + DCR associations to Arc resource

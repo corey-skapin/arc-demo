@@ -341,11 +341,29 @@ registers nothing.
 Quota/listing checks are not capacity guarantees.
 `Deploy-ArcDemo.ps1` does not reset SP credentials or generate a new password for
 existing VMs. Old labs without the saved Key Vault secret need their **current**
-password as `-AdminPassword` (SecureString); an existing SP needed for new
-onboarding needs `-OnboardingSecret`. Obtain the current values from the operator;
-do not rotate them as a shortcut. See [lifecycle semantics](lifecycle.md).
-The [nested build](nested-sql-demo.md) is separate: it needs no vault or supplied
-onboarding secret and creates/removes its own one-day app credential.
+password as `-AdminPassword` (SecureString); obtain it from the operator and
+do not rotate it as a shortcut. Arc onboarding needs no supplied secret: it adds
+and removes its own one-day SP credential (see the next entry).
+See [lifecycle semantics](lifecycle.md).
+The [nested build](nested-sql-demo.md) is separate: it needs no vault and uses
+the same one-day credential flow.
+
+## Arc onboarding cannot add its one-day credential
+
+Deploy and the nested build stop with `Could not add a one-day credential to the
+onboarding application` when Graph refuses the new credential (for example
+`Authorization_RequestDenied`). The signed-in operator must own the
+`sp-<prefix>-onboard` application or hold an application administrator role.
+Either fix that, or pass the application's current secret as `-OnboardingSecret`
+(SecureString), which skips the one-day credential. The helper never resets or
+reads existing credentials. A failed removal is reported with the new credential's
+expiry (one day); it cannot outlive that.
+
+Deploy also stops before onboarding if the Arc resource group does not exist, because
+the `Azure Connected Machine Onboarding` role is granted at that group. A rebuilt
+group has lost the previous assignment; the helper re-grants it and waits 90
+seconds for propagation, so a retry after a failed first attempt needs no manual
+role work.
 
 ## Activate rejects an unused alternative parent as outside the manifest
 
