@@ -69,15 +69,17 @@ Describe 'Estate Overview opens with data and zero clicks' {
         @($options.value) | Should -Contain 'Linux'
     }
 
-    It 'reads the environment and role options from live Arc tags, with an untagged bucket' {
+    It 'reads the environment and role options from live Arc tags, with an untagged bucket, across all subscriptions like the official dropdowns' {
         foreach ($name in 'EnvironmentFilter', 'RoleFilter') {
             $p = $script:Parameters | Where-Object name -eq $name
             $p.queryType | Should -Be 1
             $p.resourceType | Should -Be 'microsoft.resourcegraph/resources'
+            @($p.crossComponentResources) | Should -Be @('value::all') -Because $name
             $p.query | Should -Match "microsoft\.hybridcompute/machines"
             $p.query | Should -Match "'\(untagged\)'"
             $p.query | Should -Match 'project value = v, label = v'
         }
+        foreach ($item in $script:GraphQueries) { @($item.content.crossComponentResources) | Should -Be @('value::all') -Because $item.name }
     }
 
     It 'makes every All dropdown expand to no filtering and carry a time context' {
