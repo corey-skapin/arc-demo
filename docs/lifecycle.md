@@ -471,7 +471,7 @@ The shared Heartbeat wait replaced those host checks afterwards.
 An explicitly approved cycle used a clean checkout of merged main `3a70e96`,
 including the shared-wait, best-effort parking and nested-parent lifecycle changes.
 Default Hibernate ran from 03:00:50 to 03:09:25 UTC: **8 minutes 35.2 seconds**.
-Direct post-park reads verified all nine backing VMs deallocated, the named NAT
+Direct post-park reads verified the eight fleet VMs (plus a since-deleted prototype VM) deallocated, the named NAT
 gateway and public IP absent, and all 35 retained Container App revisions inactive
 and `Stopped`. For independent revision reads, use
 `az containerapp revision list --all`: the default list hides inactive revisions.
