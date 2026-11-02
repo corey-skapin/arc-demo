@@ -208,6 +208,8 @@
         "resourceType": "microsoft.operationalinsights/workspaces",
         "visualization": "timechart",
         "chartSettings": {
+          "showLegend": true,
+          "showMetrics": false,
           "ySettings": {
             "min": 0
           },
@@ -243,6 +245,8 @@
         "resourceType": "microsoft.operationalinsights/workspaces",
         "visualization": "timechart",
         "chartSettings": {
+          "showLegend": true,
+          "showMetrics": false,
           "ySettings": {
             "min": 0,
             "max": 100
@@ -263,10 +267,10 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet PatchRows = arg(\"\").patchassessmentresources\n| where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n| project Machine = tolower(tostring(split(id, '/')[8])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical),\n    Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup),\n    Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime);\nlet AllMachines = union ArcInv, Beat, PatchRows\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs),\n    AssessmentStatus = take_any(AssessmentStatus), Critical = take_any(Critical), Security = take_any(Security), UpdateRollup = take_any(UpdateRollup),\n    Definition = take_any(Definition), LastAssessed = max(LastAssessed) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role)\n| extend PatchState = case(\n    not(InArc), 'Not applicable',\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed');\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nlet CpuStat = Samples | where Metric == \"CPU percent\" | summarize CpuMean = round(avg(Value), 1), CpuPeak = round(max(Value), 1) by Machine;\nlet MemStat = Samples | where Metric == \"Memory percent\" | summarize MemP95 = round(percentile(Value, 95), 1) by Machine;\nlet DiskLast = Samples | where Metric == \"Disk free percent\" | summarize MachineLast = max(TimeGenerated) by Machine;\nlet DiskStat = Samples\n| where Metric == \"Disk free percent\"\n| summarize LastSample = max(TimeGenerated), LowFree = min(Value) by Machine, Instance\n| lookup (DiskLast) on Machine\n| where LastSample >= MachineLast - 30m\n| summarize FreePct = round(min(LowFree), 1) by Machine;\nMachines\n| lookup (CpuStat) on Machine\n| lookup (MemStat) on Machine\n| lookup (DiskStat) on Machine\n| extend Age = iff(isnull(LastBeat), long(null), datetime_diff('minute', now(), LastBeat))\n| extend Telemetry = case(isnotnull(Age) and Age <= 15, 'Reporting', isnotnull(Age), 'Silent', InArc and isempty(MonitorTier), 'No monitoring agent', 'No telemetry')\n| extend LastHeartbeat = case(isnull(Age), 'none in 14 days', Age < 2, 'just now', Age < 120, strcat(Age, ' min ago'), Age < 2880, strcat(tolong(round(Age / 60.0, 0)), ' h ago'), strcat(tolong(round(Age / 1440.0, 0)), ' d ago'))\n| extend Note = case(\n    Telemetry == 'Reporting', '',\n    Telemetry == 'Silent', 'No heartbeat in 15 minutes: parked, or the agent is stopped. Values are the last observed.',\n    Telemetry == 'No monitoring agent', 'No Azure Monitor Agent: listed from Arc inventory only, so no telemetry is expected.',\n    'No heartbeat in 14 days although a monitoring tier is declared: check the agent.')\n| order by tolower(Name) asc\n| project Machine = Name, Arc = iff(InArc, ArcStatus, 'Not in Arc'), Telemetry, LastHeartbeat, Os, Tier, Role, CpuMean, CpuPeak, MemP95, FreePct, Updates = PatchState, Note\n",
+        "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet PatchRows = arg(\"\").patchassessmentresources\n| where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n| project Machine = tolower(tostring(split(id, '/')[8])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical),\n    Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup),\n    Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime);\nlet AllMachines = union ArcInv, Beat, PatchRows\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs),\n    AssessmentStatus = take_any(AssessmentStatus), Critical = take_any(Critical), Security = take_any(Security), UpdateRollup = take_any(UpdateRollup),\n    Definition = take_any(Definition), LastAssessed = max(LastAssessed) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role)\n| extend PatchState = case(\n    not(InArc), 'Not applicable',\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed');\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nlet CpuStat = Samples | where Metric == \"CPU percent\" | summarize CpuMean = round(avg(Value), 1), CpuPeak = round(max(Value), 1) by Machine;\nlet MemStat = Samples | where Metric == \"Memory percent\" | summarize MemP95 = round(percentile(Value, 95), 1) by Machine;\nlet DiskLast = Samples | where Metric == \"Disk free percent\" | summarize MachineLast = max(TimeGenerated) by Machine;\nlet DiskStat = Samples\n| where Metric == \"Disk free percent\"\n| summarize LastSample = max(TimeGenerated), LowFree = min(Value) by Machine, Instance\n| lookup (DiskLast) on Machine\n| where LastSample >= MachineLast - 30m\n| summarize FreePct = round(min(LowFree), 1) by Machine;\nMachines\n| lookup (CpuStat) on Machine\n| lookup (MemStat) on Machine\n| lookup (DiskStat) on Machine\n| extend Age = iff(isnull(LastBeat), long(null), datetime_diff('minute', now(), LastBeat))\n| extend Telemetry = case(isnotnull(Age) and Age <= 15, 'Reporting', isnotnull(Age), 'Silent', InArc and isempty(MonitorTier), 'No monitoring agent', 'No telemetry')\n| extend LastHeartbeat = case(isnull(Age), 'none in 14 days', Age < 2, 'just now', Age < 120, strcat(Age, ' min ago'), Age < 2880, strcat(tolong(round(Age / 60.0, 0)), ' h ago'), strcat(tolong(round(Age / 1440.0, 0)), ' d ago'))\n| extend Note = case(\n    Telemetry == 'Reporting', '',\n    Telemetry == 'Silent', 'No heartbeat in 15 minutes: parked, or the agent is stopped. Values are the last observed.',\n    Telemetry == 'No monitoring agent', 'No Azure Monitor Agent: listed from Arc inventory only, so no telemetry is expected.',\n    'No heartbeat in 14 days although a monitoring tier is declared: check the agent.')\n| order by tolower(Name) asc\n| project Machine = Name, Arc = iff(InArc, ArcStatus, 'Not in Arc'), Telemetry, LastHeartbeat, Os, Tier, Role, CpuMean, CpuPeak, MemP95, FreePct, Updates = PatchState, Note, DetailMode = iff(Telemetry == 'No monitoring agent', 'noagent', 'agent')\n",
         "size": 0,
         "title": "Arc machines (select a row)",
-        "description": "Colour = status. Load figures are for the time range; parked gaps are unknown time, not idle time.",
+        "description": "Colour = status. CPU, memory and disk are percentages over the time range (Min disk free = least free space on any volume); parked gaps are unknown time, not idle time.",
         "noDataMessage": "No Arc machine or telemetry matches the current filters.",
         "noDataMessageStyle": 4,
         "queryType": 0,
@@ -318,7 +322,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "18ch"
               }
             },
             {
@@ -358,14 +362,14 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "20ch"
+                "customColumnWidthSetting": "22ch"
               }
             },
             {
               "columnMatch": "LastHeartbeat",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "22ch"
               }
             },
             {
@@ -386,7 +390,7 @@
               "columnMatch": "Role",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "9ch"
+                "customColumnWidthSetting": "11ch"
               }
             },
             {
@@ -396,7 +400,14 @@
                 "palette": "greenRed",
                 "min": 0,
                 "max": 100,
-                "customColumnWidthSetting": "11ch"
+                "customColumnWidthSetting": "14ch"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 1
+                }
               }
             },
             {
@@ -406,7 +417,14 @@
                 "palette": "greenRed",
                 "min": 0,
                 "max": 100,
-                "customColumnWidthSetting": "11ch"
+                "customColumnWidthSetting": "15ch"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 1
+                }
               }
             },
             {
@@ -416,7 +434,14 @@
                 "palette": "greenRed",
                 "min": 0,
                 "max": 100,
-                "customColumnWidthSetting": "11ch"
+                "customColumnWidthSetting": "17ch"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 1
+                }
               }
             },
             {
@@ -426,7 +451,14 @@
                 "palette": "redGreen",
                 "min": 0,
                 "max": 100,
-                "customColumnWidthSetting": "11ch"
+                "customColumnWidthSetting": "20ch"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 1
+                }
               }
             },
             {
@@ -491,12 +523,20 @@
               "columnMatch": "Note",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "60ch"
+                "customColumnWidthSetting": "40ch"
               }
+            },
+            {
+              "columnMatch": "DetailMode",
+              "formatter": 5
             }
           ],
           "filter": true,
           "labelSettings": [
+            {
+              "columnId": "Arc",
+              "label": "Arc status"
+            },
             {
               "columnId": "LastHeartbeat",
               "label": "Last heartbeat"
@@ -507,25 +547,36 @@
             },
             {
               "columnId": "CpuMean",
-              "label": "CPU avg %"
+              "label": "CPU avg"
             },
             {
               "columnId": "CpuPeak",
-              "label": "CPU peak %"
+              "label": "CPU peak"
             },
             {
               "columnId": "MemP95",
-              "label": "Memory P95 %"
+              "label": "Memory P95"
             },
             {
               "columnId": "FreePct",
-              "label": "Lowest free disk %"
+              "label": "Min disk free"
             }
           ]
         },
-        "exportFieldName": "Machine",
-        "exportParameterName": "SelectedMachine",
-        "exportDefaultValue": "(none)"
+        "exportedParameters": [
+          {
+            "fieldName": "Machine",
+            "parameterName": "SelectedMachine",
+            "parameterType": 1,
+            "defaultValue": "(none)"
+          },
+          {
+            "fieldName": "DetailMode",
+            "parameterName": "DetailMode",
+            "parameterType": 1,
+            "defaultValue": "(none)"
+          }
+        ]
       },
       "name": "grid"
     },
@@ -613,6 +664,8 @@
               "resourceType": "microsoft.operationalinsights/workspaces",
               "visualization": "timechart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
                 "ySettings": {
                   "min": 0,
                   "max": 100
@@ -635,6 +688,8 @@
               "resourceType": "microsoft.operationalinsights/workspaces",
               "visualization": "timechart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
                 "ySettings": {
                   "min": 0,
                   "max": 100
@@ -657,6 +712,8 @@
               "resourceType": "microsoft.operationalinsights/workspaces",
               "visualization": "timechart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
                 "ySettings": {
                   "min": 0,
                   "max": 100
@@ -707,6 +764,7 @@
                 "group": "Level",
                 "createOtherGroup": 10,
                 "showLegend": true,
+                "showMetrics": false,
                 "seriesLabelSettings": [
                   {
                     "seriesName": "Critical",
@@ -746,6 +804,7 @@
                 "group": "Severity",
                 "createOtherGroup": 10,
                 "showLegend": true,
+                "showMetrics": false,
                 "seriesLabelSettings": [
                   {
                     "seriesName": "Error",
@@ -1016,7 +1075,8 @@
                 ],
                 "group": "Category",
                 "createOtherGroup": 10,
-                "showLegend": true
+                "showLegend": true,
+                "showMetrics": false
               }
             },
             "name": "chg-chart",
@@ -1465,13 +1525,24 @@
                     "formatOptions": {
                       "customColumnWidthSetting": "50ch"
                     }
+                  },
+                  {
+                    "columnMatch": "Fired",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "22ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": null,
+                      "formatName": "shortDateTimeNoMsPattern"
+                    }
                   }
                 ],
                 "filter": false,
                 "labelSettings": [
                   {
                     "columnId": "Fired",
-                    "label": "Fired"
+                    "label": "Fired (local)"
                   }
                 ]
               }
@@ -1553,6 +1624,19 @@
             }
           },
           {
+            "type": 1,
+            "content": {
+              "json": "**No Azure Monitor Agent on {SelectedMachine}.** It is listed from Arc inventory only, so CPU, memory, disk, events and changes are not collected for it. Missing is not zero: there is nothing to chart here.",
+              "style": "warning"
+            },
+            "name": "detail-noagent",
+            "conditionalVisibility": {
+              "parameterName": "DetailMode",
+              "comparison": "isEqualTo",
+              "value": "noagent"
+            }
+          },
+          {
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
@@ -1565,6 +1649,8 @@
               "resourceType": "microsoft.operationalinsights/workspaces",
               "visualization": "timechart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
                 "ySettings": {
                   "min": 0,
                   "max": 100
@@ -1574,9 +1660,9 @@
             "name": "detail-cpu",
             "customWidth": "50",
             "conditionalVisibility": {
-              "parameterName": "SelectedMachine",
-              "comparison": "isNotEqualTo",
-              "value": "(none)"
+              "parameterName": "DetailMode",
+              "comparison": "isEqualTo",
+              "value": "agent"
             }
           },
           {
@@ -1592,6 +1678,8 @@
               "resourceType": "microsoft.operationalinsights/workspaces",
               "visualization": "timechart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
                 "ySettings": {
                   "min": 0,
                   "max": 100
@@ -1601,9 +1689,9 @@
             "name": "detail-mem",
             "customWidth": "50",
             "conditionalVisibility": {
-              "parameterName": "SelectedMachine",
-              "comparison": "isNotEqualTo",
-              "value": "(none)"
+              "parameterName": "DetailMode",
+              "comparison": "isEqualTo",
+              "value": "agent"
             }
           },
           {
@@ -1619,6 +1707,8 @@
               "resourceType": "microsoft.operationalinsights/workspaces",
               "visualization": "timechart",
               "chartSettings": {
+                "showLegend": true,
+                "showMetrics": false,
                 "ySettings": {
                   "min": 0,
                   "max": 100
@@ -1627,9 +1717,9 @@
             },
             "name": "detail-disk",
             "conditionalVisibility": {
-              "parameterName": "SelectedMachine",
-              "comparison": "isNotEqualTo",
-              "value": "(none)"
+              "parameterName": "DetailMode",
+              "comparison": "isEqualTo",
+              "value": "agent"
             }
           },
           {
@@ -1700,9 +1790,9 @@
             },
             "name": "detail-events",
             "conditionalVisibility": {
-              "parameterName": "SelectedMachine",
-              "comparison": "isNotEqualTo",
-              "value": "(none)"
+              "parameterName": "DetailMode",
+              "comparison": "isEqualTo",
+              "value": "agent"
             }
           },
           {
@@ -1739,9 +1829,9 @@
             },
             "name": "detail-changes",
             "conditionalVisibility": {
-              "parameterName": "SelectedMachine",
-              "comparison": "isNotEqualTo",
-              "value": "(none)"
+              "parameterName": "DetailMode",
+              "comparison": "isEqualTo",
+              "value": "agent"
             }
           }
         ]

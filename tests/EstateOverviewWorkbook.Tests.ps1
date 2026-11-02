@@ -210,17 +210,92 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
         }
     }
 
-    It 'drives the machine detail from one selected machine with a clear default' {
+    It 'drives the machine detail from the selected row and shows data only for a machine that has an agent' {
         $grid = Get-Item 'grid'
-        $grid.exportFieldName | Should -Be 'Machine'
-        $grid.exportParameterName | Should -Be 'SelectedMachine'
-        $grid.exportDefaultValue | Should -Be '(none)'
-        $detail = $script:Book.items | Where-Object name -eq 'tab-detail'
-        foreach ($item in @($detail.content.items | Where-Object { $_.name -like 'detail-*' -and $_.name -ne 'detail-hint' })) {
-            $item.conditionalVisibility.parameterName | Should -Be 'SelectedMachine' -Because $item.name
-            $item.conditionalVisibility.value | Should -Be '(none)'
+        $exports = @($grid.exportedParameters)
+        $exports.Count | Should -Be 2
+        ($exports | Where-Object parameterName -eq 'SelectedMachine').fieldName | Should -Be 'Machine'
+        ($exports | Where-Object parameterName -eq 'DetailMode').fieldName | Should -Be 'DetailMode'
+        foreach ($export in $exports) {
+            $export.parameterType | Should -Be 1 -Because $export.parameterName
+            $export.defaultValue | Should -Be '(none)' -Because $export.parameterName
         }
-        ($detail.content.items | Where-Object name -eq 'detail-hint').conditionalVisibility.comparison | Should -Be 'isEqualTo'
+        $grid.PSObject.Properties.Name | Should -Not -Contain 'exportFieldName'
+        (Get-Query 'grid') | Should -Match "DetailMode = iff\(Telemetry == 'No monitoring agent', 'noagent', 'agent'\)"
+        ($grid.gridSettings.formatters | Where-Object columnMatch -eq 'DetailMode').formatter | Should -Be 5
+        $detail = $script:Book.items | Where-Object name -eq 'tab-detail'
+        $items = @($detail.content.items)
+        foreach ($name in 'detail-cpu', 'detail-mem', 'detail-disk', 'detail-events', 'detail-changes') {
+            $visibility = ($items | Where-Object name -eq $name).conditionalVisibility
+            $visibility.parameterName | Should -Be 'DetailMode' -Because $name
+            $visibility.comparison | Should -Be 'isEqualTo' -Because $name
+            $visibility.value | Should -Be 'agent' -Because $name
+        }
+        foreach ($name in 'detail-title', 'detail-tiles') {
+            $visibility = ($items | Where-Object name -eq $name).conditionalVisibility
+            $visibility.parameterName | Should -Be 'SelectedMachine' -Because $name
+            $visibility.comparison | Should -Be 'isNotEqualTo' -Because $name
+            $visibility.value | Should -Be '(none)' -Because $name
+        }
+        $hint = ($items | Where-Object name -eq 'detail-hint').conditionalVisibility
+        $hint.parameterName | Should -Be 'SelectedMachine'
+        $hint.comparison | Should -Be 'isEqualTo'
+    }
+
+    It 'explains a machine without an Azure Monitor Agent once, in one warning, instead of mixed empty states' {
+        $detail = $script:Book.items | Where-Object name -eq 'tab-detail'
+        $note = @($detail.content.items) | Where-Object name -eq 'detail-noagent'
+        $note.type | Should -Be 1
+        $note.content.style | Should -Be 'warning'
+        $note.content.json | Should -Match 'No Azure Monitor Agent on \{SelectedMachine\}'
+        $note.content.json | Should -Match 'Missing is not zero'
+        $note.conditionalVisibility.parameterName | Should -Be 'DetailMode'
+        $note.conditionalVisibility.comparison | Should -Be 'isEqualTo'
+        $note.conditionalVisibility.value | Should -Be 'noagent'
+    }
+
+    It 'shows chart legends with series names and colours only, never aggregate totals under the chart' {
+        $charts = @($script:Queries | Where-Object { $_.content.visualization -in 'timechart', 'barchart', 'linechart', 'areachart' })
+        $charts.Count | Should -BeGreaterOrEqual 11
+        foreach ($chart in $charts) {
+            $chart.content.chartSettings.showLegend | Should -BeTrue -Because $chart.name
+            $chart.content.chartSettings.showMetrics | Should -BeFalse -Because "$($chart.name) must not show (Sum) totals"
+        }
+    }
+
+    It 'gives every machine-grid header and status cell room and prints percentages with at most one decimal' {
+        $grid = Get-Item 'grid'
+        $labels = @{}
+        foreach ($label in $grid.gridSettings.labelSettings) { $labels[$label.columnId] = $label.label }
+        foreach ($formatter in $grid.gridSettings.formatters) {
+            $width = $formatter.formatOptions.customColumnWidthSetting
+            if (-not $width) { continue }
+            $width | Should -Match '^\d+ch$' -Because $formatter.columnMatch
+            $room = [int]($width -replace 'ch$', '')
+            $header = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { $formatter.columnMatch }
+            ($header.Length + 6) | Should -BeLessOrEqual $room -Because "the $($formatter.columnMatch) header must not be cut"
+            if ($formatter.formatter -eq 18) {
+                $longest = ($formatter.formatOptions.thresholdsGrid.thresholdValue | Where-Object { $_ } | Measure-Object -Property Length -Maximum).Maximum
+                $padding = if ($formatter.formatOptions.thresholdsOptions -eq 'icons') { 4 } else { 2 }
+                ($longest + $padding) | Should -BeLessOrEqual $room -Because "the longest $($formatter.columnMatch) value must not be cut"
+            }
+        }
+        foreach ($column in 'CpuMean', 'CpuPeak', 'MemP95', 'FreePct') {
+            $formatter = $grid.gridSettings.formatters | Where-Object columnMatch -eq $column
+            $formatter.numberFormat.unit | Should -Be 1 -Because $column
+            $formatter.numberFormat.options.style | Should -Be 'decimal' -Because $column
+            $formatter.numberFormat.options.maximumFractionDigits | Should -BeLessOrEqual 1 -Because $column
+            $labels[$column] | Should -Not -Match '%' -Because 'the percent unit comes from the number format'
+        }
+    }
+
+    It 'shows the alert time in the viewer local time instead of a raw UTC string' {
+        $alerts = Get-Item 'post-alerts'
+        $fired = $alerts.gridSettings.formatters | Where-Object columnMatch -eq 'Fired'
+        $fired.formatter | Should -Be 6
+        $fired.dateFormat.PSObject.Properties.Name | Should -Contain 'showUtcTime'
+        $fired.dateFormat.showUtcTime | Should -BeNullOrEmpty
+        ($alerts.gridSettings.labelSettings | Where-Object columnId -eq 'Fired').label | Should -Match 'local'
     }
 
     It 'keeps tile labels short and the subtitles bounded' {
