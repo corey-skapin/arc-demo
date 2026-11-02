@@ -441,6 +441,26 @@ saved: do not redeploy over them. Fix the vault access, then either remove and
 rebuild the lab or, with approval, reset the VM administrator password and rerun
 Deploy with that value as `-AdminPassword`.
 
+## Deploy refuses a retained VM's size or data disk
+
+**Symptom** — `Deploy-ArcDemo.ps1` stops before any preview with
+`VM <name> is Standard_D4s_v5 but this deployment requests Standard_B2as_v2`,
+`has data disk ... that this deployment does not declare, so it would be detached`
+or `Data disk ... differs from its declaration`.
+
+**Cause** — Deployment never resizes a VM or detaches, resizes or converts a
+data disk it did not create. The nested SQL parent runs a virtualization-capable
+size with a data disk, so a deployment that declares the shared size (or no disk)
+for it would revert the size and drop the disk.
+
+**Fix** — Declare what the VM already has. For the nested parent, enable
+`nestedSqlGuest` in the skin (it declares `Standard_D4s_v5` and a 128 GiB data
+disk; override with `parentVmSize`, `parentDataDiskGb`,
+`parentDataDiskStorageAccountType` when the retained VM differs, for example a
+retained `Standard_LRS` disk). For any other entry add `vmSize` and `dataDisks`
+to its [fleet entry](legacy-os-fleet.md#per-entry-size-and-data-disks). A real
+size change is a separate approved resize with the VM deallocated, not a deploy.
+
 ## Clean deploy fails while creating DCRs with missing Log Analytics tables
 
 **Symptom** — A first deployment into a clean subscription/prefix fails during

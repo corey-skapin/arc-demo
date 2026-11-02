@@ -42,7 +42,7 @@ param adminUsername string = 'azureuser'
 @secure()
 param adminPassword string
 
-@description('On-premises-simulated Arc fleet. Each object defines the VM name, role, OS image, monitoring support, optional SQL capability, ESU eligibility, and deployment mode.')
+@description('On-premises-simulated Arc fleet. Each object defines the VM name, role, OS image, monitoring support, optional SQL capability, ESU eligibility, and deployment mode. Optional per-entry vmSize, securityType and dataDisks [{ name, lun, sizeGb, storageAccountType, caching }] override the shared defaults (see docs/legacy-os-fleet.md).')
 param onPremFleet array = [
   {
     name: 'win-sql-01'
@@ -323,8 +323,10 @@ module vmMods 'modules/vm.bicep' = [for vm in requestedOnPremVms: if (deployArcO
       monitorTier: vm.monitorTier
       esuEligible: vm.esuEligible ? 'true' : 'false'
     })
-    vmSize: vmSize
+    vmSize: vm.?vmSize ?? vmSize
     osDiskStorageAccountType: osDiskStorageAccountType
+    dataDisks: vm.?dataDisks ?? []
+    securityType: vm.?securityType ?? ''
     subnetId: networkMod.outputs.subnetId
     adminUsername: adminUsername
     adminPassword: adminPassword

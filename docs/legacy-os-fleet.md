@@ -22,11 +22,38 @@ tiers that cannot be reliably sourced as Azure Marketplace images.
 | `supportsChangeTracking` | Enables Change Tracking DCR + extension. Set `false` for legacy Windows tiers that cannot run AMA. |
 | `supportsSql` | SQL-capable role metadata, not installation/health proof. Use the [real SQL helper](sql-engine-workload.md); never enable Arc SQL/BPA in this simulation. |
 | `esuEligible` | Surfaces the ESU discussion in Arc machine tags; it does not buy or configure ESU. |
+| `vmSize` | Optional. Azure VM size for this entry; the shared `compute.vmSize` applies when absent. Deploy never resizes a retained VM, so declare the size it already has. |
+| `securityType` | Optional `Standard` or `TrustedLaunch`; unset leaves the platform default. Nested virtualization needs `Standard`. |
+| `dataDisks` | Optional array of `{ name, lun, sizeGb, storageAccountType, caching }`. Each is a standalone managed disk named `<vm>-<name>` attached with `createOption: Attach`, so a redeploy converges on an existing disk. Deploy refuses to detach, resize or convert a retained disk that the entry does not declare. |
 
 The deploy script also tags every Arc machine with `osTier`, `monitorTier`,
 `esuEligible`, `inventory=arc`, `updateManager=assessment`, `defender=plan2`,
 and `machineConfig=enabled` so the Arc control-plane story is visible for all
 Arc-onboarded machines, including legacy entries.
+
+## Per-entry size and data disks
+
+Most fleets need none of the optional fields: an entry without them deploys at
+the shared size with no data disk, exactly as before. The nested SQL parent is
+the exception. It needs a virtualization-capable size (B-series cannot run
+Hyper-V guests) and a data disk, so the skin's `nestedSqlGuest` block declares
+them on the entry named by `parentVmName` automatically (defaults
+`Standard_D4s_v5`, a 128 GiB `StandardSSD_LRS` disk at LUN 0 with caching `None`,
+security type `Standard`). Explicit fields on that entry win. To declare it by
+hand, add this to the parent's entry in a private fleet file:
+
+```json
+"vmSize": "Standard_D4s_v5",
+"securityType": "Standard",
+"dataDisks": [
+  { "name": "nested-data", "lun": 0, "sizeGb": 128, "storageAccountType": "StandardSSD_LRS", "caching": "None" }
+]
+```
+
+Capacity is checked per distinct size. Deploy refuses, rather than silently
+resizes, a retained VM whose size differs from its declaration, and refuses to
+detach, resize or convert a retained data disk. See
+[the nested SQL runbook](nested-sql-demo.md#prepare-the-parent).
 
 ## Monitoring gates
 
