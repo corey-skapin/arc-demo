@@ -79,6 +79,11 @@ Describe 'Scoped operational workbook rendering' {
             $names | Should -Contain $name
         }
         (($book.items | Where-Object name -eq 'thresholds-label').content.json) | Should -Match 'Illustrative thresholds.*not an approved service objective'
+        # Three observed hours keeps an on-demand lab classifiable within hours of waking; the label must say it is illustrative.
+        $evidence = @($book.items | Where-Object type -eq 9 | ForEach-Object { $_.content.parameters } | Where-Object name -eq 'MinObservedHours')[0]
+        $evidence.value | Should -Be '3'
+        @($evidence.jsonData | ConvertFrom-Json | ForEach-Object value) | Should -Contain '3'
+        (($book.items | Where-Object name -eq 'thresholds-label').content.json) | Should -Match 'Evidence needs.*defaults to 3 observed hours.*production review would normally ask for far more'
     }
 
     It 'uses the same shared evidence logic in both workbooks so identical scope gives identical metrics' {

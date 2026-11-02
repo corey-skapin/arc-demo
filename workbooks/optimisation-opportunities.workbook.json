@@ -136,7 +136,7 @@
     {
       "type": 1,
       "content": {
-        "json": "**Illustrative thresholds (editable here, not an approved service objective).** Candidates need adequate evidence: low CPU alone never makes one. The fixed constants behind each reason are listed under *Evidence and method*."
+        "json": "**Illustrative thresholds (editable here, not an approved service objective).** Candidates need adequate evidence: low CPU alone never makes one. *Evidence needs* defaults to 3 observed hours so a lab that runs on demand can be classified; a production review would normally ask for far more. The fixed constants behind each reason are listed under *Evidence and method*."
       },
       "name": "thresholds-label"
     },
@@ -221,7 +221,7 @@
             "typeSettings": {
               "showDefault": false
             },
-            "jsonData": "[{\"value\": \"1\", \"label\": \"1 observed h\"}, {\"value\": \"6\", \"label\": \"6 observed h\"}, {\"value\": \"12\", \"label\": \"12 observed h\"}, {\"value\": \"24\", \"label\": \"24 observed h\"}, {\"value\": \"48\", \"label\": \"48 observed h\"}, {\"value\": \"72\", \"label\": \"72 observed h\"}]"
+            "jsonData": "[{\"value\": \"1\", \"label\": \"1 observed h\"}, {\"value\": \"3\", \"label\": \"3 observed h\"}, {\"value\": \"6\", \"label\": \"6 observed h\"}, {\"value\": \"12\", \"label\": \"12 observed h\"}, {\"value\": \"24\", \"label\": \"24 observed h\"}, {\"value\": \"48\", \"label\": \"48 observed h\"}, {\"value\": \"72\", \"label\": \"72 observed h\"}]"
           }
         ],
         "style": "pills",

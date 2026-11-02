@@ -9,7 +9,8 @@ $script:OperationalDefaults = [ordered]@{
     MemHigh = '85'
     DiskLow = '15'
     LowCpuP95 = '20'
-    MinObservedHours = '24'
+    # Deliberately modest so an on-demand lab is classifiable within hours of waking; production reviews would ask for more.
+    MinObservedHours = '3'
     UtcOffsetHours = '0'
     SchedStartHour = 'none'
     SchedEndHour = 'none'

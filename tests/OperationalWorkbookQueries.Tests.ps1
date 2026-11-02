@@ -58,10 +58,13 @@ Describe 'Operational workbook queries executed against deterministic literal ta
 
         function New-FixtureRequest {
             param([string]$Name, [hashtable]$Parameters = @{}, [string[]]$Only = @())
+            # The fixtures were designed against a 24-hour evidence rule; the workbook default is a deliberately modest 3 hours.
+            $effective = @{ MinObservedHours = '24' }
+            foreach ($key in $Parameters.Keys) { $effective[$key] = $Parameters[$key] }
             # -Only narrows the roster to named machines so the edge cases (nothing reporting, everything silent) can be exercised.
             $scoped = if ($Only.Count) { @($roster | Where-Object { $_.machine -in $Only }) } else { $roster }
             $text = Get-DemoOperationalQuery -Name $Name -Roster $scoped
-            $text = Expand-DemoOperationalQuery -Query $text -Roster $scoped -Parameters $Parameters -Start $anchor.AddDays(-7) -End $anchor
+            $text = Expand-DemoOperationalQuery -Query $text -Roster $scoped -Parameters $effective -Start $anchor.AddDays(-7) -End $anchor
             $readsSharedSamples = $text.Contains('let PerfRows = Perf')
             $text = $text.Replace('let PerfRows = Perf', 'let PerfRows = FixturePerf').Replace('let InsightsRows = InsightsMetrics', 'let InsightsRows = FixtureInsights')
             # Only the scenario arithmetic may skip the shared samples; every other item must run on the fixture tables.

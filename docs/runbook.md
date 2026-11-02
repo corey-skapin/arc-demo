@@ -118,9 +118,9 @@ metric across the window, source names and observed hours stay visible, missing
 values are null (never zero), invalid samples warn, and charts omit absent
 intervals instead of drawing zeros. The default window is 14 days because the lab
 runs sporadically; coverage is observed one-minute bins, not uptime or an agent SLA.
-Evidence is adequate only with the selected observed hours (default 24) and 80%
-sampling while active, so newly collected Linux memory and disk read as thin for
-about a day. Low CPU alone never yields a sizing recommendation, and SQL host
+Evidence is adequate only with the selected observed hours (default 3, an illustrative
+setting for an on-demand lab) and 80% sampling while active, so newly collected Linux memory
+and disk read as thin for its first few running hours. Low CPU alone never yields a sizing recommendation, and SQL host
 telemetry does not establish engine capacity, database performance or licence needs.
 Thresholds (CPU 80%, sustained 30 minutes, memory 85%, disk free 15%, low CPU P95
 20%) are editable, labelled illustrative triage values, not right-sizing or

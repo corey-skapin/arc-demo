@@ -62,8 +62,9 @@ starts when the rule is applied, so Linux memory and disk read as thin until eno
 
 ## Evidence and status model
 
-**Evidence** (per machine): *Adequate* needs the selected observed hours (default 24) for CPU,
-memory and disk, with sampling while active of at least 80%. Otherwise the table says *Thin history*,
+**Evidence** (per machine): *Adequate* needs the selected observed hours (default 3, an illustrative
+setting that lets an on-demand lab be classified within hours of waking; a production review would
+ask for far more) for CPU, memory and disk, with sampling while active of at least 80%. Otherwise the table says *Thin history*,
 *Sparse sampling while active*, *Memory or disk history thin*, *Memory or disk evidence missing*,
 *CPU telemetry missing*, *Invalid samples - investigate*, *Parent counters exclude guest load* or
 *No telemetry in window*. **Reporting** means a sample within 15 minutes of the window end.
@@ -85,7 +86,7 @@ Apparent headroom needs adequate evidence and CPU P95 below the low-CPU threshol
 | Memory high | 85% |
 | Disk low free | 15% |
 | Low CPU P95 | 20% |
-| Evidence needs (observed hours) | 24 |
+| Evidence needs (observed hours) | 3 (illustrative) |
 
 Fixed constants (listed on each workbook's *Evidence and method* tab): available memory under
 512 MB is pressure; a five-minute interval needs at least three samples; percent counters outside
