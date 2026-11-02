@@ -132,7 +132,7 @@ files can be restored consistently.
 
 ## Real lock-timeout incident
 
-The approved rehearsals below each proved one real `1222`/`LCK_M_X`, bounded
+The first two approved rehearsals each proved one real `1222`/`LCK_M_X`, bounded
 rollback, ingested detection/recovery events, a Sev2 alert, Action Group execution
 and an automatic Review-only SRE investigation. Times are UTC.
 
@@ -165,9 +165,34 @@ the installed source matched the repo, the renamed checkpoint was zero with no
 legacy table or owned incident sessions, and orders/`6000` activity continued.
 Canonical SQL and LOB descriptions were made operational and neutral; the SQL
 v2 predicate readback at 01:39:10Z retained its title, severity, schedule, scope
-and route. This proves deployment/preparation, **not v2 incident ingestion**.
+and route. That preparation did not exercise a v2 incident.
 The LOB `4100` wording correction is source-only; no LOB worker redeployment or
 fault-mode change was part of this preparation.
+
+A separately approved single v2 run on 2 November then proved the deployed
+event-to-alert path:
+
+| Evidence | UTC |
+| --- | --- |
+| Actual `6201` detection | 01:50:24.539 |
+| Verified cleanup and `6001` recovery | 01:50:31.921 |
+| Both events ingested | 01:50:55.170 |
+| Exact temporary-rule Sev2 alert fired | 01:51:39.324 |
+| Action Group execution recorded | 01:51:40.557 |
+| Independent healthy guest/checkpoint/session check | 01:54:07 |
+
+Both incident payloads contained exactly the agreed twelve v2 fields, with no
+`scenario` or `maxBlockSeconds`; the detected error was `1222`, wait `LCK_M_X`
+and observed session lock timeout `5000` ms. The exact deployed alert KQL matched
+one detection for this incident. Post-recovery checks found a fresh orders
+commit, the worker running/enabled, checkpoint value zero, no owned sessions,
+the legacy table absent and the installed source matching the repo.
+The run used another explicitly approved temporary rule/merge-window exception,
+not default repeated-alert behavior. Its retirement and canonical-route
+restoration belong to the companion procedure after source-event expiry.
+An alert remaining Fired during its lookback is not proof that blocking remains
+active. These checks prove v2 emission, ingestion and alert routing, not SRE
+narrative correctness, email receipt or automatic remediation.
 
 `-Action Incident` requires the healthy orders worker and owned probe table.
 One SQL transaction takes a row lock; another waits and actually returns
