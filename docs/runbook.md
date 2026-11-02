@@ -370,7 +370,8 @@ event-provider discrepancy. A Monitor pass is not active AV or full EDR proof.
 Rehearse the [25-30 minute Arc path](runsheet.md). The optional companion
 SRE repo consumes these existing alerts; it does not replace the standalone Arc
 operations plane. Reset/induce faults only as separately authorized scenario
-actions. Do not claim Arc SQL validation; see [SQL stance](sql-arc-spike.md).
+actions. Do not claim Arc SQL validation: the nested guest scene is experimental
+and license-only; see [SQL stance](sql-arc-spike.md).
 
 ## 5. Park and wake (separate disruptive approval)
 
