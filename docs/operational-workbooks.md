@@ -178,6 +178,10 @@ is, apart from pinning its Log Analytics items to the deployment workspace, and 
 - **Reading aids.** Chart legends list series names and colours only, never summed totals. The *Arc machines* grid prints
   CPU, memory and disk as percentages with one decimal, and the alert time is shown in the viewer's local time. Every table
   uses the Full size, because a Small or Medium table reserves a fixed height and leaves a blank band under a short table.
+  Only charts of the same height share a row, because a row takes the height of its taller item and leaves a blank band
+  under the other; tables are stacked. Column widths follow the Learn grid guidance: short columns are fixed in characters
+  (header length plus six, so a header is never cut), the one long text column (rule, source, software, note) takes the
+  remaining width (`fr`), and timestamps get 28 characters in the viewer's local time.
   Selecting a machine with no Azure Monitor Agent (the nested guest) shows one warning in *Machine detail* instead of five
   empty charts and tables; the grid passes that state on through a second exported parameter, `DetailMode`.
 - **Filters.** Time range (default 24 hours), operating system, environment and role. Environment and role options are read
