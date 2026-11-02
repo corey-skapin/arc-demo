@@ -521,10 +521,24 @@ function Get-DemoNestedSqlGuestConfig {
             throw "Enabled nestedSqlGuest requires a valid $key."
         }
     }
+    # The parent needs a nested-virtualization-capable size (B-series cannot) and a data disk for the guest and media.
+    $parentSize = if ([string]::IsNullOrWhiteSpace([string]$config['parentVmSize'])) { 'Standard_D4s_v5' } else { [string]$config['parentVmSize'] }
+    if ($parentSize -cnotmatch '^Standard_[A-Za-z0-9_]{2,40}$') { throw 'Skin nestedSqlGuest.parentVmSize must be an Azure VM size such as Standard_D4s_v5.' }
+    $parentDiskGb = if ($null -eq $config['parentDataDiskGb']) { 128 } else { $config['parentDataDiskGb'] }
+    if (($parentDiskGb -isnot [int] -and $parentDiskGb -isnot [long]) -or $parentDiskGb -lt 64 -or $parentDiskGb -gt 4095) {
+        throw 'Skin nestedSqlGuest.parentDataDiskGb must be an integer from 64 to 4095.'
+    }
+    $parentDiskType = if ([string]::IsNullOrWhiteSpace([string]$config['parentDataDiskStorageAccountType'])) { 'StandardSSD_LRS' } else { [string]$config['parentDataDiskStorageAccountType'] }
+    if ($parentDiskType -cnotin @('Standard_LRS', 'StandardSSD_LRS', 'Premium_LRS')) {
+        throw 'Skin nestedSqlGuest.parentDataDiskStorageAccountType must be Standard_LRS, StandardSSD_LRS or Premium_LRS.'
+    }
     [pscustomobject]@{
         ParentVmName = [string]$config.parentVmName
         GuestVmName = [string]$config.guestVmName
         ArcMachineName = [string]$config.arcMachineName
+        ParentVmSize = $parentSize
+        ParentDataDiskGb = [int]$parentDiskGb
+        ParentDataDiskStorageAccountType = $parentDiskType
     }
 }
 
@@ -785,7 +799,116 @@ function Test-DemoFleet {
         foreach ($field in 'role', 'osTier', 'imagePublisher', 'imageOffer', 'imageSku', 'imageVersion', 'monitorTier') {
             if ([string]::IsNullOrWhiteSpace($entry.$field)) { throw "Fleet $($entry.name) is missing $field." }
         }
+        # Optional per-entry overrides; absent means the shared default size and no data disks.
+        if ($null -ne $entry.vmSize -and $entry.vmSize -cnotmatch '^Standard_[A-Za-z0-9_]{2,40}$') { throw "Fleet $($entry.name).vmSize must be an Azure VM size such as Standard_D4s_v5." }
+        if ($null -ne $entry.securityType -and $entry.securityType -cnotin @('Standard', 'TrustedLaunch')) { throw "Fleet $($entry.name).securityType must be Standard or TrustedLaunch." }
+        if ($null -ne $entry.dataDisks) {
+            if ($entry.dataDisks -isnot [array]) { throw "Fleet $($entry.name).dataDisks must be a JSON array." }
+            $diskNames = @()
+            $diskLuns = @()
+            foreach ($disk in $entry.dataDisks) {
+                if ([string]$disk.name -cnotmatch '^[a-z0-9][a-z0-9-]{0,30}$' -or $disk.name -in $diskNames) { throw "Fleet $($entry.name).dataDisks names must be unique, lowercase letters/digits/hyphens." }
+                $diskNames += $disk.name
+                if (($disk.lun -isnot [int] -and $disk.lun -isnot [long]) -or $disk.lun -lt 0 -or $disk.lun -gt 63 -or $disk.lun -in $diskLuns) { throw "Fleet $($entry.name).dataDisks lun must be a unique integer from 0 to 63." }
+                $diskLuns += $disk.lun
+                if (($disk.sizeGb -isnot [int] -and $disk.sizeGb -isnot [long]) -or $disk.sizeGb -lt 4 -or $disk.sizeGb -gt 4095) { throw "Fleet $($entry.name).dataDisks sizeGb must be an integer from 4 to 4095." }
+                if ($null -ne $disk.storageAccountType -and $disk.storageAccountType -cnotin @('Standard_LRS', 'StandardSSD_LRS', 'Premium_LRS')) { throw "Fleet $($entry.name).dataDisks storageAccountType must be Standard_LRS, StandardSSD_LRS or Premium_LRS." }
+                if ($null -ne $disk.caching -and $disk.caching -cnotin @('None', 'ReadOnly', 'ReadWrite')) { throw "Fleet $($entry.name).dataDisks caching must be None, ReadOnly or ReadWrite." }
+            }
+        }
     }
+}
+
+function Get-DemoFleetVmSize {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][string]$DefaultVmSize)
+    if ([string]::IsNullOrWhiteSpace([string]$Entry.vmSize)) { $DefaultVmSize } else { [string]$Entry.vmSize }
+}
+
+function Get-DemoFleetWithNestedParent {
+    <#
+    .SYNOPSIS
+        Declares the nested SQL parent's size, data disk and security type from the
+        skin's nestedSqlGuest block, so the parent is deployed correctly once and a
+        redeploy converges instead of reverting it. Explicit fleet-entry values win.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Fleet, [AllowNull()]$NestedSqlGuest)
+    foreach ($entry in $Fleet) {
+        if (-not $NestedSqlGuest -or $entry.name -ne $NestedSqlGuest.ParentVmName -or $entry.deploymentMode -ne 'azure-vm' -or $entry.osType -ne 'Windows') {
+            $entry
+            continue
+        }
+        $declared = [ordered]@{}
+        if ($entry -is [System.Collections.IDictionary]) { foreach ($key in $entry.Keys) { $declared[$key] = $entry[$key] } }
+        else { foreach ($property in $entry.PSObject.Properties) { $declared[$property.Name] = $property.Value } }
+        if ([string]::IsNullOrWhiteSpace([string]$declared['vmSize'])) { $declared['vmSize'] = $NestedSqlGuest.ParentVmSize }
+        if ([string]::IsNullOrWhiteSpace([string]$declared['securityType'])) { $declared['securityType'] = 'Standard' }
+        if ($null -eq $declared['dataDisks']) {
+            $declared['dataDisks'] = @([ordered]@{ name = 'nested-data'; lun = 0; sizeGb = $NestedSqlGuest.ParentDataDiskGb; storageAccountType = $NestedSqlGuest.ParentDataDiskStorageAccountType; caching = 'None' })
+        }
+        [pscustomobject]$declared
+    }
+}
+
+function Assert-DemoRetainedVmShape {
+    <#
+    .SYNOPSIS
+        Refuses a redeploy that would silently resize an existing VM or detach or
+        convert its data disks. Deployment preserves retained VMs; a resize or disk
+        change is a separate, approved operation.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Machines,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ExistingVms,
+        [Parameter(Mandatory)][string]$DefaultVmSize
+    )
+    foreach ($machine in $Machines) {
+        $existing = @($ExistingVms | Where-Object { $_.name -eq $machine.name }) | Select-Object -First 1
+        if (-not $existing) { continue }
+        $wanted = Get-DemoFleetVmSize -Entry $machine -DefaultVmSize $DefaultVmSize
+        $actual = [string]$existing.hardwareProfile.vmSize
+        if (-not $actual) { throw "Cannot read the size of existing VM $($machine.name); inspect it before deployment." }
+        if ($actual -ne $wanted) {
+            throw "VM $($machine.name) is $actual but this deployment requests $wanted. Deployment never resizes an existing VM. Declare the existing size (fleet vmSize, or nestedSqlGuest.parentVmSize for the nested parent), or resize it separately in an approved window with the VM deallocated."
+        }
+        $declared = @($machine.dataDisks | Where-Object { $_ })
+        foreach ($disk in @($existing.storageProfile.dataDisks | Where-Object { $_ })) {
+            $match = @($declared | Where-Object { "$($machine.name)-$($_.name)" -eq $disk.name }) | Select-Object -First 1
+            if (-not $match) {
+                throw "VM $($machine.name) has data disk $($disk.name) that this deployment does not declare, so it would be detached. Declare it in the fleet entry dataDisks (name without the '$($machine.name)-' prefix, lun, sizeGb, storageAccountType) or detach it separately first."
+            }
+            $wantedType = if ($match.storageAccountType) { [string]$match.storageAccountType } else { 'StandardSSD_LRS' }
+            $actualType = [string]$disk.managedDisk.storageAccountType
+            if ([int]$disk.lun -ne [int]$match.lun -or ($disk.diskSizeGb -and [int64]$disk.diskSizeGb -ne [int64]$match.sizeGb) -or ($actualType -and $actualType -ne $wantedType)) {
+                throw "Data disk $($disk.name) on $($machine.name) differs from its declaration (existing lun $($disk.lun), $($disk.diskSizeGb) GiB, $actualType). Deployment never resizes, converts or moves a retained data disk; declare the existing values."
+            }
+        }
+    }
+}
+
+function Get-DemoVmSizeDemand {
+    <#
+    .SYNOPSIS
+        Counts the VMs that still need allocation per distinct size, as the VmSize/VmCount
+        requirements Test-DemoComputeCapacity -Requirements takes. The shared default size is
+        always included (count 0 when unused) so its SKU restrictions are still checked.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Machines,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ExistingVms,
+        [Parameter(Mandatory)][string]$DefaultVmSize,
+        [Parameter(Mandatory)][string]$Location
+    )
+    $demand = [ordered]@{ $DefaultVmSize = 0 }
+    foreach ($machine in $Machines) {
+        $size = Get-DemoFleetVmSize -Entry $machine -DefaultVmSize $DefaultVmSize
+        if (-not $demand.Contains($size)) { $demand[$size] = 0 }
+        if (-not @($ExistingVms | Where-Object { $_.name -eq $machine.name -and $_.hardwareProfile.vmSize -eq $size -and $_.location -eq $Location }).Count) { $demand[$size]++ }
+    }
+    foreach ($size in $demand.Keys) { [pscustomobject]@{ VmSize = $size; VmCount = $demand[$size] } }
 }
 
 function ConvertTo-DemoQuotaNumber {

@@ -11,7 +11,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 | `azure.location` | Azure region. | `australiaeast` |
 | `notifications.email` | Budget and Action Group email receiver. | `operator@example.com` placeholder, rejected until replaced |
 | `workloads.*` | Act-1 and optional workload toggles. | Arc on-prem simulation on; optional Azure VM/Container App/AKS/SQL off |
-| `nestedSqlGuest.*` | One optional nested Windows/SQL guest: enabled, parent VM name, Hyper-V guest name and Arc name; used by Activate/Hibernate/Remove. | Disabled; use the [nested SQL runbook](nested-sql-demo.md) to configure a private skin |
+| `nestedSqlGuest.*` | One optional nested Windows/SQL guest: enabled, parent VM name, Hyper-V guest name and Arc name; used by Activate/Hibernate/Remove. Deploy also declares the parent from it: optional `parentVmSize`, `parentDataDiskGb`, `parentDataDiskStorageAccountType` override the defaults below. | Disabled; use the [nested SQL runbook](nested-sql-demo.md) to configure a private skin. Parent defaults: `Standard_D4s_v5`, 128 GiB `StandardSSD_LRS` data disk |
 | `compute.vmSize` | VM SKU for Arc-simulated and optional native VMs. | `Standard_B2as_v2` |
 | `compute.osDiskStorageAccountType` | OS disk tier for simulated/native VMs; wrapper rejects existing-tier mismatches rather than converting disks. | `StandardSSD_LRS` for new OS disks; explicit `Standard_LRS` for retained HDD labs only |
 | `operations.*` | Auto-shutdown schedule. | 19:00 Cen. Australia Standard Time |

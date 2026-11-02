@@ -61,6 +61,8 @@ inventing a precise all-in total.
 | Five Windows `Standard_B2as_v2` | AUD 0.1482/VM-hour, Windows product, no license benefit assumed | AUD 0.7410/hour |
 | Three Linux `Standard_B2as_v2` | AUD 0.1353/VM-hour, non-Windows product | AUD 0.4059/hour |
 | All eight VMs | AUD 1.1469/hour combined | AUD 837.24 at 730 hours, or 201.85 at 176 hours (22 x 8-hour sessions) |
+| Nested SQL parent: one `Standard_D4s_v5` Windows host replaces one `Standard_B2as_v2` | AUD 0.604/VM-hour against 0.1482 (27 October 2026 retail; the D-series size is needed for nested virtualization) | The eight-VM line becomes about AUD 1.60/hour while running |
+| Parent data disk, 128 GiB | `StandardSSD_LRS` E10 18.5996/month (Standard HDD S10 13.4209) | Retained while parked; no included temp disk on this size |
 | Retained HDD disk capacity | 5 x S10 (128 GiB billing tier) at 13.4209 + 3 x S4 (32 GiB) at 3.5011/month | AUD 77.61/month |
 | Same-capacity SSD disk alternative | 5 x E10 at 18.5996 + 3 x E4 at 4.6499/month | AUD 106.95/month |
 | Standard static IPv4 | AUD 0.0071/hour while allocated | AUD 5.18 at 730 hours; NAT gateway and traffic are additional |

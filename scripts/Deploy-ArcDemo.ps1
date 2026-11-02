@@ -628,6 +628,8 @@ if ($null -eq $onPremFleet) {
     $template = Invoke-DemoAz -Arguments @('bicep', 'build', '--file', (Join-Path $repoRoot 'bicep\main.bicep'), '--stdout') | ConvertFrom-Json -Depth 100
     $onPremFleet = @($template.parameters.onPremFleet.defaultValue)
 }
+$nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
+$onPremFleet = @(Get-DemoFleetWithNestedParent -Fleet $onPremFleet -NestedSqlGuest $nestedSqlGuest)
 Test-DemoFleet -Fleet $onPremFleet
 $nativePrefix = $NamePrefix.Replace('-', '')
 $expectedNativeVmName = "az-$($nativePrefix.Substring(0, [Math]::Min(9, $nativePrefix.Length)))-01"
@@ -636,14 +638,11 @@ $diskTierTargets = @($existingVms | Where-Object {
     ($DeployAzureVMs -and $_.name -eq $expectedNativeVmName)
 })
 Assert-DemoOsDiskStorageAccountType -Machines $diskTierTargets -StorageAccountType $OsDiskStorageAccountType
-$additionalVmCount = 0
-if ($DeployArcOnPrem) {
-    foreach ($entry in $onPremFleet | Where-Object deploymentMode -eq 'azure-vm') {
-        if (-not @($existingVms | Where-Object { $_.name -eq $entry.name -and $_.hardwareProfile.vmSize -eq $VmSize -and $_.location -eq $Location }).Count) { $additionalVmCount++ }
-    }
-}
-if ($DeployAzureVMs -and -not @($existingVms | Where-Object { $_.tags.workload -eq 'azure-native-vm' -and $_.tags.demoPrefix -eq $NamePrefix -and $_.hardwareProfile.vmSize -eq $VmSize }).Count) { $additionalVmCount++ }
-Test-DemoComputeCapacity -Location $Location -VmSize $VmSize -AdditionalVmCount $additionalVmCount
+$managedVms = @()
+if ($DeployArcOnPrem) { $managedVms += @($onPremFleet | Where-Object deploymentMode -eq 'azure-vm') }
+if ($DeployAzureVMs) { $managedVms += [pscustomobject]@{ name = $expectedNativeVmName } }
+Assert-DemoRetainedVmShape -Machines $managedVms -ExistingVms $existingVms -DefaultVmSize $VmSize
+Test-DemoComputeCapacity -Location $Location -Requirements @(Get-DemoVmSizeDemand -Machines $managedVms -ExistingVms $existingVms -DefaultVmSize $VmSize -Location $Location)
 $initializeAksWorkload = $true
 if ($DeployAks) {
     $clusterOutput = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', "$NamePrefix-aks", '-o', 'json') -AllowNotFound

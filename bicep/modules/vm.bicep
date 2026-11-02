@@ -49,6 +49,13 @@ param autoShutdownTime string
 @description('.NET timezone ID for auto-shutdown')
 param autoShutdownTimezone string
 
+@description('Optional data disks, each { name, lun, sizeGb, storageAccountType, caching }. Every disk is a standalone managed disk named <vmName>-<name> attached with createOption Attach, so a redeploy converges on an existing disk instead of detaching or recreating it.')
+param dataDisks array = []
+
+@description('Optional explicit VM security type, for example Standard for nested virtualization (Trusted Launch blocks it). Empty leaves the property unset, which keeps existing deployments unchanged.')
+@allowed(['', 'Standard', 'TrustedLaunch'])
+param securityType string = ''
+
 resource nic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
   name: '${vmName}-nic'
   location: location
@@ -66,6 +73,27 @@ resource nic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
   }
 }
 
+resource dataDisk 'Microsoft.Compute/disks@2024-03-02' = [for disk in dataDisks: {
+  name: '${vmName}-${disk.name}'
+  location: location
+  tags: tags
+  sku: { name: disk.?storageAccountType ?? 'StandardSSD_LRS' }
+  properties: {
+    creationData: { createOption: 'Empty' }
+    diskSizeGB: disk.sizeGb
+  }
+}]
+
+// A null dataDisks leaves the property out of the request, so VMs without declared disks are unchanged.
+var attachedDataDisks = [for (disk, i) in dataDisks: {
+  lun: disk.lun
+  name: dataDisk[i].name
+  createOption: 'Attach'
+  caching: disk.?caching ?? 'None'
+  deleteOption: 'Detach'
+  managedDisk: { id: dataDisk[i].id }
+}]
+
 resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
   name: vmName
   location: location
@@ -73,6 +101,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
   identity: { type: 'SystemAssigned' }
   properties: {
     hardwareProfile: { vmSize: vmSize }
+    securityProfile: empty(securityType) ? null : { securityType: securityType }
     osProfile: {
       computerName: vmName
       adminUsername: adminUsername
@@ -94,6 +123,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
         createOption: 'FromImage'
         managedDisk: { storageAccountType: osDiskStorageAccountType }
       }
+      dataDisks: empty(dataDisks) ? null : attachedDataDisks
     }
     networkProfile: {
       networkInterfaces: [{ id: nic.id }]
