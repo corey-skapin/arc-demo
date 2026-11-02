@@ -79,6 +79,100 @@ Describe 'Offline private presenter guide' {
         Test-Path $output | Should -BeFalse
     }
 
+    It 'renders the nested Arc SQL scene with its links and states the support boundary' {
+        $context.nestedSqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/nested-fixture"
+        $context.nestedSqlInstanceResourceId = "$scope/providers/Microsoft.AzureArcData/SqlServerInstances/nested-fixture"
+        $context.nestedSqlParentMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/parent-fixture"
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match 'Prepared nested guest: the nested guest''s Arc machine \[nested-fixture\]\(https://portal.azure.com/'
+        $text | Should -Match 'SqlServerInstances/nested-fixture\)'
+        $text | Should -Match 'backing parent host \[parent-fixture\]\(https://portal.azure.com/'
+        $text | Should -Match 'These links are not proof of current state'
+        $text | Should -Match 'experimental'
+        $text | Should -Match 'license-only'
+        $text | Should -Match 'Do not claim Monitoring, best practices assessment or Defender for SQL'
+        $text | Should -Not -Match '\{\{|\}\}'
+    }
+
+    It 'skips the nested scene, links and incident rules plainly when they are not recorded' {
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match 'No nested Arc SQL guest is recorded in this context; skip scene 3b'
+        $text | Should -Match 'No LOB alert rule is recorded'
+        $text | Should -Match 'No SQL incident alert is recorded'
+        $text | Should -Match 'No data collection rule is recorded in this context'
+        $text | Should -Not -Match 'Prepared nested guest'
+    }
+
+    It 'links the resource group and the data collection rule without new inputs beyond the saved IDs' {
+        $context.dataCollectionRuleResourceId = "$scope/providers/Microsoft.Insights/dataCollectionRules/dcr-fixture"
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match ([regex]::Escape("https://portal.azure.com/#@$($context.tenantId)/resource/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/overview"))
+        $text | Should -Match '\[the data collection rule\]\(https://portal.azure.com/.*dataCollectionRules/dcr-fixture\), \*\*dcr-fixture\*\*, read-only'
+    }
+
+    It 'renders a LOB alert rule link only for a prepared LOB host' {
+        $context.lobIncidentAlertResourceId = "$scope/providers/Microsoft.Insights/scheduledQueryRules/alert-fixture-lob"
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match '\[LOB alert rule\]\(https://portal.azure.com/.*alert-fixture-lob\)'
+        $text | Should -Match 'not proof of an alert firing or an SRE investigation'
+        $context.Remove('lobMachineName')
+        $context | ConvertTo-Json | Set-Content $path
+        { & $generator -ContextPath $path } | Should -Throw '*requires the prepared lobMachineName*'
+    }
+
+    It 'requires the nested guest machine before its instance or parent' -ForEach @(
+        @{ Field = 'nestedSqlInstanceResourceId'; Resource = 'Microsoft.AzureArcData/SqlServerInstances/nested-fixture' }
+        @{ Field = 'nestedSqlParentMachineResourceId'; Resource = 'Microsoft.HybridCompute/machines/parent-fixture' }
+    ) {
+        $context[$Field] = "$scope/providers/$Resource"
+        $context | ConvertTo-Json | Set-Content $path
+        { & $generator -ContextPath $path } | Should -Throw '*requires the nested guest Arc machine*'
+        Test-Path $output | Should -BeFalse
+    }
+
+    It 'rejects a wrong-type or foreign nested or incident link' -ForEach @(
+        @{ Field = 'nestedSqlMachineResourceId'; Resource = 'Microsoft.Compute/virtualMachines/backing' }
+        @{ Field = 'dataCollectionRuleResourceId'; Resource = 'Microsoft.Insights/dataCollectionEndpoints/dce-fixture' }
+        @{ Field = 'lobIncidentAlertResourceId'; Resource = 'Microsoft.Insights/actionGroups/ag-fixture' }
+    ) {
+        $context.nestedSqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/nested-fixture"
+        $context[$Field] = "$scope/providers/$Resource"
+        $context | ConvertTo-Json | Set-Content $path
+        { & $generator -ContextPath $path } | Should -Throw '*expected resource type*'
+        Test-Path $output | Should -BeFalse
+    }
+
+    It 'rejects a nested guest in another resource group' {
+        $context.nestedSqlMachineResourceId = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-other/providers/Microsoft.HybridCompute/machines/nested-fixture'
+        $context | ConvertTo-Json | Set-Content $path
+        { & $generator -ContextPath $path } | Should -Throw '*nestedSqlMachineResourceId*'
+        Test-Path $output | Should -BeFalse
+    }
+
+    It 'links the optional original workbooks and skips them plainly when they are not recorded' {
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match 'The Machine Intelligence Center workbook is not recorded in this context; skip this optional step'
+        $text | Should -Match 'The compliance workbook is not recorded in this context; skip this optional step'
+        $context.machineIntelligenceWorkbookResourceId = "$scope/providers/Microsoft.Insights/workbooks/66666666-6666-6666-6666-666666666666"
+        $context.complianceWorkbookResourceId = "$scope/providers/Microsoft.Insights/workbooks/77777777-7777-7777-7777-777777777777"
+        $context | ConvertTo-Json | Set-Content $path
+        & $generator -ContextPath $path | Out-Null
+        $text = Get-Content $output -Raw
+        $text | Should -Match '\[the Machine Intelligence Center workbook\]\(https://portal.azure.com/.*66666666-6666-6666-6666-666666666666\)'
+        $text | Should -Match '\[the Compliance, Security and Governance workbook\]\(https://portal.azure.com/.*77777777-7777-7777-7777-777777777777\)'
+        $text | Should -Not -Match '\{\{|\}\}'
+    }
+
     It 'requires real saved engine/query proof before enabling the SQL step' {
         $context.sqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/sql-fixture"
         $context | ConvertTo-Json | Set-Content $path
@@ -247,5 +341,92 @@ Describe 'Offline private presenter guide' {
     It 'keeps the entire local context and Markdown output out of git' {
         $ignore = Get-Content (Join-Path $repo '.gitignore')
         $ignore | Should -Contain '.local/'
+    }
+}
+
+Describe 'Presenter runsheet template' {
+    BeforeAll {
+        $template = Get-Content (Join-Path $repo 'docs\runsheet.md') -Raw
+        $split = $template -split '(?m)^## Operator notes'
+        $presenter = $split[0]
+        $notes = $split[1]
+    }
+
+    It 'is one coherent Arc path whose scene times fit 25-30 minutes' {
+        $rows = [regex]::Matches($template, '(?m)^\| (\d) \| .+ \| (\d+) \| .+ \|\s*$')
+        $rows.Count | Should -Be 8
+        $total = ($rows | ForEach-Object { [int]$_.Groups[2].Value } | Measure-Object -Sum).Sum
+        $total | Should -BeGreaterOrEqual 25
+        $total | Should -BeLessOrEqual 30
+        $template | Should -Match "add up to $total[;)]"
+        $template | Should -Match 'Allow \*\*25-30 minutes\*\*'
+    }
+
+    It 'covers the three engineer tasks and the reader versus approver boundary' {
+        $template | Should -Match 'Engineer task 1:\*\* find a server or workload and see whether its data is current'
+        $template | Should -Match 'Engineer task 2:\*\* open the capacity view and drill into the evidence'
+        $template | Should -Match 'Engineer task 3 starts here:\*\* open an incident, read the investigation and\s+review a narrowly scoped proposed action'
+        $template | Should -Match 'Reader and approver are separate roles'
+    }
+
+    It 'puts Windows, Linux and SQL under one view, including the experimental nested Arc SQL scene' {
+        $template | Should -Match '(?m)^## 2\. Find a server and check its data is current'
+        $template | Should -Match '(?m)^### 3a\. A real SQL workload observed by Azure Monitor'
+        $template | Should -Match '(?m)^### 3b\. Nested Arc-enabled SQL Server, experimental'
+        $template | Should -Match 'license-only mode'
+        $template | Should -Match 'not a supported Arc SQL configuration'
+        $template | Should -Match 'Do not claim Monitoring, best practices assessment or Defender for SQL'
+    }
+
+    It 'presents both workbooks as the engineer lens' {
+        $template | Should -Match '(?m)^## 4\. Capacity and headroom'
+        $template | Should -Match '(?m)^## 5\. Optimisation opportunities'
+        $template | Should -Match '\{\{CapacityWorkbookAvailability\}\}'
+        $template | Should -Match '\{\{OptimisationWorkbookAvailability\}\}'
+    }
+
+    It 'hands the SQL and application alert scenes to the SRE guide in neutral wording' {
+        $template | Should -Match '(?m)^### 6c\. The SQL and application alerts'
+        $template | Should -Match '\{\{SqlIncidentAvailability\}\}'
+        $template | Should -Match '\{\{LobIncidentAvailability\}\}'
+        $template | Should -Match 'The incident evidence is in the SRE guide'
+        $template | Should -Not -Match '(?i)\bprobe\b'
+    }
+
+    It 'keeps operator mechanics out of the presenter path' {
+        $notes | Should -Match 'bounded lock-timeout helper'
+        $presenter | Should -Not -Match 'bounded lock-timeout helper|Test-ArcDemoReadiness|Test-ArcSqlDemoInventory|Invoke-SqlEngineOnArc'
+    }
+
+    It 'no longer carries statements that are wrong for the demo as it is' {
+        $template | Should -Not -Match 'not part of this default demo'
+        $template | Should -Not -Match 'one-shot probe'
+        $template | Should -Not -Match '20-30 minutes'
+        $template | Should -Not -Match 'OperationalWorkbookSection'
+    }
+
+    It 'keeps the read-only presenter behaviour and the honesty caveats' {
+        $template | Should -Match 'Everything on this page is\s+read-only'
+        $template | Should -Match 'do not start machines, run\s+assessments, select \*\*Check for updates\*\*'
+        $template | Should -Match 'not a hardened production architecture'
+        $template | Should -Match 'Missing data is not zero'
+        $template | Should -Match 'never additive hardware capacity'
+        $template | Should -Match 'not billing, not realised savings'
+        $template | Should -Match 'Update Manager is free for Azure VMs\s+but billed for Arc-enabled servers'
+        $template | Should -Match 'Do not read out the workbook''s patch scorecard'
+    }
+
+    It 'names the agent and the data collection rule without a cost claim' {
+        $template | Should -Match 'The Azure Monitor Agent collects the telemetry'
+        $template | Should -Match 'control plane'
+        $template | Should -Match 'nothing is collected twice'
+        $template | Should -Match 'say nothing about cost savings'
+        $template | Should -Match 'Linux hosts get it, and Change\s+Tracking, as Azure VM extensions'
+    }
+
+    It 'contains no private identifier or internal-only citation' {
+        $template | Should -Not -Match '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+        $template | Should -Not -Match '(?i)internal only|strictly ms|ama q&a'
+        $template | Should -Not -Match 'C:\\|@microsoft\.com'
     }
 }

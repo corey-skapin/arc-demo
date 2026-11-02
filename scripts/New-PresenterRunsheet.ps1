@@ -32,7 +32,10 @@ $required = @(
 )
 $allowed = @('schemaVersion') + $required + @(
     'lobMachineName', 'companionSreRunsheetPath', 'sqlMachineResourceId', 'sqlIncidentAlertResourceId',
-    'capacityWorkbookResourceId', 'optimisationWorkbookResourceId'
+    'capacityWorkbookResourceId', 'optimisationWorkbookResourceId',
+    'nestedSqlMachineResourceId', 'nestedSqlInstanceResourceId', 'nestedSqlParentMachineResourceId',
+    'lobIncidentAlertResourceId', 'dataCollectionRuleResourceId',
+    'machineIntelligenceWorkbookResourceId', 'complianceWorkbookResourceId'
 )
 foreach ($entry in $context.GetEnumerator()) {
     if ($entry.Key -notin $allowed) { throw "Unsupported context field '$($entry.Key)'. Store only the documented nonsecret presenter fields." }
@@ -81,6 +84,26 @@ if ($context.Contains('sqlIncidentAlertResourceId')) {
 foreach ($field in @('capacityWorkbookResourceId', 'optimisationWorkbookResourceId')) {
     if ($context.Contains($field)) { $types[$field] = 'Microsoft.Insights/workbooks' }
 }
+foreach ($field in @('nestedSqlInstanceResourceId', 'nestedSqlParentMachineResourceId')) {
+    if ($context.Contains($field) -and -not $context.Contains('nestedSqlMachineResourceId')) {
+        throw "Context '$field' requires the nested guest Arc machine (nestedSqlMachineResourceId) first."
+    }
+}
+if ($context.Contains('lobIncidentAlertResourceId') -and -not $context.Contains('lobMachineName')) {
+    throw 'LOB incident alert context requires the prepared lobMachineName first.'
+}
+$optionalTypes = [ordered]@{
+    nestedSqlMachineResourceId = 'Microsoft.HybridCompute/machines'
+    nestedSqlInstanceResourceId = 'Microsoft.AzureArcData/SqlServerInstances'
+    nestedSqlParentMachineResourceId = 'Microsoft.HybridCompute/machines'
+    lobIncidentAlertResourceId = 'Microsoft.Insights/scheduledQueryRules'
+    dataCollectionRuleResourceId = 'Microsoft.Insights/dataCollectionRules'
+    machineIntelligenceWorkbookResourceId = 'Microsoft.Insights/workbooks'
+    complianceWorkbookResourceId = 'Microsoft.Insights/workbooks'
+}
+foreach ($entry in $optionalTypes.GetEnumerator()) {
+    if ($context.Contains($entry.Key)) { $types[$entry.Key] = $entry.Value }
+}
 $values = @{
     RecordedAtUtc = $recorded.UtcDateTime.ToString('o')
     GeneratedAtUtc = [DateTime]::UtcNow.ToString('o')
@@ -89,12 +112,19 @@ $values = @{
     CompanionSection = 'Arc ends here. Continue in the companion SRE repository only if that part of the demo is prepared.'
     LobAvailability = 'No LOB host is recorded in this context; skip this optional step.'
     LobHostFilter = '| where false // No prepared LOB host in the saved context.'
+    LobIncidentAvailability = 'No LOB alert rule is recorded in this context; skip this part of the scene.'
     SqlAvailability = 'No verified real SQL workload is recorded; skip this optional step. A SQL-shaped simulator is not SQL engine proof.'
     SqlHostFilter = '| where false // No verified real SQL workload in this context.'
-    SqlIncidentAvailability = 'No SQL incident alert is recorded; skip the incident beat.'
-    OperationalWorkbookSection = 'Optional capacity/optimisation workbooks are not recorded as published; skip this beat. Source templates and preview IDs are not live links.'
+    SqlIncidentAvailability = 'No SQL incident alert is recorded; skip this part of the scene.'
+    NestedSqlAvailability = 'No nested Arc SQL guest is recorded in this context; skip scene 3b and say it is not part of this run.'
+    DataCollectionRuleAvailability = 'No data collection rule is recorded in this context; explain the idea in words and do not open it.'
+    MachineIntelligenceAvailability = 'The Machine Intelligence Center workbook is not recorded in this context; skip this optional step.'
+    ComplianceWorkbookAvailability = 'The compliance workbook is not recorded in this context; skip this optional step.'
+    CapacityWorkbookAvailability = 'The capacity workbook is not recorded as published in this context; skip this scene and say it is not part of this run. Source templates and preview IDs are not live links.'
+    OptimisationWorkbookAvailability = 'The optimisation workbook is not recorded as published in this context; skip this scene and say it is not part of this run. Source templates and preview IDs are not live links.'
 }
 $portal = "https://portal.azure.com/#@$($context.tenantId)/resource"
+$values.ResourceGroupUrl = $portal + ((($arcScope -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/') + '/overview'
 foreach ($entry in $types.GetEnumerator()) {
     $resource = [string]$context[$entry.Key]
     $pattern = '^' + [regex]::Escape("$arcScope/providers/$($entry.Value)/") + '[A-Za-z0-9._()-]+$'
@@ -105,15 +135,33 @@ foreach ($entry in $types.GetEnumerator()) {
     $values["${token}Url"] = $portal + $encodedResource
     $values["${token}Name"] = $name
 }
-$operationalLinks = @()
 if ($context.Contains('capacityWorkbookResourceId')) {
-    $operationalLinks += "[Capacity and headroom]($($values.capacityWorkbookUrl)): read the scope and evidence tiles first, then the assessment tiles and the colour-coded status grid with its Evidence column; use the CPU, Memory and Disk tabs to tell a sustained pressure from a brief spike, and select a machine for its own detail."
+    $values.CapacityWorkbookAvailability = "Open [Capacity and headroom]($($values.capacityWorkbookUrl)). This link records publication only, not current telemetry health."
 }
 if ($context.Contains('optimisationWorkbookResourceId')) {
-    $operationalLinks += "[Optimisation opportunities]($($values.optimisationWorkbookUrl)): start with the review-reason tiles and the evidence-quality chart, select a candidate to see why it was flagged, and explain a conversation starter rather than promising a resize or savings."
+    $values.OptimisationWorkbookAvailability = "Open [Optimisation opportunities]($($values.optimisationWorkbookUrl)). This link records publication only, not current telemetry health."
 }
-if ($operationalLinks.Count) {
-    $values.OperationalWorkbookSection = ($operationalLinks -join "`n`n") + "`n`nCheck freshness, coverage and history warnings first. Missing data is not zero; parked gaps are not idle headroom. A declared nested guest and its parent are separate observations, never additive hardware capacity. The optional cost scenario uses only figures typed into the workbook and is not billed or realised savings. These links record publication only, not current telemetry health."
+if ($context.Contains('nestedSqlMachineResourceId')) {
+    $links = @("the nested guest's Arc machine [$($values.nestedSqlMachineName)]($($values.nestedSqlMachineUrl))")
+    if ($context.Contains('nestedSqlInstanceResourceId')) {
+        $links += "its SQL Server instance [$($values.nestedSqlInstanceName)]($($values.nestedSqlInstanceUrl))"
+    }
+    if ($context.Contains('nestedSqlParentMachineResourceId')) {
+        $links += "the backing parent host [$($values.nestedSqlParentMachineName)]($($values.nestedSqlParentMachineUrl))"
+    }
+    $values.NestedSqlAvailability = 'Prepared nested guest: ' + ($links -join '; ') + '. These links are not proof of current state: judge the scene by the live **Status** and **Last collected time** on the pages, and skip it if either is not current.'
+}
+if ($context.Contains('dataCollectionRuleResourceId')) {
+    $values.DataCollectionRuleAvailability = "Open [the data collection rule]($($values.dataCollectionRuleUrl)), **$($values.dataCollectionRuleName)**, read-only."
+}
+if ($context.Contains('machineIntelligenceWorkbookResourceId')) {
+    $values.MachineIntelligenceAvailability = "Open [the Machine Intelligence Center workbook]($($values.machineIntelligenceWorkbookUrl))."
+}
+if ($context.Contains('complianceWorkbookResourceId')) {
+    $values.ComplianceWorkbookAvailability = "Open [the Compliance, Security and Governance workbook]($($values.complianceWorkbookUrl))."
+}
+if ($context.Contains('lobIncidentAlertResourceId')) {
+    $values.LobIncidentAvailability = "Recorded [LOB alert rule]($($values.lobIncidentAlertUrl)), **$($values.lobIncidentAlertName)**. This link is not proof of an alert firing or an SRE investigation."
 }
 if ($context.Contains('sqlMachineResourceId')) {
     $proofPath = Join-Path $directory 'sql-engine-status.json'
@@ -136,13 +184,13 @@ if ($context.Contains('sqlMachineResourceId')) {
     $values.SqlHostFilter = '| where tolower(_ResourceId) == "' + $context.sqlMachineResourceId.ToLowerInvariant() + '"'
 }
 if ($context.Contains('sqlIncidentAlertResourceId')) {
-    $values.SqlIncidentAvailability = "Recorded [SQL incident alert]($($values.sqlIncidentAlertUrl)), **$($values.sqlIncidentAlertName)**. This link is not proof of an alert firing or an SRE investigation; verify the live run below."
+    $values.SqlIncidentAvailability = "Recorded [SQL incident alert]($($values.sqlIncidentAlertUrl)), **$($values.sqlIncidentAlertName)**. This link is not proof of an alert firing or an SRE investigation; the incident evidence is dated and lives in the SRE guide."
 }
 if ($context.Contains('lobMachineName')) {
     if ($context.lobMachineName -isnot [string] -or $context.lobMachineName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
         throw 'lobMachineName must be the explicitly prepared host name, not a query or a guessed default.'
     }
-    $values.LobAvailability = "Prepared LOB host: **$($context.lobMachineName)**. Use fresh rows, not old rehearsal faults."
+    $values.LobAvailability = "Prepared LOB host: **$($context.lobMachineName)**. Use fresh rows, not an earlier incident's rows."
     $values.LobHostFilter = '| where Computer =~ "' + $context.lobMachineName + '"'
 }
 if ($context.Contains('companionSreRunsheetPath')) {
