@@ -18,9 +18,13 @@ stop installation. A host name alone does not establish available capacity.
 
 Obtain approved **SQL Server 2022 Developer ISO** media and accept its actual
 licence terms before installation. Developer is for development/test/demo, not
-production. Record the ISO SHA256 privately and stage it on the selected guest.
-The helper checks the hash, Microsoft signature and SQL major version 16.
-There is no automatic download, paid-edition fallback, reboot or resize.
+production. Stage the pinned ISO on the selected guest with
+`scripts\Stage-DemoMedia.ps1`: [config\demo-media.json](../config/demo-media.json)
+holds the public Microsoft URL, size, SHA-256 and licence URL, staging needs the
+explicit `-AcceptSqlDeveloperTerms` switch and records that acceptance privately,
+and only a file that matches its pin takes its final name. The SQL helper still
+checks the hash, Microsoft signature and SQL major version 16 itself.
+It performs no download, paid-edition fallback, reboot or resize.
 
 Before installing, prevent automatic Arc SQL connection on this engine-only
 host. The helper's `ProtectArcSql` action adds only
@@ -44,9 +48,15 @@ The normal wrapper selects the host from retained deployment inventory.
   -Action ProtectArcSql -WhatIf
 # Run without WhatIf only when that host-specific change is requested.
 
+# Stage the pinned ISO (about 1.1 GiB) on the running host and verify its size and SHA-256.
+$media = .\scripts\Stage-DemoMedia.ps1 @target -MachineName win-sql-01 `
+  -Media sql-server-2022-developer -Destination C:\DemoMedia `
+  -AcceptSqlDeveloperTerms -Confirm:$false
+$sql = $media.items[0]
+
 .\scripts\Invoke-SqlEngineOnArc.ps1 @target -MachineName win-sql-01 `
-  -Action Install -MediaIsoPath <APPROVED_GUEST_ISO_PATH> `
-  -MediaSha256 <APPROVED_SHA256> -AcceptDeveloperLicenseTerms `
+  -Action Install -MediaIsoPath $sql.path `
+  -MediaSha256 $sql.sha256 -AcceptDeveloperLicenseTerms `
   -ArcSqlAutoConnectOptOutConfirmed `
   -ResultPath .\.local\sql-engine-install.json -WhatIf
 # After installation is requested and terms accepted, run without WhatIf.

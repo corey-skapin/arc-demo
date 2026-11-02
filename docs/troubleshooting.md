@@ -47,6 +47,24 @@ before installation; it never deletes the flag or skips setup checks.
 Keep the running lab unchanged. Obtain separate scope for any deeper diagnosis
 and approval for an appropriate reboot/repair before retrying installation.
 
+## Media staging stops on a size or hash mismatch
+
+**Symptom** — `Stage-DemoMedia.ps1` throws `has SHA-256 ..., not the pinned ...`,
+`more than the pinned ...` or `Existing <file> ... refusing to overwrite it`.
+
+**Cause** — The file on the VM, or the download, does not match the size and
+SHA-256 pinned in `config\demo-media.json`. Microsoft can refresh the Evaluation
+ISO behind its fixed link, and a damaged or tampered file looks the same. The
+script never overwrites a mismatching existing file, and it discards a mismatching
+download so it cannot take the final name.
+
+**Fix** — An interrupted download is not a mismatch: run again and it resumes.
+If Microsoft refreshed the file, confirm the new size and SHA-256 from the
+publisher or two independent downloads, update `bytes` and `sha256` in the
+manifest as a reviewed change, and accept the terms again. Never skip the check or
+supply a different hash on the command line. For a wrong file already on the VM,
+inspect it first and remove it deliberately.
+
 ## Directory CLI rejects --subscription
 
 `az ad` operations are tenant-scoped; commands such as `az ad sp show` do not
