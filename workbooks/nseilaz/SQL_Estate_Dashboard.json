@@ -79,6 +79,23 @@
               ],
               "allowCustom": true
             }
+          },
+          {
+            "id": "cb8eb2d9-9ebe-9d0e-31da-da910374ffe2",
+            "version": "KqlParameterItem/1.0",
+            "name": "BpaMode",
+            "label": "BpaMode",
+            "type": 2,
+            "isRequired": true,
+            "isHiddenWhenLocked": true,
+            "query": "let Bpa = union isfuzzy=true SqlAssessment_CL, (print TimeGenerated = datetime(null), RawData = '', _ResourceId = '' | where false);\nBpa\n| where TimeGenerated between (todatetime('{TimeRange:startISO}') .. todatetime('{TimeRange:endISO}'))\n| summarize Rows = count()\n| project value = iff(Rows > 0, 'data', 'none'), label = iff(Rows > 0, 'Assessment data in range', 'No assessment data in range'), selected = true, group = 'Best practices assessment'",
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            },
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces"
           }
         ],
         "style": "pills",
@@ -195,7 +212,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| extend Raised = todatetime(e.startDateTime), Condition = tostring(e.monitorCondition), AlertState = tostring(e.alertState), Sev = tostring(e.severity)\n| summarize Fired = count(), arg_max(Raised, Condition, AlertState, Sev)\n| extend RaisedMin = datetime_diff('minute', now(), Raised)\n| extend RaisedText = case(RaisedMin < 120, strcat(RaisedMin, ' min ago'), RaisedMin < 2880, strcat(toint(round(RaisedMin / 60.0, 0)), ' h ago'), strcat(toint(round(RaisedMin / 1440.0, 0)), ' d ago'))\n| project data = pack_array(\n    pack('Label', 'Alerts raised', 'Value', tostring(Fired), 'Note', strcat('latest ', RaisedText), 'Order', 1),\n    pack('Label', 'Latest alert', 'Value', Condition, 'Note', strcat(AlertState, ', ', Sev), 'Order', 2))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| extend Raised = todatetime(e.startDateTime), Condition = tostring(e.monitorCondition), AlertState = tostring(e.alertState), Sev = tostring(e.severity)\n| summarize Fired = count(), arg_max(Raised, Condition, AlertState, Sev)\n| extend RaisedMin = datetime_diff('minute', now(), Raised)\n| extend RaisedText = case(RaisedMin < 120, strcat(RaisedMin, ' min ago'), RaisedMin < 2880, strcat(toint(round(RaisedMin / 60.0, 0)), ' h ago'), strcat(toint(round(RaisedMin / 1440.0, 0)), ' d ago'))\n| project data = pack_array(\n    pack('Label', 'Alerts raised', 'Value', tostring(Fired), 'Note', strcat('latest ', RaisedText), 'Order', 1),\n    pack('Label', 'Latest alert', 'Value', Condition, 'Note', Sev, 'Order', 2))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
         "size": 3,
         "title": "Alerts",
         "noDataMessage": "No alert has been raised by a SQL lock-timeout rule in the subscriptions selected. The rule only fires when a lock-timeout incident is rehearsed.",
@@ -235,7 +252,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend Host = tostring(split(tostring(properties.containerResourceId), '/')[8]), HostId = tolower(tostring(properties.containerResourceId))\n| project Instance = name, Host, HostId, Version = tostring(properties.version), Edition = tostring(properties.edition), Licence = tostring(properties.licenseType),\n    Status = tostring(properties.status), Defender = tostring(properties.azureDefenderStatus), LastInventory = todatetime(properties.lastInventoryUploadTime)\n| join kind=leftouter (resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'WindowsAgent.SqlServer'\n    | project HostId = tolower(tostring(split(id, '/extensions/')[0])), ArcSqlMode = tostring(properties.settings.LicenseType)) on HostId\n| project Instance, Host, Version, Edition, Licence, ArcSqlMode, Status, Defender, LastInventory\n| order by Host asc, Instance asc",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend InvMin = datetime_diff('minute', now(), todatetime(properties.lastInventoryUploadTime))\n| project Instance = name, Version = tostring(properties.version), Edition = tostring(properties.edition), Licence = tostring(properties.licenseType),\n    Status = tostring(properties.status), Defender = tostring(properties.azureDefenderStatus),\n    InventoryAge = case(InvMin < 120, strcat(InvMin, ' min ago'), InvMin < 2880, strcat(toint(round(InvMin / 60.0, 0)), ' h ago'), strcat(toint(round(InvMin / 1440.0, 0)), ' d ago'))\n| order by Instance asc",
         "size": 3,
         "title": "SQL Server instances registered with Arc",
         "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected. An instance appears once the Arc SQL extension (WindowsAgent.SqlServer) is installed and the instance registers.",
@@ -252,42 +269,28 @@
               "columnMatch": "Instance",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
-              }
-            },
-            {
-              "columnMatch": "Host",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "13fr"
               }
             },
             {
               "columnMatch": "Version",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "18fr"
               }
             },
             {
               "columnMatch": "Edition",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "Licence",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
-              }
-            },
-            {
-              "columnMatch": "ArcSqlMode",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
@@ -315,7 +318,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "18fr"
               }
             },
             {
@@ -337,18 +340,14 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "19fr"
               }
             },
             {
-              "columnMatch": "LastInventory",
-              "formatter": 6,
+              "columnMatch": "InventoryAge",
+              "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
-              },
-              "dateFormat": {
-                "showUtcTime": null,
-                "formatName": "shortDateTimeNoMsPattern"
+                "customColumnWidthSetting": "19fr"
               }
             }
           ],
@@ -356,15 +355,11 @@
           "rowLimit": 25,
           "labelSettings": [
             {
-              "columnId": "ArcSqlMode",
-              "label": "Arc SQL mode"
-            },
-            {
               "columnId": "Defender",
               "label": "Defender (Arc)"
             },
             {
-              "columnId": "LastInventory",
+              "columnId": "InventoryAge",
               "label": "Last inventory"
             }
           ]
@@ -393,14 +388,14 @@
               "columnMatch": "Instance",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "13fr"
               }
             },
             {
               "columnMatch": "Database",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "22ch"
+                "customColumnWidthSetting": "18fr"
               }
             },
             {
@@ -428,7 +423,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
@@ -450,14 +445,14 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
               "columnMatch": "SizeMB",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               },
               "numberFormat": {
                 "unit": 0,
@@ -472,14 +467,14 @@
               "columnMatch": "Recovery",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "13fr"
               }
             },
             {
               "columnMatch": "CompatibilityLevel",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "18fr"
               }
             }
           ],
@@ -604,7 +599,7 @@
     {
       "type": 1,
       "content": {
-        "json": "## What Azure Monitor observes\nA real SQL Server workload on a monitored Windows host (not an Arc SQL instance). Its worker commits orders and reads them back; **event 6000** is written to the Application log after a healthy commit and read (about once a minute), **6201** is an actual lock timeout (SQL error 1222) and **6001** is the verified recovery. Each column is one time interval; a blank stretch means no events were recorded: the host was parked or the worker stopped."
+        "json": "## What Azure Monitor observes\nA real SQL Server workload on a monitored Windows host (not an Arc SQL instance). Its worker commits orders and reads them back; **event 6000** is written to the Application log after a healthy commit and read (about once a minute), **6201** is an actual lock timeout (SQL error 1222) and **6001** is the verified recovery. Each column is one time interval; a blank stretch means no events were recorded: the host was parked or the worker stopped. In the incident grid, Victim and Blocker are SQL session IDs."
       },
       "name": "workload-header"
     },
@@ -614,7 +609,7 @@
         "version": "KqlItem/1.0",
         "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Healthy = count() default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| mv-expand TimeGenerated to typeof(datetime), Healthy to typeof(real)\n| project TimeGenerated, CommitsPerMinute = round(Healthy / (Step / 1m), 1)",
         "size": 1,
-        "title": "Healthy commit events per minute",
+        "title": "Healthy commits per minute",
         "noDataMessage": "No ArcSqlEngineDemo healthy-commit events (6000) in the selected time range. The demo SQL worker writes them from its host through the Azure Monitor Agent, about one a minute; none means the host was parked or the worker stopped.",
         "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
@@ -622,12 +617,15 @@
         "resourceType": "microsoft.operationalinsights/workspaces",
         "visualization": "barchart",
         "chartSettings": {
-          "showLegend": false,
+          "showLegend": true,
           "showMetrics": false,
+          "simpleLegendSettings": {
+            "position": "bottom"
+          },
           "seriesLabelSettings": [
             {
               "seriesName": "CommitsPerMinute",
-              "label": "Commits per minute",
+              "label": "Commits/min",
               "color": "blue"
             }
           ],
@@ -653,7 +651,7 @@
         "version": "KqlItem/1.0",
         "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Slowest = max(Elapsed) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Slowest",
         "size": 1,
-        "title": "Slowest commit and read per interval (ms)",
+        "title": "Slowest commit (ms)",
         "noDataMessage": "No ArcSqlEngineDemo healthy-commit events (6000) in the selected time range, so there is no latency to chart. Latency is the elapsedMs value in each event.",
         "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
@@ -661,12 +659,15 @@
         "resourceType": "microsoft.operationalinsights/workspaces",
         "visualization": "barchart",
         "chartSettings": {
-          "showLegend": false,
+          "showLegend": true,
           "showMetrics": false,
+          "simpleLegendSettings": {
+            "position": "bottom"
+          },
           "seriesLabelSettings": [
             {
               "seriesName": "Slowest",
-              "label": "Slowest commit and read (ms)",
+              "label": "Slowest (ms)",
               "color": "orange"
             }
           ],
@@ -692,7 +693,7 @@
         "version": "KqlItem/1.0",
         "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID in (6201, 6001)\n| extend Kind = iff(EventID == 6201, 'Lock timeout (error 1222)', 'Recovery verified')\n| make-series Events = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Kind",
         "size": 1,
-        "title": "Lock timeouts and recoveries over time",
+        "title": "Lock timeouts and recoveries",
         "noDataMessage": "No lock-timeout (6201) or recovery (6001) events in the selected time range. That is the healthy case: incidents appear only when a rehearsal is run.",
         "noDataMessageStyle": 4,
         "timeContextFromParameter": "TimeRange",
@@ -708,12 +709,12 @@
           "seriesLabelSettings": [
             {
               "seriesName": "Lock timeout (error 1222)",
-              "label": "Lock timeout (error 1222)",
+              "label": "Lock timeout",
               "color": "redBright"
             },
             {
               "seriesName": "Recovery verified",
-              "label": "Recovery verified",
+              "label": "Recovery",
               "color": "green"
             }
           ],
@@ -752,7 +753,7 @@
               "columnMatch": "Detected",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
@@ -763,35 +764,35 @@
               "columnMatch": "SqlHost",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
               "columnMatch": "Database",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "18fr"
               }
             },
             {
               "columnMatch": "WaitType",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
               "columnMatch": "VictimSession",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "20ch"
+                "customColumnWidthSetting": "11fr"
               }
             },
             {
               "columnMatch": "BlockerSession",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "20ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
@@ -801,7 +802,7 @@
                 "palette": "greenRed",
                 "min": 0,
                 "max": 60,
-                "customColumnWidthSetting": "24ch"
+                "customColumnWidthSetting": "18fr"
               },
               "numberFormat": {
                 "unit": 0,
@@ -817,10 +818,6 @@
           "rowLimit": 25,
           "labelSettings": [
             {
-              "columnId": "Detected",
-              "label": "Detected"
-            },
-            {
               "columnId": "SqlHost",
               "label": "SQL host"
             },
@@ -830,15 +827,15 @@
             },
             {
               "columnId": "VictimSession",
-              "label": "Victim session"
+              "label": "Victim"
             },
             {
               "columnId": "BlockerSession",
-              "label": "Blocker session"
+              "label": "Blocker"
             },
             {
               "columnId": "RecoveredAfterSec",
-              "label": "Recovered after (s)"
+              "label": "Recovered (s)"
             }
           ]
         }
@@ -849,7 +846,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| project Rule = tostring(split(tostring(e.alertRule), '/')[-1]), Severity = tostring(e.severity), Condition = tostring(e.monitorCondition), State = tostring(e.alertState),\n    Raised = todatetime(e.startDateTime), Resolved = todatetime(e.monitorConditionResolvedDateTime)\n| order by Raised desc\n| take 15",
+        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| extend ResolvedAt = todatetime(e.monitorConditionResolvedDateTime)\n| extend ResolvedMin = datetime_diff('minute', now(), ResolvedAt)\n| project Rule = tostring(split(tostring(e.alertRule), '/')[-1]), Severity = tostring(e.severity), Condition = tostring(e.monitorCondition), State = tostring(e.alertState),\n    Raised = todatetime(e.startDateTime),\n    ResolvedAge = iff(isnull(ResolvedAt), '', case(ResolvedMin < 120, strcat(ResolvedMin, ' min ago'), ResolvedMin < 2880, strcat(toint(round(ResolvedMin / 60.0, 0)), ' h ago'), strcat(toint(round(ResolvedMin / 1440.0, 0)), ' d ago')))\n| order by Raised desc\n| take 15",
         "size": 3,
         "title": "Alerts raised by the lock-timeout rule",
         "noDataMessage": "No alerts have been raised by a SQL lock-timeout rule in the subscriptions selected. The rule only fires when a lock-timeout incident is rehearsed.",
@@ -866,14 +863,14 @@
               "columnMatch": "Rule",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "32ch"
+                "customColumnWidthSetting": "30fr"
               }
             },
             {
               "columnMatch": "Severity",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "13fr"
               }
             },
             {
@@ -901,7 +898,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
@@ -935,14 +932,14 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "18fr"
               }
             },
             {
               "columnMatch": "Raised",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
@@ -950,14 +947,10 @@
               }
             },
             {
-              "columnMatch": "Resolved",
-              "formatter": 6,
+              "columnMatch": "ResolvedAge",
+              "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
-              },
-              "dateFormat": {
-                "showUtcTime": null,
-                "formatName": "shortDateTimeNoMsPattern"
+                "customColumnWidthSetting": "13fr"
               }
             }
           ],
@@ -965,11 +958,7 @@
           "rowLimit": 15,
           "labelSettings": [
             {
-              "columnId": "Raised",
-              "label": "Raised"
-            },
-            {
-              "columnId": "Resolved",
+              "columnId": "ResolvedAge",
               "label": "Resolved"
             }
           ]
@@ -980,9 +969,27 @@
     {
       "type": 1,
       "content": {
-        "json": "## Best practices assessment: not enabled in this lab\nSQL best practices assessment writes to the `SqlAssessment_CL` table in the workspace. This lab does **not** enable it (it is a separate, approved step), so the two tiles below stay empty and say so instead of failing. They fill in automatically if assessment data ever arrives."
+        "json": "## Best practices assessment: not enabled in this lab\nSQL best practices assessment writes to the `SqlAssessment_CL` table in the workspace. This lab does **not** enable it (it is a separate, approved step), so there is nothing to chart and this section shows no empty tiles. The issue charts below appear automatically if assessment data ever arrives.",
+        "style": "info"
       },
-      "name": "bpa-header"
+      "name": "bpa-off",
+      "conditionalVisibility": {
+        "parameterName": "BpaMode",
+        "comparison": "isEqualTo",
+        "value": "none"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Best practices assessment\nIssues found by SQL best practices assessment, from the `SqlAssessment_CL` table in the workspace."
+      },
+      "name": "bpa-on",
+      "conditionalVisibility": {
+        "parameterName": "BpaMode",
+        "comparison": "isEqualTo",
+        "value": "data"
+      }
     },
     {
       "type": 3,
@@ -1021,7 +1028,12 @@
         }
       },
       "name": "bpa-severity",
-      "customWidth": "50"
+      "customWidth": "50",
+      "conditionalVisibility": {
+        "parameterName": "BpaMode",
+        "comparison": "isEqualTo",
+        "value": "data"
+      }
     },
     {
       "type": 3,
@@ -1042,7 +1054,7 @@
               "columnMatch": "Issue",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "40ch"
+                "customColumnWidthSetting": "20fr"
               }
             },
             {
@@ -1082,14 +1094,14 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
               "columnMatch": "AffectedServers",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "20ch"
+                "customColumnWidthSetting": "12fr"
               },
               "numberFormat": {
                 "unit": 0,
@@ -1104,7 +1116,7 @@
               "columnMatch": "TotalIssues",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "11fr"
               },
               "numberFormat": {
                 "unit": 0,
@@ -1121,17 +1133,22 @@
           "labelSettings": [
             {
               "columnId": "AffectedServers",
-              "label": "Affected servers"
+              "label": "Servers"
             },
             {
               "columnId": "TotalIssues",
-              "label": "Total issues"
+              "label": "Issues"
             }
           ]
         }
       },
       "name": "bpa-top",
-      "customWidth": "50"
+      "customWidth": "50",
+      "conditionalVisibility": {
+        "parameterName": "BpaMode",
+        "comparison": "isEqualTo",
+        "value": "data"
+      }
     },
     {
       "type": 1,
