@@ -54,13 +54,56 @@ Describe 'Arc governance and compliance workbook (rebuilt, repo-native, experime
     }
 
     It 'scales percentage tiles on a fixed 0 to 100 red-to-green range, never green at zero' {
-        foreach ($title in 'Policy compliance', 'Tag coverage') {
+        foreach ($title in 'Policy compliance', 'Tag coverage', 'Guest configuration pass rate') {
             $tile = $queries | Where-Object { $_.content.title -eq $title }
             $tile.content.tileSettings.leftContent.formatOptions.palette | Should -Be 'redGreen' -Because $title
             $tile.content.tileSettings.leftContent.formatOptions.min | Should -Be 0 -Because $title
             $tile.content.tileSettings.leftContent.formatOptions.max | Should -Be 100 -Because $title
         }
         $raw | Should -Not -Match 'greenRed'
+    }
+
+    It 'gives count tiles no palette colour, so no colour contradicts what a count means' {
+        foreach ($tile in @($queries | Where-Object { $_.content.visualization -eq 'tiles' })) {
+            $palette = $tile.content.tileSettings.leftContent.formatOptions.palette
+            if ($tile.content.query -match 'Value = todouble\(') {
+                $palette | Should -Be 'redGreen' -Because $tile.content.title
+            }
+            else {
+                $palette | Should -Be 'none' -Because "$($tile.content.title): the auto palette paints a failing count teal and a passing count purple"
+            }
+        }
+    }
+
+    It 'reports the guest configuration pass rate for assignments and machines next to the counts' {
+        $rate = $queries | Where-Object { $_.content.title -eq 'Guest configuration pass rate' }
+        $rate.content.query | Should -Match "'Assignments pass'"
+        $rate.content.query | Should -Match "'Machines pass all'"
+        $rate.content.query | Should -Match 'dcountif\(machine, status != ''Compliant''\)'
+        ($queries | Where-Object { $_.content.title -eq 'Guest configuration status' }).content.query | Should -Match "'Non-compliant'"
+    }
+
+    It 'draws failing checks by resource type with short friendly labels, the tail grouped as Other, in red' {
+        $chart = $queries | Where-Object { $_.content.title -eq 'Failing checks by resource type' }
+        $chart.content.visualization | Should -Be 'barchart'
+        $chart.content.chartSettings.xAxis | Should -Be 'ResourceType'
+        @($chart.content.chartSettings.yAxis) | Should -Be @('FailingChecks')
+        $chart.content.chartSettings.seriesLabelSettings[0].color | Should -Be 'redBright'
+        $chart.content.query | Should -Match 'Rank <= 6'
+        $chart.content.query | Should -Match "'Other \("
+        $chart.content.query | Should -Not -Match '\|\s*take\s+10'
+        $labels = @([regex]::Matches($chart.content.query, "t == '[^']+', '([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+        $labels.Count | Should -BeGreaterThan 5
+        foreach ($label in $labels) { $label.Length | Should -BeLessOrEqual 16 -Because "category label '$label' is cut off or rotated when long" }
+        $chart.content.query | Should -Match "replace_string\(t, 'microsoft\.', ''\)"
+    }
+
+    It 'prints compliance by resource group as percentages on a fixed 0 to 100 axis' {
+        $chart = $queries | Where-Object { $_.content.title -eq 'Compliance by resource group' }
+        @($chart.content.chartSettings.yAxis) | Should -Be @('CompliancePercent')
+        $chart.content.chartSettings.ySettings.numberFormatSettings.unit | Should -Be 1
+        $chart.content.chartSettings.ySettings.min | Should -Be 0
+        $chart.content.chartSettings.ySettings.max | Should -Be 100
     }
 
     It 'compares all resources with the Arc servers using only checks that returned a result' {

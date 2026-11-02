@@ -110,4 +110,13 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
             @($query.content.chartSettings.yAxis).Count | Should -Be 1 -Because $query.content.title
         }
     }
+
+    It '<Name>: prints any percentage chart as percentages on a fixed 0 to 100 axis' -ForEach $books {
+        foreach ($query in Read-Queries $Path | Where-Object { $_.content.visualization -in 'barchart', 'categoricalbar' -and (@($_.content.chartSettings.yAxis) -match 'Percent') }) {
+            $axis = $query.content.chartSettings.ySettings
+            $axis.numberFormatSettings.unit | Should -Be 1 -Because "$($query.content.title): a percentage axis without a unit shows bare numbers such as 55.6"
+            $axis.min | Should -Be 0 -Because $query.content.title
+            $axis.max | Should -Be 100 -Because $query.content.title
+        }
+    }
 }

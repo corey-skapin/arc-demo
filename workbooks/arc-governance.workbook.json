@@ -85,7 +85,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -205,7 +205,33 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "barchart"
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "ResourceGroup",
+          "yAxis": [
+            "CompliancePercent"
+          ],
+          "showLegend": false,
+          "seriesLabelSettings": [
+            {
+              "seriesName": "CompliancePercent",
+              "label": "Compliance",
+              "color": "blue"
+            }
+          ],
+          "ySettings": {
+            "numberFormatSettings": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "useGrouping": false,
+                "maximumFractionDigits": 1
+              }
+            },
+            "min": 0,
+            "max": 100
+          }
+        }
       },
       "name": "rg-compliance",
       "customWidth": "50"
@@ -214,7 +240,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| where tostring(properties.complianceState) == 'NonCompliant'\n| summarize FailingChecks = count() by ResourceType = tostring(properties.resourceType)\n| order by FailingChecks desc, ResourceType asc\n| take 10",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| where tostring(properties.complianceState) == 'NonCompliant'\n| extend t = tolower(tostring(properties.resourceType))\n| summarize FailingChecks = count() by t\n| extend Name = case(t == 'microsoft.compute/virtualmachines', 'Azure VMs', t == 'microsoft.hybridcompute/machines', 'Arc servers', t == 'microsoft.resources/subscriptions', 'Subscription', t == 'microsoft.keyvault/vaults', 'Key vaults', t == 'microsoft.storage/storageaccounts', 'Storage', t == 'microsoft.compute/disks', 'Disks', t == 'microsoft.network/virtualnetworks', 'Virtual networks', t == 'microsoft.operationalinsights/workspaces', 'Workspaces', t == 'microsoft.security/pricings', 'Defender plans', replace_string(t, 'microsoft.', ''))\n| order by FailingChecks desc, Name asc\n| extend Rank = row_number()\n| summarize FailingChecks = sum(FailingChecks), Types = count() by Name = iff(Rank <= 6, Name, 'Other'), Position = iff(Rank <= 6, Rank, 7)\n| extend ResourceType = iff(Name == 'Other', strcat('Other (', tostring(Types), iff(Types == 1, ' type)', ' types)')), Name)\n| order by Position asc\n| project ResourceType, FailingChecks",
         "size": 1,
         "title": "Failing checks by resource type",
         "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
@@ -224,7 +250,24 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "barchart"
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "ResourceType",
+          "yAxis": [
+            "FailingChecks"
+          ],
+          "showLegend": false,
+          "seriesLabelSettings": [
+            {
+              "seriesName": "FailingChecks",
+              "label": "Failing checks",
+              "color": "redBright"
+            }
+          ],
+          "ySettings": {
+            "min": 0
+          }
+        }
       },
       "name": "failing-types",
       "customWidth": "50"
@@ -235,6 +278,52 @@
         "json": "## Guest configuration\nGuest configuration audits settings inside the operating system (the Azure Windows baseline, Defender Exploit Guard, secure protocols). Only machines with an assignment appear here."
       },
       "name": "guest-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "guestconfigurationresources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend status = tostring(properties.complianceStatus), machine = tolower(tostring(split(tostring(properties.targetResourceId), '/')[8]))\n| summarize Total = count(), Compliant = countif(status == 'Compliant'), Machines = dcount(machine), FailingMachines = dcountif(machine, status != 'Compliant')\n| extend CleanMachines = Machines - FailingMachines\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Assignments pass', 'Value', iff(Total == 0, 0.0, round(100.0 * Compliant / Total, 1)), 'Note', strcat(tostring(Compliant), ' of ', tostring(Total), ' assignments')),\n    pack('Order', 2, 'Label', 'Machines pass all', 'Value', iff(Machines == 0, 0.0, round(100.0 * CleanMachines / Machines, 1)), 'Note', strcat(tostring(CleanMachines), ' of ', tostring(Machines), ' machines')))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Guest configuration pass rate",
+        "noDataMessage": "No machine has a guest configuration assignment yet. Guest configuration audits settings inside the operating system and only machines with an assignment appear here.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen",
+              "min": 0,
+              "max": 100
+            },
+            "numberFormat": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 1
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "guest-percent",
+      "customWidth": "50"
     },
     {
       "type": 3,
@@ -260,7 +349,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -270,7 +359,8 @@
           "showBorder": true
         }
       },
-      "name": "guest-tiles"
+      "name": "guest-tiles",
+      "customWidth": "50"
     },
     {
       "type": 3,
@@ -444,7 +534,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
