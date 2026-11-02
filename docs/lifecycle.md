@@ -385,9 +385,13 @@ parked state actually observed, not future activation or fresh deployment.
 Run full/destructive smoke cycles only in an explicitly approved disposable lab,
 never incidentally against an in-use demo.
 
-The simplified predicates, retry handling and Removed inspection are covered by
-local mocked regression checks, not a newly authorized live park/wake/teardown
-exercise. Prior operational evidence does not validate these source changes.
+The retained-estate default wake from merged main completed on 2 November 2026
+with all eight guest checks passing and new-host patch assessments submitted;
+independent Active readiness still had six Linux extension models `Updating`.
+See the [dated evidence](nested-sql-demo.md) rather than treating script exit 0
+as full Ready. Drift, denial and partial-failure predicates remain mocked:
+the successful wake does not exercise every failure path or prove fresh
+deployment, patch completion, full removal or rebuild.
 
 The best-effort parking and concurrent cold-start changes have local coverage for
 missing manifests, unlisted VMs, OS/skin drift, foreign NAT, partial deallocation,

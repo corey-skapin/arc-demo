@@ -15,7 +15,7 @@ or realised savings. The Arc/Monitor story remains 20-30 minutes.
 ## Build and operate
 
 | Reference | Use |
-|---|---|
+| --- | --- |
 | [Nested SQL demo runbook](nested-sql-demo.md) | Proven scratch build, park, wake and remove; Jumpstart alternative |
 | [Arc runbook](runbook.md) | Base infrastructure, optional workbooks and presenter context |
 | [Lifecycle](lifecycle.md) | Explicit targets, retained data, config-driven nested guest and readiness |
@@ -33,9 +33,12 @@ reset faults or run destructive rehearsals incidentally.
 ## Optional scenarios and background
 
 - [Real SQL workload on the simulated estate](sql-engine-workload.md):
-  actual engine/transaction evidence, separate from the nested Arc SQL path.
-- [LOB sample](../samples/lob-arc-app/README.md), [Container App](container-app-fault.md)
-  and [AKS](aks-break-scenario.md): separately prepared scenarios.
+  actual engine/transaction evidence, a live bounded lock-timeout/Sev2/automatic
+  Review investigation rehearsal and capture limits; separate from nested Arc SQL.
+- [LOB sample](../samples/lob-arc-app/README.md): live bounded warning,
+  original-worker restoration and automatic-investigation limitations.
+- [Container App](container-app-fault.md) and [AKS](aks-break-scenario.md):
+  separately prepared scenarios.
 - [SQL support decision](sql-arc-spike.md), [SQL-shaped simulator](sql-workload-simulation.md),
   [legacy OS](legacy-os-fleet.md) and [architecture](architecture.md): honest limits.
 - [Reskin guide](reskin-guide.md), [AGENTS](../AGENTS.md) and

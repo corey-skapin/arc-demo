@@ -21,7 +21,7 @@ Capture the following **nonsecret** fields from the explicit setup inputs and
 actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
 
 | Field | Source |
-|---|---|
+| --- | --- |
 | `schemaVersion` | Numeric `1` |
 | `subscriptionId`, `tenantId` | The operator-confirmed runtime target |
 | `recordedAtUtc` | UTC timestamp of the context/evidence being saved, not the generation time |
@@ -347,5 +347,5 @@ Pester is development-only, installed in CI; it is not a deployment dependency.
 Fresh deploy, double deploy, park/wake and teardown/recreate remain separate
 live smoke tests needing a disposable lab and explicit approval. See
 [troubleshooting](troubleshooting.md) for known failure modes.
-The approved eight-host active/readiness proof is not evidence that these
-separate deployment or lifecycle cycles have been exercised.
+The [dated retained-estate wake/park evidence](nested-sql-demo.md) does not prove
+fresh deployment, double-deploy idempotency, AKS lifecycle or full teardown/rebuild.

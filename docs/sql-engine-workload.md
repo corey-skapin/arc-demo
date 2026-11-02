@@ -105,8 +105,33 @@ files can be restored consistently.
 
 ## Real lock-timeout incident
 
-The incident helper is available, but **the SQL alert deployment and end-to-end
-alert/SRE rehearsal have not been run**. They require a separate requested window.
+The approved rehearsals below each proved one real `1222`/`LCK_M_X`, bounded
+rollback, ingested detection/recovery events, a Sev2 alert, Action Group execution
+and an automatic Review-only SRE investigation. Times are UTC.
+
+| Date | Detected | Recovered | Alert fired | SRE thread created | Final narrative |
+| --- | --- | --- | --- | --- | --- |
+| 1 November 2026 | 23:24:21 | 23:24:28 | 23:25:12 | 23:26:22 | 23:27:47 |
+| 2 November 2026 | 00:17:51 | 00:17:59 | 00:18:49 | 00:19:26 | 00:20:57 |
+
+Neither run used a manual incident chat or SQL repair. Independent before/after
+checks verified healthy orders, an unchanged probe and zero owned sessions.
+The DCR preparation added only the source-specific `6000`/`6001` selectors,
+retaining existing sources and associations. The second run used a separately
+approved temporary alert and merge-window exception; it does not prove a default
+repeat would create a new incident inside the normal cooldown.
+After source-event expiry, the canonical alert was re-enabled, the temporary
+rule deleted and the normal three-hour merge window restored; readback was
+verified at 00:36:47Z on 2 November.
+
+**Evidence limits:** Action Group execution does not prove email receipt.
+The first narrative's performance count and inference that no incident platform
+exists were incorrect. Instructions and that persisted claim were corrected
+before the repeat; its Event/Perf result headers matched the narrative's two
+events and 119 raw samples. Complete built-in query outputs were still truncated
+in the audit and absent from message results: full raw-query verification remains
+unproven. Do not equate aggregate rows with sample counts.
+This is self-recovery followed by investigation, not automatic SRE remediation.
 
 `-Action Incident` requires the healthy orders worker and owned probe table.
 One SQL transaction takes a row lock; another waits and actually returns
@@ -119,9 +144,11 @@ and Orders table are not stopped or locked by this demonstration.
 Client waits are bounded, and cleanup must verify unchanged probe value,
 no remaining owned sessions and a healthy worker before recording recovery.
 Unknown cleanup is an error. Never kill historical session IDs from old events.
+The probe self-cleans within the invocation. Do not use `-Action Stop` to clear
+it: that stops the normal orders worker instead.
 
 | Event | Level | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `6000` | Information | Real normal order commit/read |
 | `6201` | Error | Actual 1222 with SQL blocking evidence |
 | `6001` | Information | Rollback/session cleanup and worker health verified |
@@ -136,6 +163,10 @@ companion's Review-only SQL route, run one Incident, then inspect same-incident
 events, actual alert/investigation and post-incident Status.
 The alert is `al-<prefix>-sql-lock-timeout`, **Sev2**, Count > 0,
 one-minute evaluation and a 15-minute window. It has ongoing alert costs.
+Its helper uses the same explicit nested-parent/keep-parked skin selection as
+lifecycle; preview does not wake those hosts. The stateful rule auto-mitigates
+and has no additional action-muting duration; the companion's incident merge
+window is a separate setting, not a notification-delivery guarantee.
 The probe usually recovers before the alert; the story is evidence correlation,
 not an ongoing outage or automatic SRE remediation.
 
