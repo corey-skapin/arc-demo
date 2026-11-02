@@ -450,10 +450,10 @@ Describe 'Presenter runsheet template' {
         $template | Should -Not -Match 'heuristic'
         $template | Should -Not -Match 'Do not read out the workbook'
         $template | Should -Match 'read the latest Update Manager\s+assessments'
-        $template | Should -Match 'never counted as fully patched'
+        $template | Should -Match 'never counted as\s+\*\*Fully patched\*\*'
         $template | Should -Match '\*\*Assessment failed\*\*\s+or\s+\*\*Not assessed\*\*'
         $template | Should -Match 'Stand behind that figure for governance'
-        $template | Should -Match 'the \*\*Updates\*\* view above is the per-machine drill-down'
+        $template | Should -Match 'the \*\*Updates\*\* view above is the per-machine\s+drill-down'
     }
 
     It 'names the agent and the data collection rule without a cost claim' {

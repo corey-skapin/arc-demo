@@ -110,11 +110,16 @@ appear.
 
 **Optional per-server view (adds about a minute):**
 {{MachineIntelligenceAvailability}}
-Pick a Windows host: most tiles populate. The SQL instance and vulnerability tiles
-stay empty on a host with no Arc-enabled SQL Server or Defender findings, so say so
-rather than scrolling past them. This workbook's memory and disk charts read a
-table only the Windows hosts have; the capacity workbook (scene 4) is where Linux
-memory and disk show.
+Pick the Windows host **{{windowsMachineName}}** or the Linux host
+**{{linuxMachineName}}**. Under **Machine at a
+glance**, **Arc identity** and **Newest telemetry** show the machine and its
+freshest data. The tabs **Performance**, **Arc and policy** and **Events and
+uptime** populate for both, and Linux CPU, memory and disk appear here too, from the
+counters added to the data collection rule. On a host with no Arc-enabled SQL Server
+instance the instance and database items under **SQL Server** are empty and say why:
+read the message rather than scrolling past it. Leave the nested guest for scene 3:
+it has no Azure Monitor Agent, so its load items say there is no data, and we make
+no Defender claim for it, so stay off its **Security** tab.
 
 ### 2b. How the data gets here (1 minute)
 
@@ -342,22 +347,29 @@ assessment, Monitoring and Defender for SQL are not demonstrated on any host.
 
 **Optional governance view (adds about a minute):**
 {{ComplianceWorkbookAvailability}}
-Show the policy compliance score. This lab is intentionally un-hardened, so a low
-score is the honest baseline rather than a failure of the demo: visibility first,
-then an agreed change. Stand behind that figure for governance.
+In **Posture at a glance**, show **Policy compliance** under **Policy and secure
+score**. This lab is intentionally un-hardened, so a low score is the honest
+baseline rather than a failure of the demo: visibility first, then an agreed
+change. Stand behind that figure for governance.
 
-The scorecard and the table **Arc servers with pending critical or security
+**Fully patched** under **Patching and Defender agent**, **Patch status** under
+**Patch posture** and the table **Arc servers with pending critical or security
 updates** read the latest Update Manager assessments, so they agree with the
-**Updates** view above. Windows servers show their pending security, update rollup
-and definition updates. A machine whose assessment failed or has not run says
-**Assessment failed** or **Not assessed** and is never counted as fully patched; in
-this lab that is expected for the Linux hosts (their patch extension is not ready,
-an artifact of simulating on-premises with Azure VMs) and for the experimental
-nested guest. Read the counts as shown: they reflect the last assessment time, not
-live state, and the **Updates** view above is the per-machine drill-down.
+**Updates** view above. **Security pending** counts the servers with pending
+security updates, and the table lists their security, update rollup and definition
+counts. A machine whose assessment failed or has not run says **Assessment failed**
+or **Not assessed**, is counted under **Assessment gaps** and is never counted as
+**Fully patched**; in this lab that is expected for the Linux hosts (their patch
+extension is not ready, an artifact of simulating on-premises with Azure VMs) and
+for the experimental nested guest. So **Fully patched** can read zero while updates
+are pending: say that as it is. Read the counts as shown: they reflect the last
+assessment time, not live state, and the **Updates** view above is the per-machine
+drill-down.
 
-Do not open the experimental governance workbook; some of its tiles are empty by
-design.
+Keep the experimental governance workbook off this path. It is rebuilt for this lab
+and returns data, but it is labelled experimental, repeats the policy story told
+here, and its **Vulnerability findings** section is marked not applicable in this
+lab.
 
 ## 8. Close and hand over (2 minutes)
 
