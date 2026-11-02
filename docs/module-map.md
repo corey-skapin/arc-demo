@@ -122,6 +122,11 @@ the workbooks it publishes to the deployment workspace, so the repo JSON carries
 `tests/WorkbookWorkspaceScope.Tests.ps1` guard them (Resource Graph allows at most two tables per query and
 never the security and patch tables together, so the compliance tiles are one query per table pair).
 
+`tests/MachineIntelligenceWorkbook.Tests.ps1` and `tests/SqlEstateWorkbook.Tests.ps1` guard the two reworked
+engineer workbooks offline: defaults and a no-click open, no workspace picker, a specific message for
+every empty tile, tile text lengths, formatter columns and colour direction, and the honest SQL
+labelling (experimental, no Defender claim, guarded best practices assessment).
+
 `workbooks/capacity-headroom.workbook.json`,
 `workbooks/optimisation-opportunities.workbook.json` and the shared
 `workbooks/queries/*.kql` (fragments `operational-*.kql` plus the `cap-*`, `opt-*` and
