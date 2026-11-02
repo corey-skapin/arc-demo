@@ -36,13 +36,50 @@ SRE thread ran from 00:29:41 to a final narrative at 00:31:10. Independent Statu
 confirmed Healthy/running, and a post-restoration `4000` at 00:30:21 was ingested
 at 00:31:00. No task restart, guest repair or second fault was performed.
 
-**Narrative limits:** SRE incorrectly inferred an ongoing warning from the last
+**First-run narrative limits:** SRE incorrectly inferred an ongoing warning from the last
 ingested `4200` and overstated how strongly sparse host data ruled out pressure.
 Prefer the actual cleanup/current Status and fresh `4000` evidence. A still-Fired
 alert inside its ten-minute lookback is not proof of a current app fault;
 Acknowledged is not Resolved. Email receipt and a real upstream dependency
 failure were not proven. This is a configuration-driven warning and investigation,
 not an app-to-SQL transaction or automatic remediation.
+
+#### Representative follow-up
+
+A separately approved single repeat on **2 November 2026 UTC** used the existing
+120-second helper, unchanged pinned app and a neutral temporary Sev2 rule.
+Fresh Healthy/original-worker, ingested `4000` and zero-alert gates passed first.
+The helper's start is a pre-write boundary, not a separately measured file-write
+timestamp. Its exact original-config restoration readback followed about
+122 seconds later.
+
+| Evidence | UTC |
+| --- | --- |
+| Helper start / warning window end | 02:19:20.766 / 02:21:21.270 |
+| Original configuration restored and worker verified | 02:21:22.758 |
+| First / last warning generated | 02:19:23.603 / 02:21:08.652 |
+| First / last warning ingested | 02:19:59.867 / 02:21:40.004 |
+| First resumed `4000` generated / ingested | 02:21:23.672 / 02:22:03.603 |
+| Independent Healthy/original-worker Status | 02:24:38.323 |
+| Temporary-rule alert fired / Action Group executed | 02:24:59.886 / 02:25:00.369 |
+| Companion automatic Review investigation finished | 02:28:43 |
+
+All eight local `4200` events were ingested; the exact deployed alert KQL matched
+eight records. The original process, running task, pinned source and configuration
+were retained without restart, kill, redeployment or repair. The rehearsal made
+no second warning, DCR, workbook, IAM or power change.
+
+The companion capture reported an evidence-led result: warnings followed by
+resumed healthy activity, ranked change evidence from actual read-only Run
+Command/Status output, and qualified dependency/customer-impact and sparse-counter
+limits. It did not repeat the stale ongoing-warning or host-pressure-exclusion
+claims. Six KQL result headers were retained, but audit truncation still prevents
+full verification of some returned values. This does not prove a real downstream
+outage, email receipt or automatic repair.
+
+The temporary alert route was separately approved.
+The companion owns retirement and canonical-route restoration after source-event
+expiry; this is not proof of default repeat-within-cooldown behavior.
 
 ## Showing healthy activity in Log Analytics
 
