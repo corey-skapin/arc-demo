@@ -19,7 +19,7 @@ lookup constants and required upstream attribution are retained.
 | `ArcMachineIntelligenceCenter.json` | Arc Machine Intelligence Center | One Arc machine in one place: identity, CPU, memory and disk (Windows and Linux), Defender checks, software changes, SQL, extensions and policy, events and uptime. Opens on a Windows host with telemetry; machines with no Azure Monitor Agent are labelled. |
 | `Asset_Inventory_Workbook_Example.json` | Asset Inventory | Estate-wide hardware/software inventory roll-up. |
 | `GovernanceComplianceWorkbook_Experiment.json` | Governance & Compliance (experimental) | Larger compliance workbook with deeper drill-downs. |
-| `SQL_Estate_Dashboard.json` | SQL Estate Dashboard | Arc-enabled SQL inventory + Best Practice Assessment results. |
+| `SQL_Estate_Dashboard.json` | SQL Estate Dashboard | SQL under one view: the Arc SQL inventory beside the monitored SQL workload, lock-timeout incidents and alert rule; best practices assessment guarded (not enabled in this lab). |
 
 ## Local changes to the vendored snapshot
 
@@ -56,9 +56,14 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   nested SQL guest, are listed and labelled), CPU, memory and disk read the `Perf` table for Windows
   and Linux, tile labels are short, every empty tile says why, and its Log Analytics tiles carry no
   workspace picker (Phase 11 pins them at publish). `tests/MachineIntelligenceWorkbook.Tests.ps1` guards it.
-- SQL Estate Dashboard: the version and licence charts understand Arc SQL text
-  values such as `SQL Server 2022` and `Free`, not only numeric versions. The BPA
-  tiles remain explained placeholders because this lab collects no BPA data.
+- SQL Estate Dashboard is reworked for the lab, not a snapshot: the Arc inventory (instance, version,
+  edition, licence and the databases of registered instances only) sits beside the monitored SQL
+  workload (`ArcSqlEngineDemo` events 6000, 6201 and 6001 from the Azure Monitor Agent) and the
+  lock-timeout alert rule. The nested Arc SQL instance is labelled experimental and unsupported,
+  Defender is shown as Arc reports it with no claim, the BPA tiles read `SqlAssessment_CL` through a
+  guarded union and show a "not enabled" note while this lab collects no BPA data, the version and
+  licence charts understand Arc SQL text values such as `SQL Server 2022` and `Free`, and its Log Analytics
+  tiles carry no workspace picker (Phase 11 pins them at publish). `tests/SqlEstateWorkbook.Tests.ps1` guards it.
 
 ## How they get into your workspace
 
@@ -79,8 +84,7 @@ $dest = '.\workbooks\nseilaz' # Run from the repository root.
 $files = @(
   'Arc_Compliance_Security_Governance_example.json',
   'Asset_Inventory_Workbook_Example.json',
-  'GovernanceComplianceWorkbook_Experiment.json',
-  'SQL_Estate_Dashboard.json'
+  'GovernanceComplianceWorkbook_Experiment.json'
 )
 foreach ($f in $files) {
   Invoke-WebRequest -UseBasicParsing `

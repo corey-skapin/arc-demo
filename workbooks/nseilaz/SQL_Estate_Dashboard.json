@@ -4,9 +4,9 @@
     {
       "type": 1,
       "content": {
-        "json": "# SQL Server Estate - Executive Intelligence Dashboard\r\n\r\n## Procurement & Data Platform Governance for SQL Server Environment\r\n\r\nThis dashboard provides data executives with strategic oversight of the SQL Server estate, focusing on **license optimization**, **compliance risk management**, **cost control**, and **performance health**. Use this to make informed decisions about SQL Server investments, identify cost-saving opportunities, and ensure your data platform meets business and regulatory requirements."
+        "json": "# SQL under one view\n*What Azure Arc inventories and what Azure Monitor observes, side by side: the Arc-enabled SQL Server instance and its databases, then the real SQL workload on a monitored host, its lock-timeout incidents and the alert rule that watches them.*"
       },
-      "name": "Header"
+      "name": "title"
     },
     {
       "type": 9,
@@ -17,9 +17,10 @@
         ],
         "parameters": [
           {
-            "id": "1",
+            "id": "5bfbbc6a-5825-ab32-659d-7c38e7168132",
             "version": "KqlParameterItem/1.0",
             "name": "Subscription",
+            "label": "Subscription",
             "type": 6,
             "isRequired": true,
             "multiSelect": true,
@@ -40,49 +41,43 @@
             ]
           },
           {
-            "id": "2",
-            "version": "KqlParameterItem/1.0",
-            "name": "LogAnalyticsWorkspace",
-            "label": "Log Analytics Workspace",
-            "type": 5,
-            "isRequired": false,
-            "query": "where type =~ 'microsoft.operationalinsights/workspaces'\r\n| project id",
-            "crossComponentResources": [
-              "{Subscription}"
-            ],
-            "typeSettings": {
-              "additionalResourceOptions": [],
-              "showDefault": false
-            },
-            "queryType": 1,
-            "resourceType": "microsoft.resourcegraph/resources"
-          },
-          {
-            "id": "3",
+            "id": "28b0c235-3ba5-c2a4-de2b-a8b49bf20fb8",
             "version": "KqlParameterItem/1.0",
             "name": "TimeRange",
-            "label": "Time Range",
+            "label": "Time range",
             "type": 4,
             "isRequired": true,
+            "value": {
+              "durationMs": 604800000
+            },
             "typeSettings": {
               "selectableValues": [
                 {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
                   "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
                 },
                 {
                   "durationMs": 604800000
                 },
                 {
-                  "durationMs": 2592000000
+                  "durationMs": 1209600000
                 },
                 {
-                  "durationMs": 7776000000
+                  "durationMs": 2592000000
                 }
               ],
               "allowCustom": true
-            },
-            "value": {
-              "durationMs": 2592000000
             }
           }
         ],
@@ -90,21 +85,24 @@
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources"
       },
-      "name": "Parameters"
+      "name": "parameters"
     },
     {
       "type": 1,
       "content": {
-        "json": "---\r\n## Executive Summary\r\n\r\n### What You're Looking At\r\n\r\nThese 6 key performance indicators provide an at-a-glance view of your SQL Server estate:\r\n\r\n1. **Total SQL Instances** - The complete count of SQL Server instances across your organization\r\n2. **Critical Issues** - High-severity best practice violations requiring immediate attention (🔴 these expose your organization to security breaches, data loss, or compliance failures)\r\n3. **Enterprise Edition Instances** - Count of premium-licensed SQL Servers (these represent your highest license costs at ~$14,000 per core)\r\n4. **Standard Edition Instances** - Count of mid-tier licensed SQL Servers (~$3,700 per core)\r\n5. **Unsupported Versions** - SQL Server versions no longer receiving security patches from Microsoft (🔴 critical security and compliance risk)\r\n6. **Instances Without Defender** - Servers lacking Azure Defender for SQL protection (missing real-time threat detection and vulnerability assessment)\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nThese metrics directly impact your budget, security posture, and regulatory compliance:\r\n\r\n- **License Optimization**: Enterprise Edition licenses cost 3.8x more than Standard Edition. Identifying over-licensed instances can save **$40,000-$280,000 per downgraded server**\r\n- **Security & Compliance**: Unsupported versions cannot pass SOC 2, ISO 27001, or HIPAA audits. Critical issues represent vulnerabilities that could lead to data breaches with average costs of **$4.35 million per incident**\r\n- **Risk Management**: Running unsupported software exposes the organization to liability, with potential fines of **$50,000-$1.5M for compliance violations**\r\n- **Budget Planning**: Understanding your edition mix helps forecast annual software assurance costs and plan for Azure migrations\r\n\r\n### Action Items\r\n\r\n- 🔴 **Immediate**: Address all critical issues within 48 hours - these represent active security or stability risks\r\n- 🟡 **This Quarter**: Upgrade all unsupported SQL Server versions (2012, 2008 R2) or migrate to Azure SQL\r\n- 🔵 **This Month**: Enable Azure Defender for SQL on all instances ($15/server/month investment prevents $4M+ breach costs)\r\n- 💰 **License Review**: Evaluate Enterprise Edition instances - consider downgrading to Standard or migrating to Azure SQL Managed Instance for 40% cost savings"
+        "json": "## SQL at a glance\nTwo different kinds of evidence. **Arc inventory** is what Azure Arc registered. **Azure Monitor** is what a real SQL workload reports through the Azure Monitor Agent, with no Arc SQL involved."
       },
-      "name": "Executive Summary Narrative"
+      "name": "glance-header"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend edition = tostring(properties.edition)\r\n| extend version = tostring(properties.version)\r\n| extend licenseType = tostring(properties.licenseType)\r\n| extend defenderStatus = tostring(properties.azureDefenderStatus)\r\n| summarize \r\n    total = count(),\r\n    enterprise = countif(edition =~ 'Enterprise'),\r\n    standard = countif(edition =~ 'Standard'),\r\n    unsupported = countif(version startswith '10.' or version startswith '11.' or version startswith '12.'),\r\n    noDefender = countif(defenderStatus !~ 'Protected')\r\n| extend critical = 0\r\n| project data = pack_array(\r\n    pack('Metric', 'Total Instances', 'Value', total, 'Type', 'count'),\r\n    pack('Metric', 'Critical Issues', 'Value', critical, 'Type', 'alert'),\r\n    pack('Metric', 'Enterprise Edition', 'Value', enterprise, 'Type', 'license'),\r\n    pack('Metric', 'Standard Edition', 'Value', standard, 'Type', 'license'),\r\n    pack('Metric', 'Unsupported Versions', 'Value', unsupported, 'Type', 'alert'),\r\n    pack('Metric', 'No Azure Defender', 'Value', noDefender, 'Type', 'security')\r\n)\r\n| mv-expand data\r\n| project \r\n    Metric = tostring(data['Metric']), \r\n    Value = data['Value'], \r\n    Type = tostring(data['Type'])",
-        "size": 4,
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| summarize Instances = count(), Versions = strcat_array(make_set(tostring(properties.version)), ', '), Editions = strcat_array(make_set(tostring(properties.edition)), ', '),\n    Licences = strcat_array(make_set(tostring(properties.licenseType)), ', '), Builds = strcat_array(make_set(tostring(properties.currentVersion)), ', ')\n| project Label = 'SQL instances', Value = tostring(Instances), Note = 'Arc-enabled, in scope', Order = 1\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Versions = strcat_array(make_set(tostring(properties.version)), ', '), Builds = strcat_array(make_set(tostring(properties.currentVersion)), ', ')\n    | project Label = 'SQL version', Value = Versions, Note = strcat('build ', Builds), Order = 3)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Editions = strcat_array(make_set(tostring(properties.edition)), ', ')\n    | project Label = 'Edition', Value = Editions, Note = 'as registered with Arc', Order = 4)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n    | summarize Licences = strcat_array(make_set(tostring(properties.licenseType)), ', ')\n    | project Label = 'Licence', Value = Licences, Note = 'licence type in Arc', Order = 5)\n| union (resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'WindowsAgent.SqlServer'\n    | summarize Modes = strcat_array(make_set(tostring(properties.settings.LicenseType)), ', ')\n    | project Label = 'Arc SQL mode', Value = iff(isempty(Modes), 'Unknown', Modes), Note = 'inventory only when LicenseOnly', Order = 6)\n| union (resources\n    | where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n    | extend InstanceId = tolower(substring(id, 0, indexof(tolower(id), '/databases/')))\n    | join kind=inner (resources | where type =~ 'microsoft.azurearcdata/sqlserverinstances' | project InstanceId = tolower(id)) on InstanceId\n    | summarize Total = count(), SystemDbs = countif(name in~ ('master', 'model', 'msdb', 'tempdb'))\n    | project Label = 'Databases', Value = tostring(Total), Note = strcat(Total - SystemDbs, ' user, ', SystemDbs, ' system'), Order = 2)\n| order by Order asc\n| project Label, Value, Note",
+        "size": 3,
+        "title": "Arc inventory",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected. An instance appears once the Arc SQL extension (WindowsAgent.SqlServer) is installed on a server and the instance registers.",
+        "noDataMessageStyle": 4,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
@@ -113,47 +111,709 @@
         "visualization": "tiles",
         "tileSettings": {
           "titleContent": {
-            "columnMatch": "Metric",
+            "columnMatch": "Label",
             "formatter": 1
           },
           "leftContent": {
             "columnMatch": "Value",
-            "formatter": 12,
-            "formatOptions": {
-              "palette": "auto"
-            },
-            "numberFormat": {
-              "unit": 17,
-              "options": {
-                "style": "decimal",
-                "useGrouping": true
-              }
-            }
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
           },
           "showBorder": true
         }
       },
-      "name": "Executive Summary Tiles"
-    },
-    {
-      "type": 1,
-      "content": {
-        "json": "---\r\n## Estate Health - Best Practice Assessment\r\n\r\n### What You're Looking At\r\n\r\nThis section shows the health and compliance status of your SQL Server estate based on Microsoft's Best Practice Assessments:\r\n\r\n1. **Issues by Severity** - Distribution of configuration, security, and performance findings across Critical, High, Medium, and Low severity levels\r\n2. **Top 10 Issues** - The most common problems affecting multiple servers (these indicate systemic issues requiring enterprise-wide remediation)\r\n3. **Issue Distribution** - Visual breakdown showing where problems concentrate (helps prioritize remediation efforts)\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nBest Practice Assessment results directly correlate with:\r\n\r\n- **Operational Stability**: High-severity issues often cause outages costing **$5,600 per minute** of downtime for production databases\r\n- **Performance**: Medium-severity performance findings typically indicate 20-40% waste in server capacity and licenses\r\n- **Security Posture**: Critical security findings represent attack vectors - 60% of SQL Server breaches exploit known misconfigurations\r\n- **Audit Readiness**: Compliance auditors review BPA results - unresolved High/Critical issues can fail audits\r\n\r\n### Financial Impact Examples\r\n\r\n- **Performance Issue**: Poorly configured tempDB can reduce query performance by 50%, effectively doubling the servers needed (**$280K in wasted licensing**)\r\n- **Backup Issue**: Missing transaction log backups expose you to data loss - average cost per lost GB is **$141**\r\n- **Security Issue**: Weak authentication settings are #1 cause of ransomware attacks (**$4.5M average ransom + downtime**)\r\n\r\n### Action Plan\r\n\r\n- 🔴 **Critical Severity**: Fix within 48 hours - these represent immediate security or data loss risks\r\n- 🟠 **High Severity**: Remediate within 2 weeks - significant risk or performance degradation  \r\n- 🟡 **Medium Severity**: Address within quarter - optimization opportunities and minor risks\r\n- 🔵 **Low/Information**: Review annually - best practice improvements\r\n\r\n**Tip**: Issues affecting 10+ servers should be addressed via automation or policy rather than manual fixes"
-      },
-      "name": "Estate Health Narrative"
+      "name": "glance-inventory"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "datatable(Severity:string, IssueCount:long)\r\n[\r\n  \"No SQL BPA data collected in this lab\", 0\r\n]",
-        "size": 1,
-        "title": "Issues by Severity",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nlet Healthy = Worker | where EventID == 6000;\nlet LastEvent = toscalar(Healthy | summarize max(TimeGenerated));\nlet LastCommit = toscalar(Healthy | summarize max(LastCommit));\nlet LastHost = toscalar(Healthy | summarize arg_max(TimeGenerated, Computer) | project Computer);\nlet LastDb = toscalar(Healthy | summarize arg_max(TimeGenerated, Database) | project Database);\nlet Recent = Healthy | where TimeGenerated > LastEvent - 1h | summarize N = count(), SpanMin = (max(TimeGenerated) - min(TimeGenerated)) / 1m, AvgMs = avg(Elapsed), MaxMs = max(Elapsed);\nlet Rate = toscalar(Recent | extend R = N / (SpanMin + 1.0) | project R);\nlet AvgMs = toscalar(Recent | project AvgMs);\nlet MaxMs = toscalar(Recent | project MaxMs);\nlet Incidents = Worker | where EventID == 6201 | summarize Count = count(), Last = max(TimeGenerated);\nlet IncidentCount = toscalar(Incidents | project Count);\nlet LastIncident = toscalar(Incidents | project Last);\nlet HasWork = isnotnull(LastEvent);\nprint Dummy = 1\n| project data = pack_array(\n    pack('Label', 'Last commit', 'Value', iff(HasWork, AgeText(LastCommit), 'No events'), 'Note', iff(HasWork, strcat(LastHost, ' / ', LastDb), 'No ArcSqlEngineDemo events in range'), 'Order', 1),\n    pack('Label', 'Commit events/min', 'Value', iff(HasWork, Num(Rate, 1), 'No events'), 'Note', iff(HasWork, 'healthy commit and read (6000)', 'No ArcSqlEngineDemo events in range'), 'Order', 2),\n    pack('Label', 'Commit latency', 'Value', iff(HasWork, strcat(Num(AvgMs, 0), ' ms'), 'No events'), 'Note', iff(HasWork, strcat('slowest ', Num(MaxMs, 0), ' ms, last hour'), 'No ArcSqlEngineDemo events in range'), 'Order', 3),\n    pack('Label', 'Lock timeouts', 'Value', tostring(coalesce(IncidentCount, 0)), 'Note', 'SQL error 1222 in range', 'Order', 4),\n    pack('Label', 'Last lock timeout', 'Value', iff(isnotnull(LastIncident), AgeText(LastIncident), 'None in range'), 'Note', iff(isnotnull(LastIncident), 'event 6201 on the SQL host', 'no 6201 events in range'), 'Order', 5))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+        "size": 3,
+        "title": "Monitored SQL workload",
+        "noDataMessage": "No ArcSqlEngineDemo events in the selected time range. The demo SQL worker writes them from its host through the Azure Monitor Agent.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "glance-workload"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.insights/scheduledqueryrules' and name startswith 'al-' and name endswith '-sql-lock-timeout'\n| project Label = 'Alert rule', Value = iff(tostring(properties.enabled) =~ 'true', 'Enabled', 'Disabled'), Note = name, Order = 1\n| union (resources\n    | where type =~ 'microsoft.insights/scheduledqueryrules' and name startswith 'al-' and name endswith '-sql-lock-timeout'\n    | project Label = 'Severity', Value = strcat('Sev', tostring(properties.severity)), Note = strcat('checks every ', replace_string(replace_string(tostring(properties.evaluationFrequency), 'PT', ''), 'M', ' min')), Order = 2)\n| order by Order asc\n| project Label, Value, Note",
+        "size": 3,
+        "title": "Alert rule",
+        "noDataMessage": "No SQL lock-timeout alert rule (al-<prefix>-sql-lock-timeout) exists in the subscriptions selected. It is deployed separately, only when an incident rehearsal is approved.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
-          "{LogAnalyticsWorkspace}"
+          "{Subscription}"
         ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "glance-alert"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| extend Raised = todatetime(e.startDateTime), Condition = tostring(e.monitorCondition), AlertState = tostring(e.alertState), Sev = tostring(e.severity)\n| summarize Fired = count(), arg_max(Raised, Condition, AlertState, Sev)\n| project data = pack_array(\n    pack('Label', 'Alerts raised', 'Value', tostring(Fired), 'Note', strcat('latest ', format_datetime(Raised, 'yyyy-MM-dd HH:mm'), ' UTC'), 'Order', 1),\n    pack('Label', 'Latest alert', 'Value', Condition, 'Note', strcat(AlertState, ', ', Sev), 'Order', 2))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+        "size": 3,
+        "title": "Alerts",
+        "noDataMessage": "No alert has been raised by a SQL lock-timeout rule in the subscriptions selected. The rule only fires when a lock-timeout incident is rehearsed.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 1
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "glance-alerts"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## What Azure Arc inventories\n> **Experimental configuration.** The instance below runs in a Hyper-V guest nested inside an Azure VM. Microsoft Learn lists SQL Server on Azure Virtual Machines as **unsupported** for Arc-enabled SQL Server, so this shows Arc inventory behaviour only. It runs in licence-only mode: connection and inventory, not monitoring or assessment. The Defender column is the value Arc reports, which comes from subscription-level Defender plans; this lab makes no Defender for SQL claim."
+      },
+      "name": "inventory-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend Host = tostring(split(tostring(properties.containerResourceId), '/')[8]), HostId = tolower(tostring(properties.containerResourceId))\n| project Instance = name, Host, HostId, Version = tostring(properties.version), Edition = tostring(properties.edition), Licence = tostring(properties.licenseType),\n    Status = tostring(properties.status), Defender = tostring(properties.azureDefenderStatus), VCores = toint(properties.vCore), PatchLevel = tostring(properties.patchLevel),\n    LastInventory = todatetime(properties.lastInventoryUploadTime)\n| join kind=leftouter (resources\n    | where type =~ 'microsoft.hybridcompute/machines/extensions' and name =~ 'WindowsAgent.SqlServer'\n    | project HostId = tolower(tostring(split(id, '/extensions/')[0])), ArcSqlMode = tostring(properties.settings.LicenseType)) on HostId\n| project Instance, Host, Version, Edition, Licence, ArcSqlMode, Status, Defender, VCores, PatchLevel, LastInventory\n| order by Host asc, Instance asc",
+        "size": 0,
+        "title": "SQL Server instances registered with Arc",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected. An instance appears once the Arc SQL extension (WindowsAgent.SqlServer) is installed and the instance registers.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Instance",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Host",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Version",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "Edition",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Licence",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "ArcSqlMode",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "Status",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Connected",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disconnected",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Defender",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Protected",
+                    "representation": "blue",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "14ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "ArcSqlMode",
+              "label": "Arc SQL mode"
+            },
+            {
+              "columnId": "VCores",
+              "label": "vCores"
+            },
+            {
+              "columnId": "PatchLevel",
+              "label": "Patch level"
+            },
+            {
+              "columnId": "LastInventory",
+              "label": "Last inventory"
+            },
+            {
+              "columnId": "Defender",
+              "label": "Defender (reported)"
+            }
+          ]
+        }
+      },
+      "name": "inventory-instances"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n| extend InstanceId = tolower(substring(id, 0, indexof(tolower(id), '/databases/')))\n| join kind=inner (resources | where type =~ 'microsoft.azurearcdata/sqlserverinstances' | project InstanceId = tolower(id), Instance = name) on InstanceId\n| project Instance, Database = name, Kind = iff(name in~ ('master', 'model', 'msdb', 'tempdb'), 'System', 'User'), State = tostring(properties.state), SizeMB = round(todouble(properties.sizeMB), 1),\n    Recovery = tostring(properties.recoveryMode), CompatibilityLevel = toint(properties.compatibilityLevel)\n| order by Instance asc, Kind desc, Database asc",
+        "size": 0,
+        "title": "Databases discovered by Arc",
+        "noDataMessage": "No databases to list because no Arc-enabled SQL Server instance is registered in the subscriptions selected.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Instance",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Database",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "22ch"
+              }
+            },
+            {
+              "columnMatch": "Kind",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "System",
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "User",
+                    "representation": "blue",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "State",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Online",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "10ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "SizeMB",
+              "label": "Size MB"
+            },
+            {
+              "columnId": "CompatibilityLevel",
+              "label": "Compat. level"
+            }
+          ]
+        }
+      },
+      "name": "inventory-databases"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend edition = tostring(properties.edition)\n| summarize InstanceCount = count() by edition\n| order by InstanceCount desc",
+        "size": 1,
+        "title": "Edition mix",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to chart.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "piechart"
+      },
+      "name": "mix-edition",
+      "customWidth": "33"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend version = tostring(properties.version)\n| extend versionMajor = case(\n    version startswith '10.', 'SQL 2008/R2',\n    version startswith '11.', 'SQL 2012',\n    version startswith '12.', 'SQL 2014',\n    version startswith '13.', 'SQL 2016',\n    version startswith '14.', 'SQL 2017',\n    version startswith '15.', 'SQL 2019',\n    version startswith '16.', 'SQL 2022',\n    version has '2022', 'SQL 2022',\n    version has '2019', 'SQL 2019',\n    version has '2017', 'SQL 2017',\n    version has '2016', 'SQL 2016',\n    version has '2014', 'SQL 2014',\n    version has '2012', 'SQL 2012',\n    version has '2008', 'SQL 2008/R2',\n    'Unknown'\n)\n| summarize InstanceCount = count() by versionMajor\n| order by versionMajor asc",
+        "size": 1,
+        "title": "Version mix",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to chart.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "mix-version",
+      "customWidth": "33"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| extend licenseType = tostring(properties.licenseType)\n| extend licenseDisplay = case(\n    licenseType =~ 'PAYG', 'Pay-As-You-Go',\n    licenseType =~ 'Paid', 'Perpetual License',\n    licenseType =~ 'LicenseOnly', 'Azure Hybrid Benefit',\n    licenseType =~ 'Free', 'Free (Developer/Express)',\n    'Unknown'\n)\n| summarize InstanceCount = count() by licenseDisplay\n| order by InstanceCount desc",
+        "size": 1,
+        "title": "Licence mix",
+        "noDataMessage": "No Arc-enabled SQL Server instance in the subscriptions selected, so there is no mix to chart.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "piechart"
+      },
+      "name": "mix-licence",
+      "customWidth": "33"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## What Azure Monitor observes\nA real SQL Server workload on a monitored Windows host (not an Arc SQL instance). Its worker commits orders and reads them back; **event 6000** is written to the Application log after a healthy commit and read (about once a minute), **6201** is an actual lock timeout (SQL error 1222) and **6001** is the verified recovery. Gaps mean no events were recorded: the host was parked or the worker stopped."
+      },
+      "name": "workload-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Healthy = count() default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| mv-expand TimeGenerated to typeof(datetime), Healthy to typeof(real)\n| project TimeGenerated, CommitEventsPerMinute = round(Healthy / (Step / 1m), 2)",
+        "size": 1,
+        "title": "Healthy commit events per minute",
+        "noDataMessage": "No ArcSqlEngineDemo healthy-commit events (6000) in the selected time range. The demo SQL worker writes them from its host through the Azure Monitor Agent, about one a minute; none means the host was parked or the worker stopped.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "timechart",
+        "chartSettings": {
+          "ySettings": {
+            "min": 0
+          }
+        }
+      },
+      "name": "workload-commits",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID == 6000\n| make-series Average = avg(Elapsed) default = real(null), Slowest = max(Elapsed) default = real(null) on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step\n| project TimeGenerated, Average, Slowest",
+        "size": 1,
+        "title": "Commit and read latency (ms)",
+        "noDataMessage": "No ArcSqlEngineDemo healthy-commit events (6000) in the selected time range, so there is no latency to chart. Latency is the elapsedMs value in each event.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "timechart",
+        "chartSettings": {
+          "ySettings": {
+            "min": 0
+          }
+        }
+      },
+      "name": "workload-latency",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Worker = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID in (6000, 6001, 6201)\n| extend Detail = iff(EventID == 6000, RenderedDescription, '')\n| extend Elapsed = todouble(extract(@'elapsedMs=(\\d+)', 1, Detail)), LastCommit = todatetime(extract(@'lastCommitUtc=([0-9T:\\.\\-Z]+)', 1, Detail)), Database = extract(@'database=([^ ]+)', 1, Detail);\nWorker\n| where EventID in (6201, 6001)\n| extend Kind = iff(EventID == 6201, 'Lock timeout (error 1222)', 'Recovery verified')\n| make-series Events = count() default = 0 on TimeGenerated from bin(WindowStart, Step) to bin(WindowEnd, Step) + Step step Step by Kind",
+        "size": 1,
+        "title": "Lock timeouts and recoveries over time",
+        "noDataMessage": "No lock-timeout (6201) or recovery (6001) events in the selected time range. That is the healthy case: incidents appear only when a rehearsal is run.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "timechart",
+        "chartSettings": {
+          "ySettings": {
+            "min": 0
+          }
+        }
+      },
+      "name": "workload-locks",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Detected = Event\n| where TimeGenerated between (WindowStart .. WindowEnd) and Source == 'ArcSqlEngineDemo' and EventID == 6201\n| extend j = parse_json(RenderedDescription)\n| project Detected = TimeGenerated, SqlHost = Computer, IncidentId = tostring(j.incidentId), Database = tostring(j.database), VictimSession = toint(j.victimSessionId), BlockerSession = toint(j.blockerSessionId),\n    WaitType = tostring(j.waitType), SqlError = toint(j.sqlErrorNumber), LockTimeoutMs = toint(j.lockTimeoutMs);\nlet Recovered = Event\n| where TimeGenerated between (WindowStart .. WindowEnd + 1h) and Source == 'ArcSqlEngineDemo' and EventID == 6001\n| extend j = parse_json(RenderedDescription)\n| project Recovered = TimeGenerated, IncidentId = tostring(j.incidentId);\nDetected\n| join kind=leftouter Recovered on IncidentId\n| extend RecoveredAfterSec = datetime_diff('second', Recovered, Detected)\n| project Detected, SqlHost, Database, SqlError, WaitType, LockTimeoutMs, VictimSession, BlockerSession, RecoveredAfterSec, IncidentId\n| order by Detected desc",
+        "size": 0,
+        "title": "Lock-timeout incidents",
+        "noDataMessage": "No lock-timeout incidents (event 6201) in the selected time range. Incidents appear only when a rehearsal is run; widen the range to see earlier ones.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "SqlHost",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Database",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "WaitType",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "RecoveredAfterSec",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed",
+                "min": 0,
+                "max": 60,
+                "customColumnWidthSetting": "12ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "Detected",
+              "label": "Detected"
+            },
+            {
+              "columnId": "SqlHost",
+              "label": "SQL host"
+            },
+            {
+              "columnId": "SqlError",
+              "label": "SQL error"
+            },
+            {
+              "columnId": "WaitType",
+              "label": "Wait type"
+            },
+            {
+              "columnId": "LockTimeoutMs",
+              "label": "Timeout ms"
+            },
+            {
+              "columnId": "VictimSession",
+              "label": "Victim"
+            },
+            {
+              "columnId": "BlockerSession",
+              "label": "Blocker"
+            },
+            {
+              "columnId": "RecoveredAfterSec",
+              "label": "Recovered after (s)"
+            },
+            {
+              "columnId": "IncidentId",
+              "label": "Incident"
+            }
+          ]
+        }
+      },
+      "name": "workload-incidents",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend e = properties.essentials\n| where tostring(e.alertRule) endswith '-sql-lock-timeout'\n| project Rule = tostring(split(tostring(e.alertRule), '/')[-1]), Severity = tostring(e.severity), Condition = tostring(e.monitorCondition), State = tostring(e.alertState),\n    Raised = todatetime(e.startDateTime), Resolved = todatetime(e.monitorConditionResolvedDateTime)\n| order by Raised desc\n| take 15",
+        "size": 0,
+        "title": "Alerts raised by the lock-timeout rule",
+        "noDataMessage": "No alerts have been raised by a SQL lock-timeout rule in the subscriptions selected. The rule only fires when a lock-timeout incident is rehearsed.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscription}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Rule",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "30ch"
+              }
+            },
+            {
+              "columnMatch": "Severity",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "Condition",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Resolved",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Fired",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "State",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "New",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Acknowledged",
+                    "representation": "blue",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Closed",
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "14ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "Raised",
+              "label": "Raised"
+            },
+            {
+              "columnId": "Resolved",
+              "label": "Resolved"
+            }
+          ]
+        }
+      },
+      "name": "workload-alerts"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Best practices assessment: not enabled in this lab\nSQL best practices assessment writes to the `SqlAssessment_CL` table in the workspace. This lab does **not** enable it (it is a separate, approved step), so the two tiles below stay empty and say so instead of failing. They fill in automatically if assessment data ever arrives."
+      },
+      "name": "bpa-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Bpa = union isfuzzy=true SqlAssessment_CL, (print TimeGenerated = datetime(null), RawData = '', _ResourceId = '' | where false);\nBpa\n| where TimeGenerated between (WindowStart .. WindowEnd)\n| extend asmt = parse_csv(RawData)\n| extend AsmtId = tostring(asmt[1]), Severity = case(asmt[8] == 30, 'High', asmt[8] == 20, 'Medium', asmt[8] == 10, 'Low', asmt[8] == 2, 'Critical', asmt[8] == 1, 'Warning', 'Information'), Sev = toint(asmt[8])\n| join kind=inner (Bpa | extend asmt = parse_csv(RawData) | extend AsmtId = tostring(asmt[1]) | summarize arg_max(TimeGenerated, *) by _ResourceId | project AsmtId) on AsmtId\n| where Sev > 0\n| summarize IssueCount = count() by Severity, Sev\n| order by Sev desc\n| project Severity, IssueCount",
+        "size": 1,
+        "title": "Issues by severity",
+        "noDataMessage": "Best practices assessment is not enabled in this lab: the SqlAssessment_CL table has no data in this workspace, so there is nothing to chart. These tiles fill in automatically when assessment data arrives.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
         "visualization": "barchart",
         "chartSettings": {
           "seriesLabelSettings": [
@@ -176,289 +836,92 @@
           ]
         }
       },
-      "customWidth": "50",
-      "name": "Issues by Severity Chart",
-      "conditionalVisibility": {
-        "parameterName": "LogAnalyticsWorkspace",
-        "comparison": "isNotEqualTo"
-      }
+      "name": "bpa-severity",
+      "customWidth": "50"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "datatable(Issue:string, Severity:string, AffectedServers:long, TotalIssues:long)\r\n[\r\n  \"No SQL BPA data collected in this lab\", \"Information\", 0, 0\r\n]",
+        "query": "let WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 5m, WindowSpan <= 2d, 30m, WindowSpan <= 8d, 1h, WindowSpan <= 16d, 2h, 6h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(round(mins / 60.0, 1), ' h ago'), strcat(round(mins / 1440.0, 1), ' d ago'))\n};\nlet Bpa = union isfuzzy=true SqlAssessment_CL, (print TimeGenerated = datetime(null), RawData = '', _ResourceId = '' | where false);\nBpa\n| where TimeGenerated between (WindowStart .. WindowEnd)\n| extend asmt = parse_csv(RawData)\n| extend AsmtId = tostring(asmt[1]), CheckId = tostring(asmt[2]), DisplayString = tostring(asmt[3]), Severity = case(asmt[8] == 30, 'High', asmt[8] == 20, 'Medium', asmt[8] == 10, 'Low', asmt[8] == 2, 'Critical', asmt[8] == 1, 'Warning', 'Information'), Sev = toint(asmt[8])\n| join kind=inner (Bpa | extend asmt = parse_csv(RawData) | extend AsmtId = tostring(asmt[1]) | summarize arg_max(TimeGenerated, *) by _ResourceId | project AsmtId) on AsmtId\n| where Sev > 0\n| summarize AffectedServers = dcount(_ResourceId), TotalIssues = count() by CheckId, DisplayString, Severity, Sev\n| top 10 by AffectedServers desc\n| project Issue = DisplayString, Severity, AffectedServers, TotalIssues\n| order by AffectedServers desc",
         "size": 1,
-        "title": "Top 10 Most Common Issues",
+        "title": "Top 10 most common issues",
+        "noDataMessage": "Best practices assessment is not enabled in this lab: the SqlAssessment_CL table has no data in this workspace, so there is nothing to chart. These tiles fill in automatically when assessment data arrives.",
+        "noDataMessageStyle": 4,
+        "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [
-          "{LogAnalyticsWorkspace}"
-        ],
+        "visualization": "table",
         "gridSettings": {
           "formatters": [
             {
               "columnMatch": "Severity",
               "formatter": 18,
               "formatOptions": {
-                "thresholdsOptions": "icons",
+                "thresholdsOptions": "colors",
                 "thresholdsGrid": [
                   {
                     "operator": "==",
                     "thresholdValue": "Critical",
-                    "representation": "Sev0",
-                    "text": "Critical"
+                    "representation": "redBright",
+                    "text": "{0}{1}"
                   },
                   {
                     "operator": "==",
                     "thresholdValue": "High",
-                    "representation": "Sev1",
-                    "text": "High"
+                    "representation": "orange",
+                    "text": "{0}{1}"
                   },
                   {
                     "operator": "==",
                     "thresholdValue": "Medium",
-                    "representation": "Sev2",
-                    "text": "Medium"
+                    "representation": "yellow",
+                    "text": "{0}{1}"
                   },
                   {
                     "operator": "==",
                     "thresholdValue": "Low",
-                    "representation": "Sev3",
-                    "text": "Low"
-                  },
-                  {
-                    "operator": "Default",
-                    "representation": "info"
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      },
-      "customWidth": "50",
-      "name": "Top Issues Table",
-      "conditionalVisibility": {
-        "parameterName": "LogAnalyticsWorkspace",
-        "comparison": "isNotEqualTo"
-      }
-    },
-    {
-      "type": 1,
-      "content": {
-        "json": "---\r\n## License Optimization - Edition Analysis\r\n\r\n### What You're Looking At\r\n\r\nThis analysis breaks down your SQL Server estate by license edition, helping identify optimization opportunities:\r\n\r\n1. **Edition Distribution** - Count of instances by Enterprise, Standard, Express, and Developer editions\r\n2. **Version Distribution** - SQL Server versions in use (2012, 2014, 2016, 2017, 2019, 2022)\r\n3. **License Type Analysis** - Mix of PAYG (pay-as-you-go), Paid (perpetual licenses), and LicenseOnly (Azure Hybrid Benefit)\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nSQL Server licensing represents one of your largest software investments:\r\n\r\n- **Enterprise Edition**: $14,000 per core (requires minimum 4 cores) = **$56,000 base cost per server**\r\n- **Standard Edition**: $3,700 per core (minimum 4 cores) = **$14,800 base cost per server**  \r\n- **Annual Software Assurance**: 25% of license cost = **$14,000/year per Enterprise server**, **$3,700/year per Standard server**\r\n\r\n### Cost Optimization Opportunities\r\n\r\n**Edition Downgrade Analysis**:\r\n- Servers using <20% of Enterprise features can downgrade to Standard: **$41,200 savings per server**\r\n- Express/Developer editions in production should be licensed: avoiding compliance fines of **$100K-$500K**\r\n\r\n**Azure Hybrid Benefit**:\r\n- Leverage existing licenses in Azure for free (PAYG → LicenseOnly): **40-55% Azure cost reduction**\r\n- Example: 10 Enterprise servers moved to Azure SQL MI = **$840,000 annual savings**\r\n\r\n**Version Consolidation**:\r\n- Standardizing on SQL 2019/2022 reduces support overhead by **30-40%** (fewer security patches, testing cycles)\r\n- Newer versions include performance improvements reducing hardware needs by **15-25%**\r\n\r\n### Action Plan\r\n\r\n- 📊 **License Audit**: Review Enterprise Edition instances - validate they actually need Enterprise features (Always On, Compression, Partitioning)\r\n- 💰 **Quick Win**: Enable Azure Hybrid Benefit on Azure-based SQL instances (immediate 40% cost reduction)\r\n- 📈 **Migration Planning**: Prioritize SQL 2012/2014 upgrades - extended support costs **$600-$1000 per core per year**\r\n- 🔍 **Feature Usage Analysis**: Deploy scripts to audit actual feature usage - most organizations over-license by 30-50%"
-      },
-      "name": "License Optimization Narrative"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend edition = tostring(properties.edition)\r\n| summarize InstanceCount = count() by edition\r\n| order by InstanceCount desc",
-        "size": 1,
-        "title": "SQL Server Edition Distribution",
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "{Subscription}"
-        ],
-        "visualization": "piechart"
-      },
-      "customWidth": "33",
-      "name": "Edition Distribution"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend version = tostring(properties.version)\r\n| extend versionMajor = case(\r\n    version startswith '10.', 'SQL 2008/R2',\r\n    version startswith '11.', 'SQL 2012',\r\n    version startswith '12.', 'SQL 2014',\r\n    version startswith '13.', 'SQL 2016',\r\n    version startswith '14.', 'SQL 2017',\r\n    version startswith '15.', 'SQL 2019',\r\n    version startswith '16.', 'SQL 2022',\r\n    version has '2022', 'SQL 2022',\r\n    version has '2019', 'SQL 2019',\r\n    version has '2017', 'SQL 2017',\r\n    version has '2016', 'SQL 2016',\r\n    version has '2014', 'SQL 2014',\r\n    version has '2012', 'SQL 2012',\r\n    version has '2008', 'SQL 2008/R2',\r\n    'Unknown'\r\n)\r\n| summarize InstanceCount = count() by versionMajor\r\n| order by versionMajor asc",
-        "size": 1,
-        "title": "SQL Server Version Distribution",
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "{Subscription}"
-        ],
-        "visualization": "barchart"
-      },
-      "customWidth": "33",
-      "name": "Version Distribution"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend licenseType = tostring(properties.licenseType)\r\n| extend licenseDisplay = case(\r\n    licenseType =~ 'PAYG', 'Pay-As-You-Go',\r\n    licenseType =~ 'Paid', 'Perpetual License',\r\n    licenseType =~ 'LicenseOnly', 'Azure Hybrid Benefit',\r\n    licenseType =~ 'Free', 'Free (Developer/Express)',\r\n    'Unknown'\r\n)\r\n| summarize InstanceCount = count() by licenseDisplay\r\n| order by InstanceCount desc",
-        "size": 1,
-        "title": "License Type Distribution",
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "{Subscription}"
-        ],
-        "visualization": "piechart"
-      },
-      "customWidth": "33",
-      "name": "License Type Distribution"
-    },
-    {
-      "type": 1,
-      "content": {
-        "json": "---\r\n## Security & Compliance\r\n\r\n### What You're Looking At\r\n\r\nCritical security metrics for your SQL Server estate:\r\n\r\n1. **Azure Defender Status** - Count of instances with/without Azure Defender for SQL enabled\r\n2. **Unsupported Versions** - SQL Server versions past end-of-life (no security patches)\r\n3. **Security Issue Breakdown** - High-priority security findings from Best Practice Assessments\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nSQL Server security directly impacts:\r\n\r\n- **Breach Prevention**: 83% of data breaches involve databases - average breach cost is **$4.35 million**\r\n- **Regulatory Compliance**: GDPR, HIPAA, PCI-DSS all require up-to-date security patches - fines range from **$50,000 to $1.5M per violation**\r\n- **Insurance Coverage**: Cyber insurance increasingly requires proof of active vulnerability management - premiums increase **25-40% for unsupported software**\r\n- **Audit Failures**: SOC 2, ISO 27001 audits will fail if running unsupported SQL versions or lacking security monitoring\r\n\r\n### Financial Impact Examples\r\n\r\n**Azure Defender Investment**:\r\n- Cost: **$15 per server per month** = $180/year\r\n- Value: Detects threats worth **$4.35M average breach cost**\r\n- ROI: **24,000:1 return** on security investment\r\n\r\n**Unsupported Version Risks**:\r\n- Extended Support: **$600-$1,000 per core per year** (often more expensive than upgrading)\r\n- Zero-Day Exploits: Unsupported versions have no patches - recent SQL vulnerabilities exploited within **48 hours of disclosure**\r\n- Compliance Fines: **$50K-$1.5M per violation** for running unpatched systems with regulated data\r\n\r\n### Action Plan\r\n\r\n- 🚨 **Immediate**: Enable Azure Defender on all production SQL instances (takes <5 minutes per server)\r\n- 🔒 **This Quarter**: Upgrade or retire all SQL 2012 and earlier versions (end-of-life = no security patches)\r\n- 🛡️ **This Month**: Review and remediate all High/Critical security findings from BPA\r\n- 📋 **Ongoing**: Establish monthly security review cadence with CISO office"
-      },
-      "name": "Security Compliance Narrative"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend defenderStatus = tostring(properties.azureDefenderStatus)\r\n| extend status = case(\r\n    defenderStatus =~ 'Protected', 'Protected',\r\n    'Not Protected'\r\n)\r\n| summarize InstanceCount = count() by status",
-        "size": 1,
-        "title": "Azure Defender for SQL Status",
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "{Subscription}"
-        ],
-        "visualization": "piechart",
-        "chartSettings": {
-          "seriesLabelSettings": [
-            {
-              "seriesName": "Protected",
-              "color": "green"
-            },
-            {
-              "seriesName": "Not Protected",
-              "color": "redBright"
-            }
-          ]
-        }
-      },
-      "customWidth": "50",
-      "name": "Azure Defender Status"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend version = tostring(properties.version)\r\n| extend supportStatus = case(\r\n    version startswith '10.' or version startswith '11.' or version startswith '12.', 'Unsupported',\r\n    version startswith '13.', 'Mainstream Support Ended',\r\n    'Supported'\r\n)\r\n| summarize InstanceCount = count() by supportStatus",
-        "size": 1,
-        "title": "SQL Server Support Status",
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "{Subscription}"
-        ],
-        "visualization": "piechart",
-        "chartSettings": {
-          "seriesLabelSettings": [
-            {
-              "seriesName": "Supported",
-              "color": "green"
-            },
-            {
-              "seriesName": "Mainstream Support Ended",
-              "color": "yellow"
-            },
-            {
-              "seriesName": "Unsupported",
-              "color": "redBright"
-            }
-          ]
-        }
-      },
-      "customWidth": "50",
-      "name": "Support Status"
-    },
-    {
-      "type": 1,
-      "content": {
-        "json": "---\r\n## SQL Server Instance Details\r\n\r\n### What You're Looking At\r\n\r\nDetailed inventory of all SQL Server instances in your environment:\r\n\r\n- **Server Name**: Host machine name\r\n- **Instance Name**: SQL Server instance identifier\r\n- **Edition**: License edition (Enterprise, Standard, etc.)\r\n- **Version**: SQL Server version number\r\n- **License Type**: How the instance is licensed (PAYG, Perpetual, Azure Hybrid Benefit)\r\n- **Azure Defender**: Security protection status\r\n- **vCores**: Number of virtual cores allocated\r\n\r\n### Why This Matters for Data Leaders\r\n\r\nThis inventory serves as your:\r\n\r\n- **License Asset Register**: Required for SAM (Software Asset Management) audits\r\n- **Cost Allocation Tool**: Track license costs by department/application\r\n- **Risk Register**: Quickly identify unsupported or unprotected instances\r\n- **Migration Planning**: Prioritize upgrade/migration candidates\r\n\r\n### Action Plan\r\n\r\n- 📋 Export this data monthly for finance and compliance records\r\n- 🏷️ Ensure all instances are tagged with cost center, application owner, and business criticality\r\n- 🔍 Sort by Edition/Version to identify optimization opportunities\r\n- 💰 Calculate total license costs: (Enterprise count × $56K) + (Standard count × $14.8K)"
-      },
-      "name": "Instance Details Narrative"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\r\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\r\n| extend \r\n    serverName = tostring(split(properties.containerResourceId, '/')[8]),\r\n    instanceName = name,\r\n    edition = tostring(properties.edition),\r\n    version = tostring(properties.version),\r\n    licenseType = tostring(properties.licenseType),\r\n    defenderStatus = tostring(properties.azureDefenderStatus),\r\n    vcores = tostring(properties.vCore),\r\n    resourceGroup,\r\n    subscriptionId\r\n| extend versionDisplay = case(\r\n        version startswith '10.', strcat('SQL 2008/R2 (', version, ')'),\r\n        version startswith '11.', strcat('SQL 2012 (', version, ')'),\r\n        version startswith '12.', strcat('SQL 2014 (', version, ')'),\r\n        version startswith '13.', strcat('SQL 2016 (', version, ')'),\r\n        version startswith '14.', strcat('SQL 2017 (', version, ')'),\r\n        version startswith '15.', strcat('SQL 2019 (', version, ')'),\r\n        version startswith '16.', strcat('SQL 2022 (', version, ')'),\r\n        version\r\n    )\r\n| project \r\n    ServerName = serverName,\r\n    InstanceName = instanceName,\r\n    Edition = edition,\r\n    Version = versionDisplay,\r\n    LicenseType = licenseType,\r\n    AzureDefender = defenderStatus,\r\n    vCores = vcores,\r\n    ResourceGroup = resourceGroup,\r\n    Subscription = subscriptionId\r\n| order by ServerName asc, InstanceName asc",
-        "size": 0,
-        "title": "SQL Server Instance Inventory",
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "{Subscription}"
-        ],
-        "gridSettings": {
-          "formatters": [
-            {
-              "columnMatch": "Edition",
-              "formatter": 18,
-              "formatOptions": {
-                "thresholdsOptions": "colors",
-                "thresholdsGrid": [
-                  {
-                    "operator": "==",
-                    "thresholdValue": "Enterprise",
-                    "representation": "orange",
-                    "text": "{0}"
-                  },
-                  {
-                    "operator": "==",
-                    "thresholdValue": "Standard",
                     "representation": "blue",
-                    "text": "{0}"
+                    "text": "{0}{1}"
                   },
                   {
                     "operator": "Default",
+                    "thresholdValue": null,
                     "representation": "gray",
-                    "text": "{0}"
+                    "text": "{0}{1}"
                   }
-                ]
-              }
-            },
-            {
-              "columnMatch": "AzureDefender",
-              "formatter": 18,
-              "formatOptions": {
-                "thresholdsOptions": "colors",
-                "thresholdsGrid": [
-                  {
-                    "operator": "==",
-                    "thresholdValue": "Protected",
-                    "representation": "green",
-                    "text": "{0}"
-                  },
-                  {
-                    "operator": "Default",
-                    "representation": "redBright",
-                    "text": "{0}"
-                  }
-                ]
+                ],
+                "customColumnWidthSetting": "12ch"
               }
             }
           ],
-          "filter": true,
-          "sortBy": [
+          "filter": false,
+          "labelSettings": [
             {
-              "itemKey": "Edition",
-              "sortOrder": 1
+              "columnId": "AffectedServers",
+              "label": "Affected servers"
+            },
+            {
+              "columnId": "TotalIssues",
+              "label": "Total issues"
             }
           ]
-        },
-        "sortBy": [
-          {
-            "itemKey": "Edition",
-            "sortOrder": 1
-          }
-        ]
+        }
       },
-      "name": "Instance Inventory Table"
+      "name": "bpa-top",
+      "customWidth": "50"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n*Adapted from the SQL Estate Dashboard by Nic Seilaz (MIT licence), [github.com/nseilaz/AzureArc_Workbooks](https://github.com/nseilaz/AzureArc_Workbooks). Reworked for the Arc demo lab: inventory and monitored workload in one view, a guarded best-practices assessment, no unsourced cost claims.*"
+      },
+      "name": "footer"
     }
   ],
-  "fallbackResourceIds": [
-    "azure monitor"
-  ],
+  "styleSettings": {
+    "fontFamily": "Segoe UI",
+    "fontSize": 14
+  },
   "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
 }
