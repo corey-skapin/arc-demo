@@ -23,7 +23,7 @@
 ## Target and consent
 
 - Require explicit runtime `-SubscriptionId` and `-TenantId`; verify that exact context without silently switching CLI defaults.
-- Keep the same confirmed prefix/skin/fleet; store targets, credentials, hashes, manifests and dated evidence privately outside git.
+- Keep the same confirmed prefix/skin/fleet; store targets, credentials, hashes, manifests and dated evidence privately outside git. The one tracked exception is `config/demo-media.json`: public Microsoft installer URLs, sizes, SHA-256 pins and licence URLs, with no secret or target data. A pin mismatch stops staging; confirm the new file and update the manifest rather than bypassing it, and keep the operator's terms-acceptance record private (`.local/media-acceptance.json`).
 - Preview with normal lifecycle `-WhatIf`; never treat preview or read-only inspection as permission to mutate.
 - Obtain explicit approval for activation, hibernation, removal, faults/reset, assessments, alert tests/emails, repair, credential, role or pricing changes.
 - Keep the lab running unless parking/removal is requested; never exercise a live lifecycle incidentally during testing.

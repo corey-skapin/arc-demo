@@ -684,6 +684,124 @@ function Assert-DemoOsDiskStorageAccountType {
     }
 }
 
+function Get-DemoGuestTarget {
+    <#
+    .SYNOPSIS
+        Resolves one retained Windows VM from the exact demo inventory for a guest-side
+        operation. The configured nested SQL parent may be a separately created VM;
+        every other target must be a fleet member.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$NamePrefix,
+        [Parameter(Mandatory)][AllowNull()][System.Collections.IDictionary]$Skin,
+        [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$')][string]$MachineName
+    )
+    $nested = Get-DemoNestedSqlGuestConfig -Skin $Skin
+    $inventory = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nested) { $nested.ParentVmName } else { '' }) `
+        -KeepParkedVmNames @(Get-DemoSkinValue $Skin 'operations.keepParkedVmNames' @())
+    Assert-DemoSkinInventory $Skin $inventory
+    $targets = @($inventory.Machines | Where-Object Name -eq $MachineName)
+    $isParent = $nested -and $MachineName -eq $nested.ParentVmName
+    if ($targets.Count -ne 1 -or ($targets[0].Native -and -not $isParent) -or $targets[0].OsType -ne 'Windows' -or
+        -not $targets[0].Actual -or $targets[0].Actual.storageProfile.osDisk.osType -ne 'Windows') {
+        throw "Guest target $MachineName must be one retained Windows VM from the demo inventory (a fleet member or the configured nested SQL parent); no native/unknown VM or OS guess."
+    }
+    [pscustomobject]@{ Inventory = $inventory; Target = $targets[0]; NestedSqlGuest = $nested }
+}
+
+function Get-DemoMediaManifest {
+    <#
+    .SYNOPSIS
+        Loads and validates config\demo-media.json: public Microsoft installer media pinned
+        by size and SHA-256. Nothing in it is secret; acceptance is recorded privately.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$Path = '',
+        [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    )
+    $manifestPath = if ([string]::IsNullOrWhiteSpace($Path)) { Join-Path $RepoRoot 'config\demo-media.json' }
+        elseif ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $RepoRoot $Path }
+    if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Media manifest not found: $manifestPath" }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -AsHashtable -Depth 10
+    if ($manifest -isnot [System.Collections.IDictionary] -or $manifest.schemaVersion -ne 1 -or $manifest.media -isnot [System.Collections.IDictionary]) {
+        throw "Invalid media manifest '$manifestPath': expected schemaVersion 1 and a media object."
+    }
+    foreach ($id in $manifest.media.Keys) {
+        $item = $manifest.media[$id]
+        $problem = if ($id -cnotmatch '^[a-z0-9][a-z0-9-]{1,50}$') { 'id must be lowercase letters, digits and hyphens' }
+            elseif ($item -isnot [System.Collections.IDictionary]) { 'entry must be an object' }
+            elseif ([string]$item.fileName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,100}\.iso$') { 'fileName must be a plain .iso name' }
+            elseif ([string]$item.url -cnotmatch '^https://(download|go)\.microsoft\.com/') { 'url must be a download.microsoft.com or go.microsoft.com address' }
+            elseif (($item.bytes -isnot [int] -and $item.bytes -isnot [long]) -or $item.bytes -le 0) { 'bytes must be a positive integer' }
+            elseif ([string]$item.sha256 -cnotmatch '^[A-Fa-f0-9]{64}$') { 'sha256 must be 64 hex characters' }
+            elseif ([string]$item.licenseUrl -cnotmatch '^https://') { 'licenseUrl must be an https address' }
+            elseif ([string]$item.acceptanceSwitch -cnotin @('AcceptWindowsEvaluationTerms', 'AcceptSqlDeveloperTerms')) { 'acceptanceSwitch must be AcceptWindowsEvaluationTerms or AcceptSqlDeveloperTerms' }
+        if ($problem) { throw "Media manifest entry '$id' is invalid: $problem." }
+        [pscustomobject]@{
+            Id = [string]$id; DisplayName = [string]$item.displayName; FileName = [string]$item.fileName; Url = [string]$item.url
+            Bytes = [int64]$item.bytes; Sha256 = ([string]$item.sha256).ToUpperInvariant(); LicenseUrl = [string]$item.licenseUrl
+            Scope = [string]$item.scope; AcceptanceSwitch = [string]$item.acceptanceSwitch
+        }
+    }
+}
+
+function Invoke-DemoGuestAction {
+    <#
+    .SYNOPSIS
+        Runs one action of a repo guest script (scripts\guest\*.ps1, Windows PowerShell 5.1 as SYSTEM)
+        through classic Run Command and returns its single ARC_GUEST_RESULT= JSON object.
+        Unlike Invoke-DemoGuestCommand the result is returned, and the payload is a repo file
+        that can be unit-tested offline. Settings travel as base64 JSON, never on a command line.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Machine,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][ValidatePattern('^[A-Za-z]+$')][string]$Action,
+        [hashtable]$Settings = @{},
+        [ValidateRange(60, 7200)][int]$TimeoutSeconds = 900
+    )
+    if ($Machine.OsType -ne 'Windows') { throw "Guest actions need a Windows machine, not $($Machine.Name)." }
+    $source = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $ScriptPath).ProviderPath)
+    $encodedSource = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($source))
+    $encodedSettings = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($Settings | ConvertTo-Json -Depth 8 -Compress)))
+    $wrapper = @'
+$ErrorActionPreference = 'Stop'
+$file = Join-Path $env:TEMP ('arc-demo-guest-' + [guid]::NewGuid().ToString() + '.ps1')
+try {
+    [IO.File]::WriteAllText($file, [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__SOURCE__')), [Text.UTF8Encoding]::new($false))
+    & $file -Action '__ACTION__' -SettingsBase64 '__SETTINGS__'
+} catch {
+    $message = $_.Exception.Message
+    'ARC_GUEST_ERROR=' + (@{ message = $message.Substring(0, [Math]::Min(400, $message.Length)) } | ConvertTo-Json -Compress)
+} finally {
+    if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
+}
+'@
+    $wrapper = $wrapper.Replace('__SOURCE__', $encodedSource).Replace('__ACTION__', $Action).Replace('__SETTINGS__', $encodedSettings)
+    $path = [System.IO.Path]::GetTempFileName()
+    try {
+        [System.IO.File]::WriteAllText($path, $wrapper, [System.Text.UTF8Encoding]::new($false))
+        $job = Start-DemoAzJob -Arguments @('vm', 'run-command', 'invoke', '--ids', $Machine.Id,
+            '--command-id', 'RunPowerShellScript', '--scripts', "@$path", '-o', 'json', '--only-show-errors')
+        $raw = Receive-DemoJobs -Jobs @($job) -TimeoutSeconds $TimeoutSeconds -PassThru | ConvertFrom-Json
+    } finally { [System.IO.File]::Delete($path) }
+    $entries = @($raw.value | Where-Object { $_ })
+    $stdout = @($entries | Where-Object { $_.code -match '^ComponentStatus/StdOut/succeeded$|^ProvisioningState/succeeded$' } | ForEach-Object { $_.message }) -join "`n"
+    $errorLines = @($stdout -split '\r?\n' | Where-Object { $_.StartsWith('ARC_GUEST_ERROR=') })
+    if ($errorLines.Count -eq 1) {
+        throw "Guest action $Action failed on $($Machine.Name): $(($errorLines[0].Substring('ARC_GUEST_ERROR='.Length) | ConvertFrom-Json).message)"
+    }
+    $resultLines = @($stdout -split '\r?\n' | Where-Object { $_.StartsWith('ARC_GUEST_RESULT=') })
+    if (-not $entries -or @($entries | Where-Object { $_.code -match 'failed|error' -or $_.level -eq 'Error' }).Count -or
+        $stdout -notmatch '(?m)^ARC_DEMO_OK\r?$' -or $resultLines.Count -ne 1) {
+        throw "Guest action $Action returned no verified result on $($Machine.Name); inspect the VM and its Run Command state before retrying."
+    }
+    $resultLines[0].Substring('ARC_GUEST_RESULT='.Length) | ConvertFrom-Json
+}
+
 function Invoke-DemoGuestCommand {
     [CmdletBinding()]
     param(

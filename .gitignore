@@ -21,6 +21,7 @@ Thumbs.db
 !workbooks/**/*.json
 !.github/**/*.json
 !bicep/**/parameters*.json
+!config/demo-media.json
 
 # PowerShell test output
 TestResults.xml
