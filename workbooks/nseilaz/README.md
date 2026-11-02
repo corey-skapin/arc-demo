@@ -16,7 +16,7 @@ lookup constants and required upstream attribution are retained.
 | File | Workbook | What it shows |
 |---|---|---|
 | `Arc_Compliance_Security_Governance_example.json` | Compliance, Security & Governance | Estate inventory, NIST CSF v2 compliance, patch posture, privileged activity, TLS hardening, Defender alerts, configuration drift. Not deployed: the lab publishes the rebuilt `workbooks/arc-compliance.workbook.json`. |
-| `ArcMachineIntelligenceCenter.json` | Arc Machine Intelligence Center | 360° view of one Arc machine: live perf, security health, CVSS vulns, software history, SQL (if applicable), Arc mgmt, ops timeline. |
+| `ArcMachineIntelligenceCenter.json` | Arc Machine Intelligence Center | One Arc machine in one place: identity, CPU, memory and disk (Windows and Linux), Defender checks, software changes, SQL, extensions and policy, events and uptime. Opens on a Windows host with telemetry; machines with no Azure Monitor Agent are labelled. |
 | `Asset_Inventory_Workbook_Example.json` | Asset Inventory | Estate-wide hardware/software inventory roll-up. |
 | `GovernanceComplianceWorkbook_Experiment.json` | Governance & Compliance (experimental) | Larger compliance workbook with deeper drill-downs. |
 | `SQL_Estate_Dashboard.json` | SQL Estate Dashboard | Arc-enabled SQL inventory + Best Practice Assessment results. |
@@ -42,7 +42,7 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   `CostCentre`/`Owner`/`Environment` alone reported every machine as untagged.
 - Governance: the Governance Health Score tile projects the `Compliant` column its
   tile reads. A few titles and headings that held a replacement character (U+FFFD)
-  in Governance and Machine Intelligence Center now carry an emoji.
+  in Governance now carry an emoji.
 - Compliance, Security & Governance is no longer deployed from this folder either. It is rebuilt in
   `workbooks/arc-compliance.workbook.json` (attribution kept in its header): posture tiles for Azure Policy,
   Defender secure score, Update Manager patching and the Defender agent, a per-server scorecard, and
@@ -51,6 +51,11 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   (`patchassessmentresources`) instead of the upstream connection-state estimate and report a failed or
   never-assessed machine as such. The upstream file stays here as the snapshot, with the earlier local
   fixes that `tests/OriginalWorkbooks.Tests.ps1` still checks.
+- Machine Intelligence Center is reworked for the lab, not a snapshot: a Resource Graph-backed **Machine**
+  dropdown opens on a Windows host with the Azure Monitor Agent (machines without it, such as the
+  nested SQL guest, are listed and labelled), CPU, memory and disk read the `Perf` table for Windows
+  and Linux, tile labels are short, every empty tile says why, and its Log Analytics tiles carry no
+  workspace picker (Phase 11 pins them at publish). `tests/MachineIntelligenceWorkbook.Tests.ps1` guards it.
 - SQL Estate Dashboard: the version and licence charts understand Arc SQL text
   values such as `SQL Server 2022` and `Free`, not only numeric versions. The BPA
   tiles remain explained placeholders because this lab collects no BPA data.
@@ -65,12 +70,13 @@ validated story; see [SQL stance](../../docs/sql-arc-spike.md).
 
 ## Updating the snapshot
 
+Machine Intelligence Center and SQL Estate Dashboard are reworked in this repository rather than vendored, so they are not in the list below; refreshing them from upstream would revert the rework.
+
 To pull the latest from upstream:
 
 ```powershell
 $dest = '.\workbooks\nseilaz' # Run from the repository root.
 $files = @(
-  'ArcMachineIntelligenceCenter.json',
   'Arc_Compliance_Security_Governance_example.json',
   'Asset_Inventory_Workbook_Example.json',
   'GovernanceComplianceWorkbook_Experiment.json',
