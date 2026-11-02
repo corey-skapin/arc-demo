@@ -270,7 +270,8 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
         foreach ($formatter in $grid.gridSettings.formatters) {
             $width = $formatter.formatOptions.customColumnWidthSetting
             if (-not $width) { continue }
-            $width | Should -Match '^\d+ch$' -Because $formatter.columnMatch
+            $width | Should -Match '^(\d+ch|\d+fr)$' -Because $formatter.columnMatch
+            if ($width -match 'fr$') { continue }
             $room = [int]($width -replace 'ch$', '')
             $header = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { $formatter.columnMatch }
             ($header.Length + 6) | Should -BeLessOrEqual $room -Because "the $($formatter.columnMatch) header must not be cut"
@@ -304,6 +305,67 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
         foreach ($table in $tables) { $table.content.size | Should -Be 3 -Because "$($table.name) reserves a fixed height when it is Small or Medium" }
     }
 
+    It 'lets only equal-height charts share a row, because a row takes the height of its taller item and leaves a blank band under the other' {
+        $sharing = @($script:All | Where-Object { $_.PSObject.Properties['customWidth'] })
+        $sharing.Count | Should -BeGreaterThan 0
+        foreach ($item in $sharing) {
+            $item.type | Should -Be 3 -Because $item.name
+            $item.content.visualization | Should -BeIn @('timechart', 'barchart', 'linechart', 'areachart') -Because "$($item.name) shares a row, so it must be a chart, never a table or tiles"
+            $item.content.size | Should -Be 1 -Because "$($item.name) shares a row with a chart of the same size"
+        }
+    }
+
+    It 'gives every table column room for its header, and every timestamp a local-time format that fits' {
+        $tables = @($script:Queries | Where-Object { $_.content.visualization -eq 'table' })
+        foreach ($table in $tables) {
+            $grid = $table.content.gridSettings
+            $labels = @{}
+            foreach ($label in @($grid.labelSettings)) { if ($label) { $labels[$label.columnId] = $label.label } }
+            foreach ($formatter in @($grid.formatters)) {
+                $width = $formatter.formatOptions.customColumnWidthSetting
+                if (-not $width) { continue }
+                $width | Should -Match '^(\d+ch|\d+fr)$' -Because "$($table.name) $($formatter.columnMatch)"
+                if ($width -match 'fr$') { continue }
+                $room = [int]($width -replace 'ch$', '')
+                $header = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { $formatter.columnMatch }
+                ($header.Length + 6) | Should -BeLessOrEqual $room -Because "the $($table.name) $($formatter.columnMatch) header must not be cut"
+                if ($formatter.formatter -eq 18) {
+                    $longest = ($formatter.formatOptions.thresholdsGrid.thresholdValue | Where-Object { $_ } | Measure-Object -Property Length -Maximum).Maximum
+                    $padding = if ($formatter.formatOptions.thresholdsOptions -eq 'icons') { 4 } else { 2 }
+                    ($longest + $padding) | Should -BeLessOrEqual $room -Because "the longest $($table.name) $($formatter.columnMatch) value must not be cut"
+                }
+            }
+        }
+        $timestamps = @{
+            'post-updates' = 'LastAssessed'; 'post-alerts' = 'Fired'; 'chg-hosts' = 'LastChange'; 'ev-grid' = 'LastSeen'
+            'sys-grid' = 'LastSeen'; 'detail-events' = 'TimeGenerated'; 'detail-changes' = 'TimeGenerated'
+        }
+        foreach ($name in $timestamps.Keys) {
+            $formatter = @((Get-Item $name).gridSettings.formatters | Where-Object columnMatch -eq $timestamps[$name])
+            $formatter.Count | Should -Be 1 -Because "$name needs one formatter for its $($timestamps[$name]) column"
+            $formatter[0].formatter | Should -Be 6 -Because "$name $($timestamps[$name]) is a date and time"
+            $formatter[0].dateFormat.showUtcTime | Should -BeNullOrEmpty -Because "$name shows local time"
+            [int]($formatter[0].formatOptions.customColumnWidthSetting -replace 'ch$', '') | Should -BeGreaterOrEqual 28 -Because "$name $($timestamps[$name]) is a 21-character timestamp"
+        }
+    }
+
+    It 'gives the long text columns the remaining width instead of a fixed width that cuts them' {
+        $longText = @{ 'grid' = 'Note'; 'post-alerts' = 'Rule'; 'ev-grid' = 'Source'; 'chg-apps' = 'Software'; 'detail-events' = 'Detail'; 'detail-changes' = 'Item' }
+        foreach ($name in $longText.Keys) {
+            $formatter = @((Get-Item $name).gridSettings.formatters | Where-Object columnMatch -eq $longText[$name])
+            $formatter.Count | Should -Be 1 -Because "$name needs one formatter for its $($longText[$name]) column"
+            $formatter[0].formatOptions.customColumnWidthSetting | Should -Match '^\d+fr$' -Because "$name $($longText[$name]) must take the remaining width"
+        }
+    }
+
+    It 'keeps the machine-grid notes short enough to read on one line' {
+        $block = [regex]::Match((Get-Query 'grid'), '(?s)\| extend Note = case\((.*?)\)\r?\n\| order by').Groups[1].Value
+        $block | Should -Not -BeNullOrEmpty
+        $lengths = @([regex]::Matches($block, "'([^']*)'") | ForEach-Object { $_.Groups[1].Value.Length })
+        $lengths.Count | Should -BeGreaterThan 3
+        ($lengths | Measure-Object -Maximum).Maximum | Should -BeLessOrEqual 48
+    }
+
     It 'keeps tile labels short and the subtitles bounded' {
         $labels = [regex]::Matches((Get-Query 'kpi'), "'l', '([^']+)'") | ForEach-Object { $_.Groups[1].Value }
         $labels.Count | Should -Be 8
@@ -312,8 +374,8 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
 
     It 'reports parked and silent states in words instead of looking broken' {
         (Get-Query 'kpi') | Should -Match 'none in 15 min: parked or silent'
-        (Get-Query 'grid') | Should -Match 'No heartbeat in 15 minutes: parked, or the agent is stopped'
-        (Get-Query 'grid') | Should -Match 'No Azure Monitor Agent: listed from Arc inventory only'
+        (Get-Query 'grid') | Should -Match 'Parked or agent stopped: last known values'
+        (Get-Query 'grid') | Should -Match 'No Azure Monitor Agent: Arc inventory only'
     }
 }
 
@@ -413,13 +475,24 @@ Describe 'Estate Overview queries executed read-only against the live workspace'
             foreach ($item in $items) { [pscustomobject]@{ Key = "$case/$($item.name)"; Body = (@{ query = (Expand $item.content.query $expansions[$case]) } | ConvertTo-Json -Depth 5) } }
         }
         $responses = @($requests | ForEach-Object -ThrottleLimit 4 -Parallel {
+            $request = $_
             try {
                 $reply = Invoke-RestMethod -Method POST -Uri $using:uri -Headers @{ Authorization = "******" } -ContentType 'application/json' -Body $_.Body -TimeoutSec 180
                 [pscustomobject]@{ Key = $_.Key; Reply = $reply; Error = '' }
             } catch {
-                [pscustomobject]@{ Key = $_.Key; Reply = $null; Error = [string]$_.ErrorDetails.Message }
+                [pscustomobject]@{ Key = $request.Key; Reply = $null; Error = [string]$_.ErrorDetails.Message }
             }
         })
+        # The Log Analytics gateway occasionally rejects a valid token under parallel load: retry those items once, one at a time.
+        foreach ($failed in @($responses | Where-Object { $_.Error -match 'AuthorizationRequiredError|TooManyRequests|ServiceUnavailable|GatewayTimeout' })) {
+            $body = ($requests | Where-Object Key -eq $failed.Key).Body
+            try {
+                $failed.Reply = Invoke-RestMethod -Method POST -Uri $uri -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body $body -TimeoutSec 180
+                $failed.Error = ''
+            } catch {
+                $failed.Error = [string]$_.ErrorDetails.Message
+            }
+        }
         $live = @{}
         foreach ($response in $responses) {
             $table = if ($response.Reply -and @($response.Reply.tables).Count) { $response.Reply.tables[0] } else { $null }
