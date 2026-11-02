@@ -6,6 +6,7 @@
 - Start humans at [docs/README.md](docs/README.md); present the generated `.local/presenter-runsheet.md` from the single [runsheet template](docs/runsheet.md).
 - Read [runbook](docs/runbook.md) and [lifecycle](docs/lifecycle.md) before operating an existing lab.
 - Use [troubleshooting](docs/troubleshooting.md) for symptoms and [module map](docs/module-map.md) for engineering evidence; do not treat old runs as current health.
+- To build the whole estate from zero use the [ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper): plan only by default, it calls the maintained scripts and keeps its config, state and evidence in the [private build folder](docs/private-config.md). It adds no second manifest or workflow.
 
 ## Keep the demo scope
 
@@ -26,6 +27,7 @@
 - Keep the same confirmed prefix/skin/fleet; store targets, credentials, hashes, manifests and dated evidence privately outside git. The one tracked exception is `config/demo-media.json`: public Microsoft installer URLs, sizes, SHA-256 pins and licence URLs, with no secret or target data. A pin mismatch stops staging; confirm the new file and update the manifest rather than bypassing it, and keep the operator's terms-acceptance record private (`.local/media-acceptance.json`).
 - Preview with normal lifecycle `-WhatIf`; never treat preview or read-only inspection as permission to mutate.
 - Obtain explicit approval for activation, hibernation, removal, faults/reset, assessments, alert tests/emails, repair, credential, role or pricing changes.
+- Run the build wrapper with `-Execute` only with the switches the user approved for first spend, licence acceptance, SRE parent creation and the subscription-scope alert-access grant; never supply an unapproved switch or work around a blocked step, missing script or stale state file.
 - Keep the lab running unless parking/removal is requested; never exercise a live lifecycle incidentally during testing.
 - Surface denied/malformed/unknown reads and actual CLI/job failures; never substitute absence or bypass a denial with another tool.
 - Preserve credentials, workload fault flags, disks/data, identities, RBAC, logs and private vault access on routine lifecycle/reconcile.
@@ -106,5 +108,6 @@
 - Propose disposable live smoke scope/cost separately and obtain approval before execution; distinguish mocks, prior operational evidence and new live proof.
 - Scan changed tracked content for secrets/private identifiers before every push; keep real GUIDs, emails, customer names and machine-local paths out of source.
 - Update the canonical docs with behavior, index changes in docs/README.md and keep the module map current; add no competing runsheet or tracking diary.
+- Keep the inventory snapshot and parity scripts read-only, and update `config/expected-inventory.json` in the same change that adds or removes a named object a build creates.
 - Ground portal steps in current Microsoft Learn and distinguish documented navigation from observed UI; default beginner rehearsals to read-only evidence.
 - Add newly reported symptoms to troubleshooting with established causes/limits, not invented diagnoses or implicit repair permission.

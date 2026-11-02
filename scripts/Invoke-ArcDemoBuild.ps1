@@ -1,0 +1,126 @@
+#Requires -Version 7.4
+<#
+.SYNOPSIS
+    Builds the whole demo estate from main in one ordered path: plan only unless -Execute.
+.DESCRIPTION
+    A thin wrapper that calls the maintained scripts in order (P0-P11): preflight, base
+    estate, Hyper-V parent, nested guest, real SQL, Monitor add-ons, readiness, SRE layer
+    in the companion repo, presenter guide, inventory snapshot and parity check.
+
+    The default is a read-only plan. -Execute runs the steps that are not already recorded
+    as done in the private state file, so a failed or interrupted run resumes where it
+    stopped. Billing, licence and IAM decisions are explicit switches, never implied:
+    -ApproveCostStart (P2), -AcceptWindowsEvaluationTerms and -AcceptSqlDeveloperTerms
+    (P3, P5), -ApproveSreCreation (P9) and -ApproveSubscriptionGrant (the opt-in
+    subscription-scope Azure Monitor alert-access grant for the SRE identity).
+
+    When the nested guest (P4) will run, the Administrator credential is requested at
+    the start, not about an hour in; pass -GuestCredential for an unattended run. It is
+    never stored. The SRE preview and create steps (P9.1, P9.2) are skipped, not failed,
+    when the SRE parent already exists, because Deploy-SreAgent.ps1 refuses an existing
+    parent even with -WhatIf.
+
+    The build config, state and evidence live in one private folder outside the git
+    worktree. See docs/private-config.md. -WhatIf is the same as the default plan.
+.EXAMPLE
+    .\Invoke-ArcDemoBuild.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -BuildConfigPath <PRIVATE>\build.json
+.EXAMPLE
+    .\Invoke-ArcDemoBuild.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -BuildConfigPath <PRIVATE>\build.json `
+        -Execute -From P2 -To P4 -ApproveCostStart -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms -Confirm:$false
+#>
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+param(
+    [Parameter(Mandatory)][guid]$SubscriptionId,
+    [Parameter(Mandatory)][guid]$TenantId,
+    [Parameter(Mandatory)][string]$BuildConfigPath,
+    [ValidateSet('P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11')][string]$From,
+    [ValidateSet('P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11')][string]$To,
+    [ValidateSet('P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11')][string[]]$Only,
+    [switch]$Execute,
+    [switch]$Force,
+    [switch]$Offline,
+    [switch]$ApproveCostStart,
+    [switch]$AcceptWindowsEvaluationTerms,
+    [switch]$AcceptSqlDeveloperTerms,
+    [switch]$ApproveSreCreation,
+    [switch]$ApproveSubscriptionGrant,
+    [pscredential]$GuestCredential,
+    [switch]$PassThru
+)
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib/BuildPlan.psm1') -Force
+
+$run = $Execute -and -not $WhatIfPreference
+if ($Execute -and $Offline) { throw '-Offline only applies to the plan; execution needs Azure.' }
+$approved = @{
+    CostStart = [bool]$ApproveCostStart
+    WindowsEvaluationTerms = [bool]$AcceptWindowsEvaluationTerms
+    SqlDeveloperTerms = [bool]$AcceptSqlDeveloperTerms
+    SreCreation = [bool]$ApproveSreCreation
+}
+$config = Read-ArcDemoBuildConfig -Path $BuildConfigPath -RepoRoot $repoRoot
+$context = New-ArcDemoBuildContext -Config $config -SubscriptionId $SubscriptionId -TenantId $TenantId -RepoRoot $repoRoot `
+    -GuestCredential $GuestCredential -Approved $approved -ApproveSubscriptionGrant:$ApproveSubscriptionGrant
+$state = Read-ArcDemoBuildState -Path $config.StatePath -SubscriptionId $SubscriptionId -TenantId $TenantId -Prefix $context.Prefix
+$steps = @(Select-ArcDemoBuildStep -Steps (Get-ArcDemoBuildSteps -Context $context) -From $From -To $To -Only $Only)
+$plan = @(Get-ArcDemoBuildPlan -Context $context -Steps $steps -State $state -Force:$Force)
+$context.RemainingMinutes = [int](($plan | Where-Object { $_.Status -in @('ready', 'blocked') -and $_.Phase -in @('P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9') } |
+    Measure-Object -Property Minutes -Sum).Sum)
+
+if (-not $run) {
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    if ($WhatIfPreference -and $Execute) { $warnings.Add('-WhatIf: showing the plan only; nothing was run.') }
+    if (-not $Offline) {
+        try {
+            Initialize-DemoContext -SubscriptionId $SubscriptionId -TenantId $TenantId
+            $stale = Test-ArcDemoBuildStateFresh -Context $context -State $state
+            if ($stale) { $warnings.Add($stale) }
+            foreach ($row in $plan | Where-Object { $_.Step -in @('P0', 'P1') -and $_.Status -ne 'skipped' }) {
+                Invoke-ArcDemoBuildStep -Step $row.Definition -Context $context -State $state -NoState
+            }
+            Resolve-ArcDemoPlanSkip -Plan $plan -Context $context
+        } catch { $warnings.Add("Read-only checks stopped: $($_.Exception.Message)") }
+    }
+    Write-ArcDemoBuildPlan -Plan $plan -Warnings $warnings
+    $needed = @($plan | Where-Object { $_.Status -in @('ready', 'blocked') } | ForEach-Object Needs)
+    $switches = @((Get-ArcDemoApprovalSwitch).GetEnumerator() | Where-Object { $_.Key -in $needed } | ForEach-Object { "-$($_.Value)" })
+    Write-Step ("To run it: .\scripts\Invoke-ArcDemoBuild.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -BuildConfigPath <CONFIG> -Execute " + ($switches -join ' ')).TrimEnd()
+    if ($PassThru) { $plan | Select-Object -ExcludeProperty Definition -Property * }
+    return
+}
+
+function Assert-PlanRunnable {
+    param([object[]]$Rows)
+    $blocked = @($Rows | Where-Object Status -eq 'blocked')
+    if ($blocked) {
+        Write-ArcDemoBuildPlan -Plan $plan
+        throw "Blocked step(s): $($blocked.Step -join ', '). Nothing was started. Fix the blockers above, or select other phases with -From/-To/-Only."
+    }
+    $missing = @($Rows | Where-Object { $_.Needs.Count } | ForEach-Object { foreach ($need in $_.Needs) { "-$((Get-ArcDemoApprovalSwitch)[$need]) ($($_.Step))" } })
+    if ($missing) { throw "Approval switch(es) missing: $($missing -join ', '). Nothing was started." }
+}
+# Steps that can never be skipped fail fast, before any Azure read; the others (the SRE parent steps) are
+# checked after the read-only resolution, so a skipped step neither blocks nor needs an approval.
+Assert-PlanRunnable @($plan | Where-Object { -not $_.Definition.SkipWhen })
+Initialize-DemoContext -SubscriptionId $SubscriptionId -TenantId $TenantId
+$stale = Test-ArcDemoBuildStateFresh -Context $context -State $state
+if ($stale) { throw $stale }
+Resolve-ArcDemoPlanSkip -Plan $plan -Context $context
+Assert-PlanRunnable $plan
+$todo = @($plan | Where-Object { $_.Status -eq 'ready' })
+Write-ArcDemoBuildPlan -Plan $plan
+if (-not $todo) { Write-Ok 'Nothing to do: every selected step is already recorded as done or skipped.'; return }
+if (-not $PSCmdlet.ShouldProcess("$($context.Prefix): $($todo.Step -join ', ')", 'Run the ordered build (billable resources, credentials and IAM per the approved switches)')) { return }
+if ('P4' -in $todo.Step -and -not $context.GuestCredential) {
+    # Ask now rather than about an hour in, so the long build can run unattended. It is never stored.
+    $context.GuestCredential = Get-Credential -UserName Administrator -Message 'Approved Administrator credential for the nested guest (asked now so the build can run unattended; never stored)'
+    if (-not $context.GuestCredential) { throw 'The nested guest (P4) needs an approved Administrator credential. Nothing was started.' }
+}
+foreach ($row in $todo) {
+    Invoke-ArcDemoBuildStep -Step $row.Definition -Context $context -State $state
+}
+Write-Header 'Build steps finished'
+Write-Ok "Steps run: $($todo.Step -join ', '). State: $($config.StatePath)"
+if ($PassThru) { $todo | Select-Object -ExcludeProperty Definition -Property * }

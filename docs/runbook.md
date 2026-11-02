@@ -165,6 +165,83 @@ pressure, missing/invalid samples, parked gaps, short histories and separate
 parent/guest rows. Normal CI skips those Azure-dependent tests; a local mock
 pass does not imply KQL execution or a published workbook.
 
+## Build everything in order (optional wrapper)
+
+`scripts\Invoke-ArcDemoBuild.ps1` runs the maintained scripts in one fixed order
+(P0-P11) for a from-zero build of the base estate and the optional parts. It adds
+no logic of its own: every step is an existing script, so the sections below still
+describe what each step does. It is **plan only by default**. `-Execute` runs the
+steps not yet recorded as done in the private `build-state.json`, so a stopped
+build resumes where it stopped. Keep the config, state and evidence in the
+[private build folder](private-config.md).
+
+```powershell
+$build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '<PRIVATE>\build.json' }
+.\scripts\Invoke-ArcDemoBuild.ps1 @build        # plan: order, status, approvals, blockers, time
+.\scripts\Invoke-ArcDemoBuild.ps1 @build -Execute -From P2 -To P4 `
+    -ApproveCostStart -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms
+```
+
+| Step | What runs | Needs |
+| --- | --- | --- |
+| P0, P1 | Read-only preflight (tools, access, providers, repo state, soft-deleted workspace name, build window against the VM auto-shutdown) and onboarding-identity check | |
+| P2 | `Deploy-ArcDemo.ps1` with the private skin | `-ApproveCostStart` |
+| P3 | `Prepare-NestedSqlParent.ps1`: the Hyper-V parent for the nested guest. Runs after Deploy with the lab Active (it refuses a parked lab) and writes the nested build input into the private folder. A reported `status` of `pending` or `fail` is not recorded as done, and it is safe to re-run | `-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms` |
+| P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is requested at the start of `-Execute` (pass `-GuestCredential` to run unattended) and is never stored | |
+| P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status` | `-AcceptSqlDeveloperTerms` |
+| P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation) | |
+| P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes | |
+| P8 | Companion repo: LOB alert rule and LOB app | |
+| P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`; `-ApproveSubscriptionGrant` adds the opt-in alert-access grant |
+| P10 | Presenter context and guide for this repo (the SRE guide only if its context exists) | |
+| P11 | `Export-ArcDemoInventory.ps1`, then `Test-ArcDemoParity.ps1` | |
+
+- The plan shows each step as `ready`, `done`, `skipped` (with the reason) or
+  `blocked`. Blocked means the script is not in the checkout yet, it does not
+  accept an argument the wrapper passes, or an input file is missing.
+- Nothing starts if any selected step is blocked, an approval switch is missing,
+  or the state records P2 as done while the infra group no longer exists (a
+  teardown happened; delete the state file to start a new build).
+- Read-only steps (P0, P1, P5 `Status`, P7, P9 readiness, P11) run
+  again on every `-Execute`. A failed or interrupted P4 or P9 deploy is not retried
+  until you have inspected it and pass `-Force`; `-Force` also re-runs steps
+  recorded as done. A step that could not even start (for example a lookup failed
+  or the credential prompt was cancelled) is recorded as `blocked` and stays retryable.
+- `Deploy-SreAgent.ps1` refuses an existing SRE parent, even with `-WhatIf`. So a
+  read-only check of `rg-<prefix>-sre` (the agent name comes from the SRE skin)
+  runs first: when the parent exists, P9 preview and create are **skipped**, not
+  failed, and need no approval; when the check cannot be read, they are `blocked`
+  with the exact error. P9 therefore belongs after a confirmed removal; use
+  `Initialize-SreConfiguration` for configuration-only changes to a running agent.
+- `-From`, `-To` and `-Only` take phase names; `-WhatIf` is the same as the plan;
+  pass `-Confirm:$false` for unattended runs. The plan's minutes are typical
+  timings (about 3.5 hours end to end), not a promise. Billable resources start
+  at P2; reprice with [cost.md](cost.md).
+- The wrapper only builds. Teardown stays with `Hibernate-ArcDemo.ps1` and
+  `Remove-ArcDemo.ps1` (and the companion's own scripts first); the opt-in
+  `-ForceDeleteWorkspace` and `-PruneDeploymentHistory` switches for a same-prefix
+  rebuild are described with Remove below and decided at teardown time.
+
+### Snapshot and parity (read-only)
+
+```powershell
+$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVATE>\arc-skin.json' }
+.\scripts\Export-ArcDemoInventory.ps1 @target -OutputPath <PRIVATE>\evidence\inventory-before.json
+.\scripts\Test-ArcDemoParity.ps1 @target -SnapshotPath <PRIVATE>\evidence\inventory-before.json -Feature RealSql, Sre
+```
+
+The snapshot records names, types, sizes, power states, associations, alert and
+workbook definitions, policy/budget/Defender state, onboarding-credential
+metadata and the retained manifest's fleet. It never reads a secret. A denied or
+failed read is recorded verbatim in its section and the script exits 1.
+Take one before a teardown and one after a rebuild.
+
+The parity check compares a snapshot (or a fresh read) with
+[`config/expected-inventory.json`](../config/expected-inventory.json) and the
+manifest's fleet, exiting 0 only when every check passes. Run it while the estate
+is Active (parked estates have no NAT gateway). Update the expected list in the
+same change that adds or removes a named object.
+
 ## 1. Choose the target and skin
 
 Use a demo subscription where the operator has effective subscription Owner or
