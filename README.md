@@ -15,10 +15,14 @@ If that file is missing, ask the preparing assistant/operator to
 The [tracked guide](docs/runsheet.md) is its source template.
 Generation is offline; it does not activate the lab or certify current readiness.
 
-The read-only Arc path takes 25-30 minutes:
-**estate workbook -> find a server and check its data is current -> SQL under one
-view (a real workload, then the experimental nested Arc SQL guest) -> capacity and
-optimisation workbooks -> signal to alert -> operating posture**.
+The read-only Arc path is one 25-28 minute story, "the Monday-morning questions",
+told in seven chapters that follow a single SQL database:
+**what do we have (estate workbook) -> one server's evidence (Machine Intelligence
+Center) -> safe and up to date (Compliance) -> the database (SQL under one view) ->
+room for what is next (Capacity) -> where the money goes (Optimisation) -> what
+happens at 2 a.m. (the alert rules)**, then a close that maps each customer question
+to what they saw. The guide has cut lists for 20 and 15 minutes and a stage card for
+the presenter.
 The generated guide links to the optional SRE guide only when its local file
 exists; live faults and the Review approval belong to that SRE half. Leave the lab
 unchanged at the end.

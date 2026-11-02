@@ -357,17 +357,23 @@ Describe 'Estate Overview colours mean what they say' {
 }
 
 Describe 'The presenter template names only what the Estate Overview shows' {
-    It 'finds every bold name in scene 1 as a tile, item title, tab or filter in the workbook' {
-        $template = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot) 'docs/runsheet.md') -Raw
-        $scene = [regex]::Match($template, '(?s)## 1\. .*?(?=\r?\n## 2\. )').Value
-        $scene | Should -Not -BeNullOrEmpty
+    It 'finds every bold name in chapter 1 as a tile, item title, tab or filter in the workbook' {
+        $repoRoot = Split-Path $PSScriptRoot
+        $template = Get-Content -LiteralPath (Join-Path $repoRoot 'docs/runsheet.md') -Raw
+        $chapter = [regex]::Match($template, '(?s)## Chapter 1\. .*?(?=\r?\n## Chapter 2\. )').Value
+        $chapter | Should -Not -BeNullOrEmpty
+        $flat = ($chapter -replace '(?m)^\s*>\s?', '') -replace '\s+', ' '
+        # The optional Asset Inventory step and the portal Type filter are guarded in RunsheetWorkbookNames.Tests.ps1.
+        $assetInventory = (Get-Content -LiteralPath (Join-Path $repoRoot 'workbooks/arc-asset-inventory.workbook.json') -Raw) -replace '\\n', ' '
         $vocabulary = @($script:Queries | ForEach-Object { $_.content.title })
         $vocabulary += @(($script:All | Where-Object { $_.type -eq 11 }) | ForEach-Object { $_.content.links.linkLabel })
         $vocabulary += [regex]::Matches((Get-Query 'kpi'), "'l', '([^']+)'") | ForEach-Object { $_.Groups[1].Value }
-        $names = [regex]::Matches($scene, '\*\*([^*]+)\*\*') | ForEach-Object { ($_.Groups[1].Value -replace '\s+', ' ').Trim() } | Where-Object { $_ -notmatch '^Say:$' }
+        $shape = "^(The customer's question|The thread|Show, in this order|Say|Wow|Ask the room|Bridge):?$|^Watch-outs / if asked$|^\{\{[A-Za-z]+\}\}$"
+        $names = [regex]::Matches($flat, '\*\*([^*]+?)\*\*') | ForEach-Object { $_.Groups[1].Value.Trim() } |
+            Where-Object { $_ -notmatch $shape -and $_ -ne 'Type' -and -not $assetInventory.Contains($_) }
         $names.Count | Should -BeGreaterThan 8
         foreach ($name in $names) {
-            @($vocabulary | Where-Object { $_ -like "*$name*" }).Count | Should -BeGreaterThan 0 -Because "scene 1 names '$name'"
+            @($vocabulary | Where-Object { $_ -like "*$name*" }).Count | Should -BeGreaterThan 0 -Because "chapter 1 names '$name'"
         }
     }
 

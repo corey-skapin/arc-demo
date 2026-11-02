@@ -7,12 +7,14 @@ bottom. [runsheet.md](runsheet.md) is the single source template; the operator
 [generates the guide](runbook.md#prepare-the-local-presenter-guide) from saved
 local context. Generation is offline, not a current-health check.
 
-The **Capacity and headroom** and **Optimisation opportunities** workbooks are scenes 4
-and 5 of the guide when their published IDs are recorded; read the
-[workbook reference](operational-workbooks.md) first. Start with the tiles and
-the evidence column, and with stale/missing evidence while hosts are parked; gaps
-are not spare capacity or realised savings. The guide is one 25-30 minute Arc path,
-with the SQL and LOB incident evidence handed to the SRE guide.
+The guide is one story, the Monday-morning questions, in seven chapters (25-28 minutes
+for the Arc path, with 20 and 15 minute cut lists) that follows one SQL database from
+the estate list to the alert that starts the SRE half. The **Capacity and headroom**
+and **Optimisation opportunities** workbooks are chapters 5 and 6 when their published
+IDs are recorded; read the [workbook reference](operational-workbooks.md) first. Start
+with the tiles and the evidence column, and with stale/missing evidence while hosts
+are parked; gaps are not spare capacity or realised savings. The SQL and LOB incident
+evidence is handed to the SRE guide.
 
 ## Build and operate
 
