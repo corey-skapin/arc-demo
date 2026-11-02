@@ -36,7 +36,10 @@ datatable(SortKey:long)[0, 1, 2, 3, 4, 5]
         SortKey == 1, case(
             Total == 0, "no machine matches the current filters",
             Reporting == Total, "every machine sent a sample within 15 minutes of the window end",
-            Reporting == 0, "none within 15 minutes of the window end: the estate is parked or silent, so the figures below describe the last observed data",
+            Absent == Total, "no machine in scope sent any telemetry in this window: unknown, not zero",
+            Reporting == 0 and Absent == 0, "none within 15 minutes of the window end: the estate is parked or silent, so the figures below describe the last observed data",
+            Reporting == 0, strcat("none within 15 minutes of the window end. ", tostring(Silent), " silent (the figures below describe their last observed data) and ",
+                tostring(Absent), " never reported: ", NotReportingNames),
             strcat(tostring(Silent), " silent and ", tostring(Absent), " never reported: ", NotReportingNames)),
         SortKey == 2, iff(isnull(Newest), "no sample from any machine in scope in this window: unknown, not zero",
             strcat("newest sample ", format_datetime(Newest, "yyyy-MM-dd HH:mm"), " UTC; the window ends ", format_datetime(WindowEnd, "yyyy-MM-dd HH:mm"), " UTC")),

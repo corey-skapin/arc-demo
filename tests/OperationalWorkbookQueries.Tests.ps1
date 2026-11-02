@@ -57,9 +57,11 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $fixture = $fixture.Replace('__ANCHOR__', $anchor.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [cultureinfo]::InvariantCulture))
 
         function New-FixtureRequest {
-            param([string]$Name, [hashtable]$Parameters = @{})
-            $text = Get-DemoOperationalQuery -Name $Name -Roster $roster
-            $text = Expand-DemoOperationalQuery -Query $text -Roster $roster -Parameters $Parameters -Start $anchor.AddDays(-7) -End $anchor
+            param([string]$Name, [hashtable]$Parameters = @{}, [string[]]$Only = @())
+            # -Only narrows the roster to named machines so the edge cases (nothing reporting, everything silent) can be exercised.
+            $scoped = if ($Only.Count) { @($roster | Where-Object { $_.machine -in $Only }) } else { $roster }
+            $text = Get-DemoOperationalQuery -Name $Name -Roster $scoped
+            $text = Expand-DemoOperationalQuery -Query $text -Roster $scoped -Parameters $Parameters -Start $anchor.AddDays(-7) -End $anchor
             $readsSharedSamples = $text.Contains('let PerfRows = Perf')
             $text = $text.Replace('let PerfRows = Perf', 'let PerfRows = FixturePerf').Replace('let InsightsRows = InsightsMetrics', 'let InsightsRows = FixtureInsights')
             # Only the scenario arithmetic may skip the shared samples; every other item must run on the fixture tables.
@@ -79,6 +81,9 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             memory = New-FixtureRequest 'cap-mem-grid'
             capTiles = New-FixtureRequest 'cap-tiles'
             scopeTiles = New-FixtureRequest 'cap-scope'
+            scopeAllAbsent = New-FixtureRequest 'cap-scope' -Only @('missing')
+            scopeAllSilent = New-FixtureRequest 'cap-scope' -Only @('parked')
+            scopeMixed = New-FixtureRequest 'cap-scope' -Only @('parked', 'missing')
             detailTiles = New-FixtureRequest 'cap-detail-tiles' @{ SelectedHost = 'devidle' }
             candidates = New-FixtureRequest 'opt-candidates'
             optTiles = New-FixtureRequest 'opt-tiles'
@@ -116,6 +121,9 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $memory = $results.memory
         $capTiles = $results.capTiles
         $scopeTiles = $results.scopeTiles
+        $scopeAllAbsent = $results.scopeAllAbsent
+        $scopeAllSilent = $results.scopeAllSilent
+        $scopeMixed = $results.scopeMixed
         $detailTiles = $results.detailTiles
         $candidates = $results.candidates
         $optTiles = $results.optTiles
@@ -284,6 +292,32 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             $coverage = & $tile 'Window coverage'
             $coverage.Machines | Should -Be 100
             $coverage.Names | Should -Match 'parked time, unknown and not idle'
+        }
+
+        It 'tells unknown from parked when nothing is reporting' {
+            $tile = { param($rows, $label) @($rows | Where-Object Label -like "*$label*")[0] }
+            # Every machine without telemetry: nothing was observed, so there is no last observed data to describe and nothing is zero.
+            (& $tile $scopeAllAbsent 'Reporting').Machines | Should -Be 0
+            (& $tile $scopeAllAbsent 'Reporting').Names | Should -Be 'no machine in scope sent any telemetry in this window: unknown, not zero'
+            (& $tile $scopeAllAbsent 'Latest sample').Machines | Should -BeNullOrEmpty
+            (& $tile $scopeAllAbsent 'Latest sample').Names | Should -Match 'unknown, not zero'
+            (& $tile $scopeAllAbsent 'Window coverage').Machines | Should -BeNullOrEmpty
+            (& $tile $scopeAllAbsent 'Adequate evidence').Machines | Should -Be 0
+            (& $tile $scopeAllAbsent 'Limited evidence').Names | Should -Be 'none'
+            # Every machine silent: parked, and the figures describe the last observed data (48 hours old, 71% of the window observed).
+            $silent = & $tile $scopeAllSilent 'Reporting'
+            $silent.Names | Should -Match 'parked or silent'
+            $silent.Names | Should -Match 'last observed data'
+            $latest = & $tile $scopeAllSilent 'since the latest sample'
+            $latest.Label | Should -Be '🕒 Hours since the latest sample'
+            $latest.Machines | Should -Be 48
+            (& $tile $scopeAllSilent 'Window coverage').Machines | Should -Be 71
+            # A mix: only the silent subset has observed data to describe.
+            $mixed = & $tile $scopeMixed 'Reporting'
+            $mixed.Machines | Should -Be 0
+            $mixed.Names | Should -Match '^none within 15 minutes of the window end\. 1 silent \(the figures below describe their last observed data\) and 1 never reported: '
+            $mixed.Names | Should -Match 'parked'
+            $mixed.Names | Should -Match 'missing'
         }
 
         It 'counts mutually exclusive capacity assessments that add up to the machines in scope' {

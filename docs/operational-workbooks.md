@@ -127,6 +127,8 @@ environment and application/role, plus the threshold selectors.
 
 *Reporting now* means a sample within 15 minutes of the window end; for a custom past range the tile says
 *at the window end*. With every machine parked it reads 0 and says the figures below describe the last observed data.
+When no machine in scope has sent any telemetry it says so instead and treats the result as unknown, not zero, with no
+latest sample and no coverage figure; with a mix it says that only the silent machines have observed data.
 
 ## Optimisation opportunities
 
