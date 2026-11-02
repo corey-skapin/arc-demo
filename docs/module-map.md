@@ -41,11 +41,11 @@ the customer-facing Arc records and observability plane are in the other group.
 | `.github/workflows/lint.yml` Windows job | Executes nested guest and real SQL regressions with mocked Windows APIs |
 | `scripts/Deploy-ArcDemo.ps1` | Selected-provider and SKU/quota checks; Bicep preview/create; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness |
 | `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL from the single tracked `docs/runsheet.md` template; no Azure calls or lifecycle changes |
-| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads/reconnect where needed, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness |
+| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads, one shared Heartbeat/Arc/ARM wait with a single global deadline (no Run Command host checks by default; opt-in `-GuestChecks`), concurrent nested-guest start, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness |
 | `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; optional identity/Defender changes |
 | `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table; Active (Ready alias), compute-only Hibernated with network cost diagnostics, Removed; bounded retries, exit 0/1/2 |
-| `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, `@file` guest-script transport/markers, capacity/quota, readiness checks |
+| `scripts/lib/Common.psm1` | Skin/fleet validation, checked CLI/REST with subscription pinning and tenant-only directory guards, retained inventory, bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota, readiness checks |
 | `Get-DemoNestedSqlGuestConfig`, `Invoke-DemoNestedSqlGuest`, `Wait-DemoNestedSqlArcConnected` in `Common.psm1`, `tests/NestedSqlLifecycle.Tests.ps1` | One skin-defined nested guest, normal graceful shutdown/start and bounded Arc connection wait across Activate/Hibernate/Remove |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
 | `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved media/terms, bounded startup and hash ownership; guarded emitter-only update preserves normal worker functions and migrates the owned checkpoint with rollback/backups; no Arc SQL, automatic reboot/repair or Defender changes |
@@ -61,8 +61,9 @@ history is retained as the per-workload manifest: additive empty-fleet deploymen
 do not hide earlier Arc VMs. Unknown VMs fail closed for startup/deletion, not
 spend-reducing parking. Foreign IDs always fail closed. Hibernated readiness
 queries cost state, not retained monitoring; NAT/PIP cost diagnostics do not gate
-verified compute parking. Guest checks use concurrent jobs, a ten-minute AMA wait
-and pending evidence; telemetry-only lag requires a readiness recheck, not repair.
+verified compute parking. The host wait uses one Heartbeat query and ARM state, not
+Run Command, under one deadline with per-host pending evidence; telemetry-only lag
+requires a readiness recheck, not repair.
 
 ## Monitoring support
 
@@ -110,6 +111,10 @@ execution of deterministic literal-table fixtures, not a live fault or ingestion
 `tests/Lifecycle.Tests.ps1` exercises waits, errors, config, mixed/native
 classification, retained additive manifests, ShouldProcess previews, guest/job
 failures and the JSON/exit-code contract without a cloud deployment.
+`tests/GuestReadinessWait.Tests.ps1` covers the shared Activate wait on a simulated
+clock: all-fresh Heartbeats with Updating extensions, one pending host, deadline
+bounds for nine hosts, no Run Command by default, opt-in checks, the nested guest
+budget and the soft extension readiness rows.
 Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
 conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile

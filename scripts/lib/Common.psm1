@@ -466,7 +466,8 @@ function Invoke-DemoNestedSqlGuest {
     param(
         [Parameter(Mandatory)]$ParentMachine,
         [Parameter(Mandatory)][string]$GuestVmName,
-        [Parameter(Mandatory)][ValidateSet('Start', 'Stop')][string]$Action
+        [Parameter(Mandatory)][ValidateSet('Start', 'Stop')][string]$Action,
+        [switch]$AsJob
     )
     if ($ParentMachine.OsType -ne 'Windows') { throw 'Nested SQL lifecycle requires the configured Windows parent VM.' }
     if ($GuestVmName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') { throw 'Nested SQL guest VM name is invalid.' }
@@ -501,7 +502,7 @@ do {
 'ARC_DEMO_OK'
 '@
     $guestScript = $guestScript.Replace('__GUEST_NAME__', $GuestVmName).Replace('__ACTION__', $Action)
-    Invoke-DemoGuestCommand -Machine $ParentMachine -Script $guestScript
+    Invoke-DemoGuestCommand -Machine $ParentMachine -Script $guestScript -AsJob:$AsJob
 }
 
 function Wait-DemoNestedSqlArcConnected {
@@ -833,13 +834,29 @@ function Get-DemoReadinessChecks {
     }
     foreach ($machine in $Inventory.Machines) {
         $actual = $machine.Actual
+        $arc = $null
         if (-not $machine.Native) {
             $arc = $arcMachines | Where-Object { $_.id -eq $machine.ArcId } | Select-Object -First 1
             New-DemoCheck "arc/$($machine.Name)" $machine.ArcId 'Connected' $arc.status $(if (-not $arc) { 'fail' } elseif ($arc.status -eq 'Connected') { 'pass' } else { 'pending' })
         }
         $scope = if ($machine.Native) { $machine.Id } else { $machine.ArcId }
+        $extensionScope = if ($machine.Native -or $machine.OsType -eq 'Linux') { $machine.Id } else { $machine.ArcId }
+        $extensions = @()
+        if ($machine.Monitor -and $actual) {
+            $extensions = if ($machine.Native -or $machine.OsType -eq 'Linux') {
+                @(Invoke-DemoAz -Arguments @('vm', 'extension', 'list', '-g', $Inventory.InfraRg, '--vm-name', $machine.Name, '-o', 'json') | ConvertFrom-Json)
+            } else {
+                @(Invoke-DemoAz -Arguments @('connectedmachine', 'extension', 'list', '-g', $Inventory.ArcRg, '--machine-name', $machine.Name, '-o', 'json') | ConvertFrom-Json)
+            }
+        }
+        $amaName = if ($machine.OsType -eq 'Windows') { 'AzureMonitorWindowsAgent' } else { 'AzureMonitorLinuxAgent' }
+        $amaExtension = $extensions | Where-Object name -eq $amaName | Select-Object -First 1
+        $amaState = if ($amaExtension.provisioningState) { $amaExtension.provisioningState } else { $amaExtension.properties.provisioningState }
         if ($machine.Monitor) {
-            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'Heartbeat within 10 minutes by _ResourceId' ($scope.ToLowerInvariant() -in $heartbeatIds) $(if ($scope.ToLowerInvariant() -in $heartbeatIds) { 'pass' } else { 'pending' })
+            $seen = $scope.ToLowerInvariant() -in $heartbeatIds
+            $amaFailed = -not $seen -and $amaState -eq 'Failed'
+            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'Heartbeat within 10 minutes by _ResourceId' $seen $(if ($seen) { 'pass' } elseif ($amaFailed) { 'fail' } else { 'pending' }) `
+                -Message $(if ($amaFailed) { 'No recent Heartbeat and the AMA extension is Failed: a real failure, not telemetry lag.' } else { '' })
         } else {
             New-DemoCheck "heartbeat/$($machine.Name)" $scope 'unsupported host' $null 'skipped' $false
         }
@@ -852,21 +869,423 @@ function Get-DemoReadinessChecks {
             $ruleId = "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/dataCollectionRules/$rule"
             New-DemoCheck "dcra/$($machine.Name)/$rule" $scope $ruleId @($associationList.dataCollectionRuleId) $(if ($ruleId -in $associationList.dataCollectionRuleId) { 'pass' } else { 'fail' })
         }
-        $extensionScope = if ($machine.Native -or $machine.OsType -eq 'Linux') { $machine.Id } else { $machine.ArcId }
-        $extensions = if ($machine.Native -or $machine.OsType -eq 'Linux') {
-            @(Invoke-DemoAz -Arguments @('vm', 'extension', 'list', '-g', $Inventory.InfraRg, '--vm-name', $machine.Name, '-o', 'json') | ConvertFrom-Json)
-        } else {
-            @(Invoke-DemoAz -Arguments @('connectedmachine', 'extension', 'list', '-g', $Inventory.ArcRg, '--machine-name', $machine.Name, '-o', 'json') | ConvertFrom-Json)
-        }
-        $extensionNames = @(if ($machine.OsType -eq 'Windows') { 'AzureMonitorWindowsAgent' } else { 'AzureMonitorLinuxAgent' })
+        $extensionNames = @($amaName)
         if ($machine.VmInsights) { $extensionNames += 'DependencyAgentWindows' }
         if ($machine.ChangeTracking) { $extensionNames += "ChangeTracking-$($machine.OsType)" }
+        # Extension provisioning is a soft diagnostic. Only the heartbeat row can gate readiness.
+        $connectedMinutes = if ($arc.status -eq 'Connected' -and $arc.lastStatusChange) {
+            [int][Math]::Max(0, ((Get-Date).ToUniversalTime() - (ConvertTo-DemoUtc $arc.lastStatusChange)).TotalMinutes)
+        }
         foreach ($name in $extensionNames) {
             $extension = $extensions | Where-Object name -eq $name | Select-Object -First 1
             $state = if ($extension.provisioningState) { $extension.provisioningState } else { $extension.properties.provisioningState }
-            New-DemoCheck "extension/$($machine.Name)/$name" "$extensionScope/extensions/$name" 'Succeeded' $state $(if (-not $extension -or $state -eq 'Failed') { 'fail' } elseif ($state -eq 'Succeeded') { 'pass' } else { 'pending' })
+            $status = if (-not $extension -or $state -eq 'Failed') { 'fail' } elseif ($state -eq 'Succeeded') { 'pass' } else { 'pending' }
+            $message = switch ($status) {
+                'pass' { '' }
+                'fail' { 'Extension missing or Failed. Soft warning, not a readiness gate; with no recent Heartbeat the heartbeat row fails.' }
+                default {
+                    $age = if ($null -ne $connectedMinutes) { "; Arc connected $connectedMinutes min ago" } else { '' }
+                    $pointer = if ($null -eq $connectedMinutes -or $connectedMinutes -ge 30) { ' See docs/troubleshooting.md, Linux ARM Updating while monitoring guest handlers are healthy.' } else { '' }
+                    "ARM state $state$age. Soft warning, not a readiness gate: the heartbeat row is the authority.$pointer"
+                }
+            }
+            New-DemoCheck "extension/$($machine.Name)/$name" "$extensionScope/extensions/$name" 'Succeeded' $state $status -Required $false -Message $message
         }
     }
+}
+
+function ConvertTo-DemoUtc {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace("$Value")) { return $null }
+    if ($Value -is [DateTimeOffset]) { return $Value.UtcDateTime }
+    if ($Value -is [DateTime]) {
+        if ($Value.Kind -eq [DateTimeKind]::Unspecified) { return [DateTime]::SpecifyKind($Value, [DateTimeKind]::Utc) }
+        return $Value.ToUniversalTime()
+    }
+    [DateTimeOffset]::Parse([string]$Value, [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AssumeUniversal).UtcDateTime
+}
+
+function Get-DemoHeartbeatTimes {
+    <#
+    .SYNOPSIS
+        One Log Analytics query: the latest Heartbeat generated per exact lower-cased _ResourceId.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$WorkspaceCustomerId, [string]$Token = '')
+    if (-not $Token) { $Token = Get-LawQueryToken }
+    $query = 'Heartbeat | where TimeGenerated > ago(7d) | summarize LastHeartbeat = max(TimeGenerated) by ResourceId = tolower(_ResourceId)'
+    $response = Invoke-RestMethod -Method Post -TimeoutSec 60 `
+        -Uri "https://api.loganalytics.io/v1/workspaces/$WorkspaceCustomerId/query" `
+        -Headers @{ Authorization = "Bearer $Token" } -ContentType 'application/json' `
+        -Body (@{ query = $query } | ConvertTo-Json)
+    if ($response.error) { throw "Log Analytics returned a query error: $($response.error.code)" }
+    $times = @{}
+    foreach ($row in @($response.tables[0].rows)) { $times[[string]$row[0]] = ConvertTo-DemoUtc $row[1] }
+    $times
+}
+
+function Invoke-DemoArmGetParallel {
+    <#
+    .SYNOPSIS
+        Time-boxed parallel read-only ARM GETs in one process. Failures and timeouts are returned, never thrown.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Uri,
+        [Parameter(Mandatory)][string]$Token,
+        [ValidateRange(1, 300)][int]$TimeoutSeconds = 20,
+        [ValidateRange(1, 32)][int]$ThrottleLimit = 12
+    )
+    if (-not $Uri.Count) { return @() }
+    $headers = @{ Authorization = "Bearer $Token" }
+    $callTimeout = $TimeoutSeconds
+    @($Uri | ForEach-Object -ThrottleLimit $ThrottleLimit -TimeoutSeconds $TimeoutSeconds -Parallel {
+        try { [pscustomobject]@{ Uri = $_; Body = (Invoke-RestMethod -Method Get -Uri $_ -Headers $using:headers -TimeoutSec $using:callTimeout); Error = $null } }
+        catch { [pscustomobject]@{ Uri = $_; Body = $null; Error = $_.Exception.Message } }
+    })
+}
+
+function Get-DemoHostArmStates {
+    <#
+    .SYNOPSIS
+        Soft ARM facts in one parallel, time-boxed batch: extension provisioning states for monitored hosts
+        and, for the named hosts only, the backing VM's power, guest agent and in-flight extension state.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Machines,
+        [Parameter(Mandatory)][string]$Token,
+        [string[]]$VmStateFor = @(),
+        [ValidateRange(1, 300)][int]$TimeoutSeconds = 20
+    )
+    $arm = 'https://management.azure.com'
+    $requests = @(foreach ($machine in $Machines) {
+        if ($machine.Monitor) {
+            # Same extension path as the readiness rows: Windows Arc hosts use Arc extensions, everything else the VM.
+            $uri = if (-not $machine.Native -and $machine.OsType -eq 'Windows') { "$arm$($machine.ArcId)/extensions?api-version=2024-07-10" }
+            else { "$arm$($machine.Id)/extensions?api-version=2024-07-01" }
+            [pscustomobject]@{ Name = $machine.Name; Kind = 'extensions'; Uri = $uri }
+        }
+        if ($machine.Name -in $VmStateFor) {
+            [pscustomobject]@{ Name = $machine.Name; Kind = 'vm'; Uri = "$arm$($machine.Id)/instanceView?api-version=2024-07-01" }
+        }
+    })
+    $states = [pscustomobject]@{ Extensions = @{}; Vm = @{}; Errors = @{} }
+    if (-not $requests.Count) { return $states }
+    $responses = @(Invoke-DemoArmGetParallel -Uri @($requests.Uri) -Token $Token -TimeoutSeconds $TimeoutSeconds)
+    foreach ($request in $requests) {
+        $response = $responses | Where-Object { $_.Uri -eq $request.Uri } | Select-Object -First 1
+        $key = "$($request.Name)/$($request.Kind)"
+        if (-not $response) { $states.Errors[$key] = 'ARM read did not finish inside the time box'; continue }
+        if ($response.Error) { $states.Errors[$key] = [string]$response.Error; continue }
+        if ($request.Kind -eq 'extensions') {
+            $byName = [ordered]@{}
+            foreach ($extension in @($response.Body.value)) { $byName[[string]$extension.name] = [string]$extension.properties.provisioningState }
+            $states.Extensions[$request.Name] = $byName
+        } else {
+            $view = $response.Body
+            $states.Vm[$request.Name] = [pscustomobject]@{
+                Power = [string](@($view.statuses | Where-Object { $_.code -like 'PowerState/*' } | ForEach-Object { $_.displayStatus }) | Select-Object -First 1)
+                AgentReady = @($view.vmAgent.statuses | Where-Object { $_.displayStatus -eq 'Ready' }).Count -gt 0
+                Updating = @($view.statuses | Where-Object { $_.code -eq 'ProvisioningState/updating' }).Count -gt 0
+                TransitioningExtensions = @($view.extensions | Where-Object { @($_.statuses | Where-Object { $_.displayStatus -eq 'Transitioning' }).Count } | ForEach-Object { [string]$_.name })
+            }
+        }
+    }
+    $states
+}
+
+function New-DemoGuestCheckScript {
+    <#
+    .SYNOPSIS
+        Builds the guest health script for one host (opt-in Run Command path). Services restart only when asked.
+        Returns $null when the host has nothing to check.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Machine, [switch]$Restart)
+    $services = @()
+    if (-not $Machine.Native) { $services += if ($Machine.OsType -eq 'Windows') { 'himds' } else { 'himdsd' } }
+    if ($Machine.Monitor -and $Machine.OsType -eq 'Linux') { $services += 'azuremonitoragent' }
+    if (-not $services -and -not $Machine.Monitor) { return $null }
+    if ($Machine.OsType -eq 'Windows') {
+        $commands = @("`$ErrorActionPreference='Stop'")
+        if ($services) {
+            if ($Restart) { $commands += "Restart-Service $($services -join ',') -Force" }
+            $commands += ('if (@(Get-Service -Name {0} | Where-Object {{ $_.Status -ne ''Running'' }}).Count) {{ throw ''Required Arc service is not running.'' }}' -f ($services -join ','))
+        }
+        if ($Machine.Monitor) {
+            $commands += @'
+$deadline = (Get-Date).AddMinutes(10)
+while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonAgentCore').Count) {
+    if ((Get-Date) -ge $deadline) { Write-Warning 'AMA startup remains pending after 10 minutes; re-check exact-ID Heartbeat.'; 'ARC_DEMO_PENDING'; return }
+    Write-Progress -Activity 'Waiting for AMA MonAgentCore' -Status 'Cold start; no repair or restart'
+    Start-Sleep -Seconds 15
+}
+'@
+        }
+        $commands += "'ARC_DEMO_OK'"
+        $text = $commands -join "`n"
+    } else {
+        $restartCommand = if ($Restart) { "sudo systemctl restart $($services -join ' ')" } else { '' }
+        $text = "set -e`n$restartCommand`nfor service in $($services -join ' '); do sudo systemctl is-active --quiet `"`$service`"; done`necho ARC_DEMO_OK"
+    }
+    [pscustomobject]@{ Script = $text; Services = $services }
+}
+
+function Remove-DemoGuestJob {
+    [CmdletBinding()]
+    param([AllowNull()]$Job)
+    if ($Job.Id) { Get-Job -Id $Job.Id -ErrorAction SilentlyContinue | Stop-Job -PassThru | Remove-Job -Force }
+    if ($Job.DemoScriptPath) { [System.IO.File]::Delete($Job.DemoScriptPath) }
+}
+
+function Wait-DemoHostsReady {
+    <#
+    .SYNOPSIS
+        One shared wait, under one global deadline, for running demo VMs to be healthy after a wake.
+    .DESCRIPTION
+        A host passes when its VM is running, its Arc identity is Connected (hosts with an Arc identity) and, for
+        monitored hosts, a Heartbeat was generated after the VM start time. Cost does not grow with host count: each
+        poll is one connectedmachine list, one Log Analytics query and one parallel, time-boxed ARM read.
+        Extension provisioning state (AMA, Change Tracking, MDE) is a soft warning, never a gate. Run Command guest
+        checks are opt-in and share the deadline. The nested guest start Run Command is submitted by the caller,
+        runs concurrently and has its own budget. A host with no Heartbeat at the deadline is pending, not failed,
+        unless its AMA extension is Failed. A stopped VM or an Arc identity that never connects fails.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Inventory,
+        [Parameter(Mandatory)][string]$NamePrefix,
+        [Parameter(Mandatory)][datetime]$AttemptStartedUtc,
+        [hashtable]$StartedAtUtc = @{},
+        [ValidateRange(1, 120)][int]$DeadlineMinutes = 12,
+        [ValidateSet('None', 'WhenStalled', 'Always')][string]$GuestChecks = 'None',
+        [ValidateRange(1, 120)][int]$StallMinutes = 9,
+        [switch]$RepairStalledAgents,
+        [AllowNull()]$NestedGuest = $null,
+        [ValidateRange(1, 120)][int]$PollSeconds = 15
+    )
+    $loopStarted = (Get-Date).ToUniversalTime()
+    $deadline = $loopStarted.AddMinutes($DeadlineMinutes)
+    $workspaceId = "/subscriptions/$script:DemoSubscription/resourceGroups/$($Inventory.ArcRg)/providers/Microsoft.OperationalInsights/workspaces/law-$NamePrefix"
+    $watched = '^(AzureMonitor(Windows|Linux)Agent|ChangeTracking-(Windows|Linux)|DependencyAgentWindows|MDE\.(Windows|Linux))$'
+    $items = @(foreach ($machine in @($Inventory.Machines)) {
+        $scope = if ($machine.Native) { $machine.Id } else { $machine.ArcId }
+        $startedAt = if ($StartedAtUtc.ContainsKey($machine.Id)) { $StartedAtUtc[$machine.Id] } else { $AttemptStartedUtc }
+        [pscustomobject]@{
+            Machine = $machine; Name = $machine.Name; Scope = "$scope".ToLowerInvariant()
+            NeedsArc = -not $machine.Native; NeedsHeartbeat = [bool]$machine.Monitor
+            StartedAt = ConvertTo-DemoUtc $startedAt; Started = $StartedAtUtc.ContainsKey($machine.Id)
+            ArcConnected = $false; ArcStatus = $null; LastHeartbeat = $null; HeartbeatSeen = $false
+            Extensions = [ordered]@{}; ExtensionSince = @{}
+            Job = $null; RunCommand = 'not-run'; Completion = $null; Restarted = @(); GateWarned = $false
+            Status = 'pending'; Message = ''; Warnings = [System.Collections.Generic.List[string]]::new()
+        }
+    })
+    $nested = if ($NestedGuest) {
+        [ordered]@{ parentVmName = $NestedGuest.Parent.Name; guestVmName = $NestedGuest.GuestVmName; arcMachineName = $NestedGuest.ArcMachineName
+            startCommand = 'running'; arcStatus = $null; status = 'pending'; message = '' }
+    }
+    $arcList = @(); $heartbeats = @{}; $workspaceCustomerId = $null; $lawToken = $null; $armToken = $null
+    $lastArmPoll = $null; $armStates = $null; $readFailures = 0; $alwaysSubmitted = $false
+    $applyExtensionStates = {
+        param($states, $at)
+        foreach ($item in $items) {
+            foreach ($name in @($states.Extensions[$item.Name].Keys | Where-Object { $_ -match $watched })) {
+                $state = $states.Extensions[$item.Name][$name]
+                $item.Extensions[$name] = $state
+                if ($state -eq 'Succeeded') { $item.ExtensionSince.Remove($name) }
+                elseif (-not $item.ExtensionSince.ContainsKey($name)) { $item.ExtensionSince[$name] = $at }
+            }
+        }
+    }
+    try {
+        while ($true) {
+            $now = (Get-Date).ToUniversalTime()
+            $open = @($items | Where-Object { $_.Status -eq 'pending' })
+            $readable = $true
+            try {
+                if (@($open | Where-Object { $_.NeedsArc }).Count -or ($nested -and $nested.status -eq 'pending')) {
+                    $arcList = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $Inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
+                }
+                if (@($open | Where-Object { $_.NeedsHeartbeat -and -not $_.HeartbeatSeen }).Count) {
+                    if (-not $workspaceCustomerId) {
+                        $workspaceCustomerId = (Invoke-DemoAz -Arguments @('monitor', 'log-analytics', 'workspace', 'show', '--ids', $workspaceId, '-o', 'json') | ConvertFrom-Json).customerId
+                        $lawToken = Get-LawQueryToken
+                    }
+                    $heartbeats = Get-DemoHeartbeatTimes -WorkspaceCustomerId $workspaceCustomerId -Token $lawToken
+                }
+                $readFailures = 0
+            } catch {
+                $readable = $false
+                if (++$readFailures -ge 3) { throw "Inspection failed while waiting for guest readiness: $($_.Exception.Message)" }
+                Write-Warn "Guest readiness read failed ($readFailures of 3); retrying: $($_.Exception.Message)"
+            }
+            if ($readable) {
+                foreach ($item in $open) {
+                    if ($item.NeedsArc) {
+                        $arc = $arcList | Where-Object { $_.id -eq $item.Machine.ArcId } | Select-Object -First 1
+                        $item.ArcStatus = [string]$arc.status
+                        if ($item.ArcStatus -eq 'Connected') { $item.ArcConnected = $true }
+                    }
+                    if ($item.NeedsHeartbeat -and $heartbeats.Contains($item.Scope)) {
+                        $item.LastHeartbeat = $heartbeats[$item.Scope]
+                        if ($item.LastHeartbeat -gt $item.StartedAt) { $item.HeartbeatSeen = $true }
+                    }
+                }
+                if ($GuestChecks -eq 'Always' -and -not $alwaysSubmitted) {
+                    $alwaysSubmitted = $true
+                    foreach ($item in $open) {
+                        $restart = $RepairStalledAgents.IsPresent -and ($item.Started -or ($item.NeedsArc -and -not $item.ArcConnected))
+                        $check = New-DemoGuestCheckScript -Machine $item.Machine -Restart:$restart
+                        if (-not $check) { continue }
+                        $item.Job = Invoke-DemoGuestCommand -Machine $item.Machine -Script $check.Script -AsJob
+                        $item.RunCommand = 'running'
+                        $item.Restarted = @(if ($restart) { $check.Services })
+                    }
+                }
+                foreach ($item in $items | Where-Object { $_.RunCommand -eq 'running' -and $_.Status -eq 'pending' }) {
+                    if ($item.Job.State -in @('NotStarted', 'Running')) { continue }
+                    try {
+                        $item.Completion = Invoke-DemoGuestCommand -Machine $item.Machine -Job $item.Job -PassThru -AllowPending:($item.Machine.Monitor -and $item.Machine.OsType -eq 'Windows')
+                        $item.RunCommand = $item.Completion.status
+                    } catch {
+                        $item.RunCommand = 'fail'; $item.Status = 'fail'; $item.Message = $_.Exception.Message
+                        Write-Warning $item.Message
+                    }
+                    $item.Job = $null
+                }
+                if ($nested -and $nested.status -eq 'pending') {
+                    if ($nested.startCommand -eq 'running') {
+                        if ($NestedGuest.Job.State -notin @('NotStarted', 'Running')) {
+                            try {
+                                Invoke-DemoGuestCommand -Machine $NestedGuest.Parent -Job $NestedGuest.Job -PassThru | Out-Null
+                                $nested.startCommand = 'pass'
+                            } catch {
+                                $nested.startCommand = 'fail'; $nested.status = 'fail'; $nested.message = $_.Exception.Message
+                                Write-Warning $nested.message
+                            }
+                        } elseif (($now - $NestedGuest.SubmittedUtc).TotalMinutes -ge $NestedGuest.BudgetMinutes) {
+                            Remove-DemoGuestJob $NestedGuest.Job
+                            $nested.startCommand = 'timeout'
+                            $nested.message = "The guest start command did not finish within $($NestedGuest.BudgetMinutes) minutes (queued behind a VM extension operation?); waiting for the guest Arc connection."
+                            Write-Warning $nested.message
+                        }
+                    }
+                    if ($nested.status -eq 'pending') {
+                        $arc = $arcList | Where-Object { $_.name -eq $NestedGuest.ArcMachineName } | Select-Object -First 1
+                        $nested.arcStatus = [string]$arc.status
+                        if ($nested.arcStatus -eq 'Connected' -and $nested.startCommand -in @('pass', 'timeout')) { $nested.status = 'pass' }
+                    }
+                }
+                foreach ($item in $items | Where-Object { $_.Status -eq 'pending' }) {
+                    $ready = (-not $item.NeedsArc -or $item.ArcConnected) -and (-not $item.NeedsHeartbeat -or $item.HeartbeatSeen) -and
+                        -not ($GuestChecks -eq 'Always' -and $item.RunCommand -eq 'running')
+                    if ($ready) { $item.Status = 'pass'; Write-Ok "Host ready: $($item.Name)" }
+                }
+                $stalled = @()
+                if ($GuestChecks -eq 'WhenStalled') {
+                    $stalled = @($items | Where-Object { $_.Status -eq 'pending' -and $_.RunCommand -eq 'not-run' -and ($now - $_.StartedAt).TotalMinutes -ge $StallMinutes })
+                }
+                if (-not $lastArmPoll -or ($now - $lastArmPoll).TotalSeconds -ge 60) {
+                    try {
+                        if (-not $armToken) { $armToken = Get-MgmtToken }
+                        $armStates = Get-DemoHostArmStates -Machines @($Inventory.Machines) -Token $armToken -VmStateFor @($stalled.Name)
+                        $lastArmPoll = $now
+                        & $applyExtensionStates $armStates $now
+                    } catch { Write-Warning "ARM extension read failed (soft; not a gate): $($_.Exception.Message)" }
+                    foreach ($item in $stalled) {
+                        $vm = $armStates.Vm[$item.Name]
+                        if ($vm -and $vm.Power -eq 'VM running' -and $vm.AgentReady -and -not $vm.Updating -and -not @($vm.TransitioningExtensions).Count) {
+                            $restart = $RepairStalledAgents.IsPresent
+                            $check = New-DemoGuestCheckScript -Machine $item.Machine -Restart:$restart
+                            if (-not $check) { continue }
+                            $item.Job = Invoke-DemoGuestCommand -Machine $item.Machine -Script $check.Script -AsJob
+                            $item.RunCommand = 'running'
+                            $item.Restarted = @(if ($restart) { $check.Services })
+                        } elseif (-not $item.GateWarned) {
+                            $item.GateWarned = $true
+                            $item.Warnings.Add('Run Command guest check not submitted: the VM agent is not Ready or a VM extension operation is in flight, so it would queue behind it.')
+                            Write-Warning "$($item.Name): $($item.Warnings[-1])"
+                        }
+                    }
+                }
+            }
+            $open = @($items | Where-Object { $_.Status -eq 'pending' })
+            if (-not $open.Count -and (-not $nested -or $nested.status -ne 'pending')) { break }
+            $remaining = ($deadline - (Get-Date).ToUniversalTime()).TotalSeconds
+            if ($remaining -le 0) { break }
+            $waitingFor = @($open.Name) + @(if ($nested -and $nested.status -eq 'pending') { $nested.guestVmName })
+            Write-Step "Waiting for guest readiness (Heartbeat after VM start): $($waitingFor -join ', ') ($([int]$remaining) s remaining)"
+            Start-Sleep -Seconds ([Math]::Min($PollSeconds, [Math]::Max(1, [int][Math]::Ceiling($remaining))))
+        }
+
+        $unresolved = @($items | Where-Object { $_.Status -eq 'pending' })
+        $finalNow = (Get-Date).ToUniversalTime()
+        if ($armToken -and ($unresolved.Count -or -not $lastArmPoll -or ($finalNow - $lastArmPoll).TotalSeconds -ge 45)) {
+            try {
+                $armStates = Get-DemoHostArmStates -Machines @($Inventory.Machines) -Token $armToken -VmStateFor @($unresolved.Name)
+                & $applyExtensionStates $armStates $finalNow
+            } catch { Write-Warning "ARM state read failed (soft; not a gate): $($_.Exception.Message)" }
+        }
+        foreach ($item in $unresolved) {
+            $vm = $armStates.Vm[$item.Name]
+            $amaName = if ($item.Machine.OsType -eq 'Windows') { 'AzureMonitorWindowsAgent' } else { 'AzureMonitorLinuxAgent' }
+            if ($vm -and $vm.Power -and $vm.Power -ne 'VM running') {
+                $item.Status = 'fail'; $item.Message = "The VM is not running (power state: $($vm.Power))."
+            } elseif ($item.NeedsArc -and -not $item.ArcConnected) {
+                $item.Status = 'fail'; $item.Message = "The Arc identity is not Connected after $DeadlineMinutes minutes (last status: $($item.ArcStatus))."
+            } elseif ($item.NeedsHeartbeat -and -not $item.HeartbeatSeen) {
+                if ($item.Extensions[$amaName] -eq 'Failed') {
+                    $item.Status = 'fail'; $item.Message = 'No Heartbeat after VM start and the AMA extension is Failed; this is not telemetry lag.'
+                } else {
+                    $item.Message = "No Heartbeat generated after VM start within $DeadlineMinutes minutes. Pending, not failed; re-check readiness."
+                }
+            } else {
+                $item.Message = 'The Run Command guest check did not finish before the deadline (queued behind a VM extension operation?). Pending, not failed.'
+            }
+        }
+        foreach ($item in $items | Where-Object { $_.Status -eq 'pass' }) {
+            $item.Message = if ($item.NeedsHeartbeat) { 'VM running, Arc Connected where applicable, Heartbeat generated after VM start.' } else { 'VM running; no Heartbeat expected for this host.' }
+        }
+        if ($nested -and $nested.status -eq 'pending') {
+            $nested.status = 'fail'
+            $nested.message = "The nested guest's Arc machine is not Connected after $DeadlineMinutes minutes (last status: $($nested.arcStatus))."
+        }
+        foreach ($item in $items) {
+            foreach ($name in $item.ExtensionSince.Keys) {
+                $state = $item.Extensions[$name]
+                $minutes = [int][Math]::Floor(($finalNow - $item.ExtensionSince[$name]).TotalMinutes)
+                $item.Warnings.Add($(
+                    if ($state -eq 'Failed') { "extension $name is Failed (not a gate)" }
+                    elseif ($minutes -ge 1) { "extension $name $state for at least $minutes min (not a gate)" }
+                    else { "extension $name $state (age unknown; not a gate)" }))
+                Write-Warning "$($item.Name): $($item.Warnings[-1])"
+            }
+            if ($item.Status -eq 'pending') { Write-Warning "$($item.Name): $($item.Message)" }
+        }
+    } finally {
+        foreach ($item in $items) { Remove-DemoGuestJob $item.Job }
+    }
+    $hosts = @(foreach ($item in $items) {
+        [ordered]@{
+            machineName = $item.Name; resourceId = $item.Machine.Id; status = $item.Status
+            method = $(if ($item.NeedsHeartbeat) { 'arm+heartbeat' } else { 'arm' }) + $(if ($item.RunCommand -ne 'not-run') { '+run-command' } else { '' })
+            startedAtUtc = $item.StartedAt.ToString('o')
+            lastHeartbeatUtc = $(if ($item.LastHeartbeat) { $item.LastHeartbeat.ToString('o') } else { $null })
+            arcStatus = $(if ($item.NeedsArc) { $item.ArcStatus } else { 'not-applicable' })
+            extensionStates = $item.Extensions
+            monitorCheck = $(if ($item.NeedsHeartbeat) { 'Heartbeat after VM start' } else { 'not-required' })
+            restartedServices = @($item.Restarted); completion = $item.Completion
+            message = $item.Message; warnings = @($item.Warnings)
+        }
+    })
+    $worst = if (@($hosts | Where-Object { $_.status -eq 'fail' }).Count -or $nested.status -eq 'fail') { 'fail' }
+        elseif (@($hosts | Where-Object { $_.status -eq 'pending' }).Count) { 'pending' } else { 'pass' }
+    [pscustomobject]@{ Status = $worst; Hosts = $hosts; NestedGuest = $nested
+        ElapsedSeconds = [int]((Get-Date).ToUniversalTime() - $loopStarted).TotalSeconds }
 }
 
 Export-ModuleMember -Function * -Variable *

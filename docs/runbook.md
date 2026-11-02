@@ -287,11 +287,19 @@ It verifies deallocation/AKS stop/inactive revisions before safe NAT/PIP removal
 Foreign/shared bindings skip only networking with a loud residual-cost warning.
 Data, identities and fault flags remain. Failed compute attempts do not block
 attempts on other hosts/workloads; unknown/denied final power is not success.
-Activation restores outbound NAT first, starts retained workloads and reconnects
-agents where needed. Every run verifies guests, including already-connected hosts,
-without unnecessary restarts; Windows Arc AMA uses a `MonAgentCore` process check.
-Host checks run concurrently with a ten-minute AMA budget and per-host evidence.
-An AMA timeout records pending; required service failures still fail.
+Activation restores outbound NAT first, then starts retained workloads. Every run
+verifies the hosts, including already-connected ones, without restarting anything:
+one shared wait with a 12-minute global deadline (`-GuestCheckMinutes`) passes a host
+when its VM is running, Arc is `Connected` and, for a monitored host, a Heartbeat was
+generated after the VM start. No Run Command is used for host checks by default, so a
+VM extension update that is still `Updating` (a warning, never a gate) cannot stall the
+wake; expect about 12-15 minutes. A host with no Heartbeat at the deadline is pending
+for that host only; a stopped VM or an Arc identity that never connects fails. Opt in
+to Run Command guest checks with `-GuestChecks WhenStalled|Always` (Windows Arc
+`himds`/`MonAgentCore`, Linux services) and to service restarts with
+`-RepairStalledAgents`; both share the same deadline. The nested SQL guest start keeps
+its Run Command concurrently with a five-minute budget. Per-host evidence records
+`method`, `startedAtUtc`, `lastHeartbeatUtc` and `extensionStates`.
 Telemetry-only pending does not fail activation, but must be rechecked through
 readiness before the presentation or dependent SRE/incident-offer flow continues.
 Default assessment submissions cover newly started/waking Arc hosts only;

@@ -3,12 +3,16 @@
     Restores outbound networking, starts retained workloads and validates the demo.
 .DESCRIPTION
     Uses retained deployment manifests and actual VM OS metadata, not name prefixes.
-    Does not reset workload faults or credentials. Every run verifies guest health
-    without restarting already-connected/running hosts. Windows AMA is checked by
-    its MonAgentCore process, not an assumed Windows service. Patch assessments
-    are submitted for newly started Arc hosts unless skipped. -AssessPatches
-    explicitly assesses all Arc hosts, including already-active retries.
-    Submission is not completion.
+    Does not reset workload faults or credentials. Once compute is running, one shared wait with a single
+    global deadline (-GuestCheckMinutes, default 12) decides each host from ARM and telemetry: the VM is running,
+    Arc is Connected and, for monitored hosts, a Heartbeat was generated after the VM start. Run Command is not
+    used by default, so a queued VM extension update cannot stall the wake. A host without a Heartbeat at the
+    deadline is pending, not failed. Extension provisioning state (AMA, Change Tracking, MDE) is only a warning.
+    -GuestChecks WhenStalled|Always opts in to Run Command guest checks that share the same deadline;
+    -RepairStalledAgents also restarts the Arc/AMA services they check. The nested SQL guest start keeps its
+    Run Command, runs concurrently and has its own five-minute budget. Patch assessments are submitted for newly
+    started Arc hosts unless skipped. -AssessPatches explicitly assesses all Arc hosts, including already-active
+    retries. Submission is not completion.
     -WhatIf is read-only. Optional ResultPath preserves per-host outcomes.
 #>
 [CmdletBinding(SupportsShouldProcess)]
@@ -21,6 +25,10 @@ param(
     [switch]$SkipValidate,
     [switch]$SkipPatchAssessment,
     [switch]$AssessPatches,
+    [ValidateRange(1, 120)][int]$GuestCheckMinutes = 12,
+    [ValidateSet('None', 'WhenStalled', 'Always')][string]$GuestChecks = 'None',
+    [ValidateRange(1, 120)][int]$StallMinutes = 9,
+    [switch]$RepairStalledAgents,
     [string]$ResultPath = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -31,6 +39,8 @@ if (-not $PSBoundParameters.ContainsKey('Location')) { $Location = Get-DemoSkinV
 $nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
 Assert-DemoName $NamePrefix
 if ($SkipPatchAssessment -and $AssessPatches) { throw 'AssessPatches and SkipPatchAssessment cannot both be supplied.' }
+if ($RepairStalledAgents -and $GuestChecks -eq 'None') { throw 'RepairStalledAgents needs -GuestChecks WhenStalled or Always.' }
+if ($GuestChecks -eq 'WhenStalled' -and $StallMinutes -ge $GuestCheckMinutes) { throw 'StallMinutes must be less than GuestCheckMinutes.' }
 Initialize-DemoContext $SubscriptionId $TenantId
 $inventory = Get-DemoInventory $NamePrefix -NestedSqlParentVmName $(if ($nestedSqlGuest) { $nestedSqlGuest.ParentVmName } else { '' }) `
     -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
@@ -40,11 +50,13 @@ if ($missing) { throw "Missing expected VMs: $($missing.Name -join ', '). Reconc
 $network = Get-DemoNetworkState -InfraRg $inventory.InfraRg -NamePrefix $NamePrefix
 if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Restore NAT, start retained workloads, verify guests and assess newly started Arc hosts (AssessPatches explicitly includes already-active hosts; no fault reset)')) { return }
 
+$attemptStartedUtc = (Get-Date).ToUniversalTime()
 $result = [ordered]@{
     schemaVersion = 1; workload = 'arc-demo-activation'
     startedAtUtc = [DateTime]::UtcNow.ToString('o'); completedAtUtc = $null
     subscriptionId = "$SubscriptionId"; tenantId = "$TenantId"; status = 'running'
-    guestChecks = @(); patchAssessments = @()
+    guestCheckMinutes = $GuestCheckMinutes; guestChecksMode = $GuestChecks
+    guestChecks = @(); nestedGuest = $null; patchAssessments = @()
     patchAssessment = if ($SkipPatchAssessment) { 'skipped' } else { 'not-run' }
     readiness = 'not-run'; error = $null
 }
@@ -73,11 +85,13 @@ try {
         Invoke-DemoAz -Arguments @('network', 'vnet', 'subnet', 'update', '--ids', $subnet.id, '--nat-gateway', $natId, '-o', 'none') | Out-Null
     }
     $startedVmIds = @()
+    $startedAtUtc = @{}
     foreach ($machine in $inventory.Machines) {
         if ($machine.Actual.powerState -ne 'VM running') {
             if ($machine.Actual.powerState -ne 'VM starting') {
                 Invoke-DemoAz -Arguments @('vm', 'start', '--ids', $machine.Id, '--no-wait', '-o', 'none') | Out-Null
-            }
+                $startedAtUtc[$machine.Id] = (Get-Date).ToUniversalTime()
+            } else { $startedAtUtc[$machine.Id] = $attemptStartedUtc }
             $startedVmIds += $machine.Id
         }
     }
@@ -86,11 +100,17 @@ try {
         @($inventory.Machines | Where-Object { $_.Id -notin @($vms | Where-Object powerState -eq 'VM running' | ForEach-Object id) }).Count -eq 0
     } | Out-Null
 
+    $nestedStart = $null
     if ($nestedSqlGuest) {
         $parent = $inventory.Machines | Where-Object Name -ceq $nestedSqlGuest.ParentVmName | Select-Object -First 1
         if (-not $parent) { throw 'Configured nested SQL parent was not found in the retained inventory.' }
-        Invoke-DemoNestedSqlGuest -ParentMachine $parent -GuestVmName $nestedSqlGuest.GuestVmName -Action Start
-        Wait-DemoNestedSqlArcConnected -ArcResourceGroup $inventory.ArcRg -ArcMachineName $nestedSqlGuest.ArcMachineName
+        # Submitted now, collected by the shared wait under its own five-minute budget.
+        $nestedStart = [pscustomobject]@{
+            Parent = $parent; GuestVmName = $nestedSqlGuest.GuestVmName; ArcMachineName = $nestedSqlGuest.ArcMachineName
+            Job = Invoke-DemoNestedSqlGuest -ParentMachine $parent -GuestVmName $nestedSqlGuest.GuestVmName -Action Start -AsJob
+            SubmittedUtc = (Get-Date).ToUniversalTime(); BudgetMinutes = 5
+        }
+        $jobs += @{ Job = $nestedStart.Job }
     }
     foreach ($id in $inventory.AksClusterIds) {
         $cluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', ($id -split '/')[-1], '-o', 'json') | ConvertFrom-Json
@@ -115,60 +135,14 @@ try {
             Invoke-DemoAz -Arguments @('containerapp', 'revision', 'activate', '-g', $infraRg, '--revision', $app.properties.latestRevisionName, '-o', 'none') | Out-Null
         }
     }
-    $arcBeforeRestart = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
-    foreach ($machine in $inventory.Machines) {
-        $wasConnected = $machine.ArcId -in @($arcBeforeRestart | Where-Object status -eq 'Connected' | ForEach-Object id)
-        $restart = $machine.Id -in $startedVmIds -or (-not $machine.Native -and -not $wasConnected)
-        $services = @()
-        if (-not $machine.Native) { $services += if ($machine.OsType -eq 'Windows') { 'himds' } else { 'himdsd' } }
-        if ($machine.Monitor -and $machine.OsType -eq 'Linux') { $services += 'azuremonitoragent' }
-        if (-not $services -and -not $machine.Monitor) { continue }
-        $script = if ($machine.OsType -eq 'Windows') {
-            $commands = @("`$ErrorActionPreference='Stop'")
-            if ($services) {
-                if ($restart) { $commands += "Restart-Service $($services -join ',') -Force" }
-                $commands += ('if (@(Get-Service -Name {0} | Where-Object {{ $_.Status -ne ''Running'' }}).Count) {{ throw ''Required Arc service is not running.'' }}' -f ($services -join ','))
-            }
-            if ($machine.Monitor) {
-                $commands += @'
-$deadline = (Get-Date).AddMinutes(10)
-while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonAgentCore').Count) {
-    if ((Get-Date) -ge $deadline) { Write-Warning 'AMA startup remains pending after 10 minutes; re-check exact-ID Heartbeat.'; 'ARC_DEMO_PENDING'; return }
-    Write-Progress -Activity 'Waiting for AMA MonAgentCore' -Status 'Cold start; no repair or restart'
-    Start-Sleep -Seconds 15
-}
-'@
-            }
-            $commands += "'ARC_DEMO_OK'"
-            $commands -join "`n"
-        } else {
-            $restartCommand = if ($restart) { "sudo systemctl restart $($services -join ' ')" } else { '' }
-            "set -e`n$restartCommand`nfor service in $($services -join ' '); do sudo systemctl is-active --quiet `"`$service`"; done`necho ARC_DEMO_OK"
-        }
-        $guest = [ordered]@{
-            machineName = $machine.Name; resourceId = $machine.Id; status = 'pending'
-            restartedServices = @(if ($restart) { $services })
-            monitorCheck = if (-not $machine.Monitor) { 'not-required' } elseif ($machine.OsType -eq 'Windows') { 'MonAgentCore process' } else { 'azuremonitoragent service' }
-            completion = $null
-        }
-        $result.guestChecks += $guest
-        try { $jobs += @{ Job = Invoke-DemoGuestCommand -Machine $machine -Script $script -AsJob; Machine = $machine; Evidence = $guest } }
-        catch { $guest.status = 'fail'; throw }
-    }
-    foreach ($item in $jobs) {
-        $guest = $item.Evidence
-        try {
-            $guest.completion = Invoke-DemoGuestCommand -Machine $item.Machine -Job $item.Job -PassThru -AllowPending:($item.Machine.Monitor -and $item.Machine.OsType -eq 'Windows')
-            $guest.status = $guest.completion.status
-            if ($guest.status -eq 'pending') { Write-Warning "$($item.Machine.Name): AMA startup pending; poll readiness before presenting or offering an incident." }
-            else { Write-Ok "Guest activation verified: $($item.Machine.Name)" }
-        } catch { $guest.status = 'fail'; $guest['error'] = $_.Exception.Message; Write-Warning $_.Exception.Message }
-    }
-    if (@($result.guestChecks | Where-Object status -eq 'fail').Count) { throw (($result.guestChecks | Where-Object status -eq 'fail' | ForEach-Object error) -join '; ') }
-    Wait-Until -Message 'expected Arc identities connected' -Condition {
-        $arc = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
-        @($inventory.Machines | Where-Object { -not $_.Native -and $_.ArcId -notin @($arc | Where-Object status -eq 'Connected' | ForEach-Object id) }).Count -eq 0
-    } | Out-Null
+    $wait = Wait-DemoHostsReady -Inventory $inventory -NamePrefix $NamePrefix -AttemptStartedUtc $attemptStartedUtc -StartedAtUtc $startedAtUtc `
+        -DeadlineMinutes $GuestCheckMinutes -GuestChecks $GuestChecks -StallMinutes $StallMinutes -RepairStalledAgents:$RepairStalledAgents -NestedGuest $nestedStart
+    $result.guestChecks = @($wait.Hosts)
+    $result.nestedGuest = $wait.NestedGuest
+    $failures = @($wait.Hosts | Where-Object { $_.status -eq 'fail' } | ForEach-Object { "$($_.machineName): $($_.message)" })
+    if ($wait.NestedGuest.status -eq 'fail') { $failures += "nested guest $($wait.NestedGuest.guestVmName): $($wait.NestedGuest.message)" }
+    if ($failures) { throw ($failures -join '; ') }
+    if ($wait.Status -eq 'pending') { Write-Warning 'Compute is running; telemetry is pending for the hosts above. Poll Test-ArcDemoReadiness before presenting or offering an incident.' }
     if (-not $SkipPatchAssessment) {
         foreach ($machine in $inventory.Machines | Where-Object { -not $_.Native -and ($AssessPatches -or $_.Id -in $startedVmIds) }) {
             $assessment = [ordered]@{ machineName = $machine.Name; resourceId = $machine.ArcId; status = 'pending' }
@@ -196,7 +170,7 @@ while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonA
         }
         if ($ready.status -eq 'pending') { Write-Warning 'Compute/services are active; telemetry is pending. Re-run Test-ArcDemoReadiness before presenting or offering an incident.' }
     } else { $result.readiness = 'skipped' }
-    $result.status = if ($result.readiness -eq 'pending') { 'pending' } else { 'pass' }
+    $result.status = if ($result.readiness -eq 'pending' -or $wait.Status -eq 'pending') { 'pending' } else { 'pass' }
 } catch {
     $result.status = 'fail'
     $result.error = $_.Exception.Message

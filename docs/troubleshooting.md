@@ -76,8 +76,19 @@ finishes and removes it on success/failure. Do not print credential-bearing scri
 Inspect ARM model state, VM guest instance view, recent activity and exact-ID
 telemetry separately. An outstanding MDE.Linux operation can coincide with AMA
 and Change Tracking reporting ARM Updating even when their guest handlers report
-Succeeded and data continues to arrive. Readiness must remain pending, not be
-forced green. A missing MDE status file is not proof of working endpoint protection.
+Succeeded and data continues to arrive. A read-only look at one awake Linux host
+showed the VM provisioning state `Updating`, `MDE.Linux` `Transitioning` (the guest
+agent reported no status file) and the other handlers Ready, still so about 75
+minutes after wake with fresh Heartbeats.
+
+**Not a gate.** Extension provisioning state (AMA, Change Tracking, MDE) is a soft
+warning, not a readiness condition. Activation prints `extension <name> Updating for
+at least <n> min (not a gate)`, and readiness shows non-required `extension/*` rows
+(state, how long the host's Arc identity has been connected, a pointer here), so the
+overall status follows the required `heartbeat/*` rows. Do not force Heartbeat green
+and do not wait for these rows to clear before presenting. A `Failed` AMA extension
+with no Heartbeat is different: that is a real failure. A missing MDE status file is
+not proof of working endpoint protection.
 Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
 restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
 
@@ -121,10 +132,13 @@ approved read-only guest invocation returned a valid stdout completion marker;
 the marker/transport was not broken. Do not treat its absence in the original
 failed command as evidence that the guest script never ran.
 
-**Fix** - Activation checks Windows Arc AMA through `MonAgentCore`, as described
+**Fix** - Activation no longer runs a guest script by default: it waits for a
+Heartbeat generated after the VM start
+([the shared wait](#linux-activation-waits-behind-a-vm-extension-update)). The
+opt-in `-GuestChecks WhenStalled|Always` script checks Windows Arc AMA through
+`MonAgentCore`, as described
 in [Microsoft's Windows Arc troubleshooting guidance](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc),
-and restarts only real required services on newly started/disconnected hosts.
-Already-running hosts receive read-only guest health checks on a retry. Missing
+and restarts real required services only with `-RepairStalledAgents`. Missing
 services, failed status entries and absent stdout markers still fail.
 The helper reports safe status metadata without logging potentially sensitive
 guest output. Optional `-ResultPath` retains per-host outcomes and failures.
@@ -142,17 +156,18 @@ five minutes after boot, roughly half a minute after the old guard failed.
 Fresh exact-ID Heartbeat followed; no repair was needed. That observation is not
 a guarantee of future boot/ingestion time.
 
-Activation now submits host checks concurrently and waits up to ten minutes for
-Windows AMA, with job progress. Required Arc/Linux services must still be healthy.
-An AMA deadline emits the explicit pending marker and records that host as
-pending in `-ResultPath`; it does not restart/reinstall the agent. Final readiness
+Activation now waits up to the shared deadline (12 minutes by default) for a
+Heartbeat generated after the VM start; the first Windows Heartbeats were observed
+after 7.6-8.4 minutes. A host still without one at the deadline is recorded pending
+in `-ResultPath`; nothing is restarted or reinstalled. The opt-in guest script keeps
+its own ten-minute AMA wait and explicit pending marker. Final readiness
 reports telemetry lag separately. If only Heartbeat is pending, activation exits
 0 with pending evidence and a re-check message. Poll read-only readiness before
 presenting or the combined incident offer; report pending if it does not converge.
 Do not turn an auth failure, unhealthy service or failed extension into telemetry
 lag. Microsoft documents both the
 [MonAgentCore process and a further Heartbeat wait](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc#basic-troubleshooting-steps-installation-agent-not-running-configuration-issues);
-the ten-minute budget is this repo's policy, not a service SLA.
+the budgets here are this repo's policy, not a service SLA.
 
 ## Hibernate finds missing manifests, an extra VM or a foreign NAT
 
@@ -204,18 +219,32 @@ before proposing a targeted change. See [lifecycle boundaries](lifecycle.md).
 
 ## Linux activation waits behind a VM extension update
 
-After wake, Defender auto-provisioning can leave the MDE extension transitioning
-and other VM extension operations Updating. In the live rehearsal, Linux Run
-Command waited behind that update and reached its 15-minute checked-job timeout
-per VM, even though Heartbeats were fresh and the VM agent reported Ready.
-Activation collects those bounded results per VM, so these waits can dominate
-the wake time. Extension provisioning and direct sensor health are different
-signals; earlier direct checks reported a healthy sensor.
+**Observed cause** - After wake, Defender auto-provisioning can leave the MDE
+extension transitioning and the VM and its other extension operations `Updating`.
+Run Command queues behind that operation. In the 1 November rehearsal each blocked
+Linux VM reached the old 15-minute checked-job timeout, collected one VM at a time
+with a fresh clock, and activation then failed although Heartbeats were fresh and
+the VM agent reported Ready (first Heartbeats arrived after 3-4 minutes on Linux and
+7.6-8.4 on Windows). It is intermittent: the 2 November wake finished in about 13
+minutes with every guest check passing, yet six Linux AMA/Change Tracking extension
+models were still `Updating` 26 minutes later.
+
+**Fix** - Activation no longer uses Run Command for host checks by default. One
+shared wait with a single deadline (`-GuestCheckMinutes`, default 12) passes a host on
+VM running, Arc `Connected` and a Heartbeat generated after the VM start, and treats
+extension state as a soft warning (see the
+[Linux ARM Updating symptom](#linux-arm-updating-while-monitoring-guest-handlers-are-healthy)).
+A host with no Heartbeat at the deadline is pending for that host only. With
+`-GuestChecks WhenStalled|Always` the checks are asynchronous and share the same
+deadline: a command still queued then leaves its host pending, not failed, and
+`WhenStalled` skips a host whose VM agent is not Ready or whose VM has an extension
+operation in flight (it would queue behind it) and says so. Extension provisioning
+and direct sensor health are different signals; earlier direct checks reported a
+healthy sensor.
 
 Inspect VM instance view, extension state and exact-ID Heartbeats read-only.
-Do not cancel the update, remove/reinstall Defender, or infer readiness from
-Heartbeat alone. The wait/transport behaviour needs a separate operator decision;
-the weekend rehearsal did not redesign activation or repair the sensor.
+Do not cancel the update, remove/reinstall Defender, restart anything or infer
+readiness from extension state in either direction.
 
 ## Arc reconnects after startup, but Windows Heartbeat is still pending
 
