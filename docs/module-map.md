@@ -123,7 +123,10 @@ the workbooks it publishes to the deployment workspace, so the repo JSON carries
 `tests/GovernanceWorkbook.Tests.ps1` and `tests/WorkbookWorkspaceScope.Tests.ps1` guard them, and
 `tests/RebuiltWorkbooksLayout.Tests.ps1` guards what only shows in the portal (grid headers that fit their
 column width, date/time columns in local time, percentage bars printed as percentages, small grids that fit
-their rows instead of reserving a fixed 330 px band, grouped bar charts that name their category column).
+their rows instead of reserving a fixed 330 px band, grouped bar charts that name their category column,
+percentage charts on a 0 to 100 axis with a % unit). The experimental governance workbook's count tiles carry
+no palette colour, because the auto palette colours by position and a failing count could read teal or a
+passing one purple; red-to-green colour comes only from the percentage tiles and the status icons.
 Resource Graph allows at most two tables per query and never the security and patch tables together, so the
 compliance tiles are one query per table pair.
 
