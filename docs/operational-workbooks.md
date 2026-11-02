@@ -1,11 +1,11 @@
 # Capacity and optimisation workbooks
 
 Optional, read-only engineer views built only from telemetry the lab already collects
-and from Arc inventory. They are scenes 4 and 5 of the 25-30 minute presenter path
+and from Arc inventory. They are chapters 5 and 6 of the 25-28 minute presenter story
 and they never act on a machine. The operator procedure (preview, draft, publish,
 remove) is in the [runbook](runbook.md#optional-capacity-and-optimisation-workbooks);
-this page says what each view shows and the rules behind it. The first-scene
-[Estate Overview](#estate-overview-scene-1) is a static template, described after the two.
+this page says what each view shows and the rules behind it. The first-chapter
+[Estate Overview](#estate-overview-chapter-1) is a static template, described after the two.
 
 | Workbook | Story |
 |---|---|
@@ -164,7 +164,7 @@ opportunities* from the header and the resource-detail tab of *Capacity and head
 hyperlinks that open the sibling with its own default scope, and a draft links to the draft while a published
 workbook links to the published one, so publish both for the links to resolve.
 
-## Estate Overview (scene 1)
+## Estate Overview (chapter 1)
 
 The first impression: which Arc machines exist, whether they are connected and sending telemetry, how busy they are,
 what changed and what needs attention. Unlike the two workbooks above it is a **static, self-contained template**
@@ -226,9 +226,12 @@ tag changes or a newly onboarded nested guest.
   Pass the workspace, subscription and tenant through `New-PesterContainer -Data`. It ingests nothing.
 - `tests/EstateOverviewWorkbook.Tests.ps1` covers the static Estate Overview offline: no tokens or identifiers, defaults and
   All handling, a flat option list, no-data messages, the honest tile logic, colour meaning, chart legends, grid headers and
-  number formats, the local alert time, the no-agent detail state and the names scene 1 of the presenter template uses. It is
+  number formats, the local alert time, the no-agent detail state and the names chapter 1 of the presenter template uses. It is
   explicit opt-in for the live part: pass the workspace, subscription and tenant through
   `New-PesterContainer -Data` to run its Log Analytics items read-only under every form of All.
+- `tests/RunsheetWorkbookNames.Tests.ps1` is the presenter name guard: every bold tile, section or tab name in a chapter of
+  `docs/runsheet.md` must exist in the workbook that chapter opens (the Capacity and Optimisation tile labels live in
+  `workbooks/queries`), so a workbook rename fails a test instead of surprising the presenter.
 - Query execution against the real workspace and portal rendering are separate evidence. A passing mock or query run does
   not prove the portal draws a tile or chart the way it should; review the draft in the portal first.
 - `arg()` inside a Log Analytics item works in the portal and through `api.loganalytics.io`, but the ARM

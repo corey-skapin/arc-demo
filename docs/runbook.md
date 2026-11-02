@@ -33,10 +33,11 @@ actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
 | `sqlMachineResourceId` (optional) | Actual prepared SQL host Arc ID, with adjacent verified `sql-engine-status.json` from [real SQL Status](sql-engine-workload.md); omit until actually prepared |
 | `sqlIncidentAlertResourceId` (optional) | Exact prepared SQL log-alert ID; requires the SQL host/proof above. Adds a concrete alert link, not an alert-delivery or investigation claim |
 | `lobIncidentAlertResourceId` (optional) | Exact prepared LOB log-alert rule ID; requires `lobMachineName`. Adds a concrete alert link, not an alert-delivery or investigation claim |
-| `nestedSqlMachineResourceId` (optional) | Exact Arc machine ID of the nested SQL guest; enables the experimental nested Arc SQL scene. A link, not proof of current state: the presenter judges the scene by the live status and last collected time |
+| `nestedSqlMachineResourceId` (optional) | Exact Arc machine ID of the nested SQL guest; enables the experimental nested Arc SQL beat. A link, not proof of current state: the presenter judges the beat by the live status and last collected time |
 | `nestedSqlInstanceResourceId`, `nestedSqlParentMachineResourceId` (optional) | The guest's Arc-enabled SQL Server instance and its Hyper-V parent Arc machine; each requires the nested guest above |
 | `dataCollectionRuleResourceId` (optional) | Exact core data collection rule ID, opened read-only in the "how the data gets here" beat |
-| `machineIntelligenceWorkbookResourceId`, `complianceWorkbookResourceId` (optional) | Exact IDs of the original Machine Intelligence Center and Compliance, Security and Governance workbooks, used as optional one-minute beats |
+| `machineIntelligenceWorkbookResourceId`, `complianceWorkbookResourceId` (optional) | Exact IDs of the original Machine Intelligence Center and Compliance, Security and Governance workbooks, used in the "show me one server" and "safe and up to date" chapters |
+| `assetInventoryWorkbookResourceId`, `sqlEstateWorkbookResourceId` (optional) | Exact IDs of the Asset Inventory and SQL Estate workbooks: the optional extra minute in the estate chapter and the database chapter. Without them the guide skips those steps and says so |
 | `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview or draft IDs. Adds optional links, not current-health or savings proof |
 | `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
 
@@ -67,8 +68,8 @@ broken or guessed relative path.
 
 ## Optional capacity and optimisation workbooks
 
-These are optional read-only engineer surfaces after setup, scenes 4 and 5 of the
-25-30 minute presenter path rather than additional workload infrastructure.
+These are optional read-only engineer surfaces after setup, chapters 5 and 6 of the
+25-28 minute presenter story rather than additional workload infrastructure.
 They reuse existing `Perf`/`InsightsMetrics` and Arc inventory; the views make no
 guest, SQL, extension, power, price or schedule changes. The one collection change
 is the explicitly approved Linux memory and disk counters in the core DCR, which
@@ -367,10 +368,10 @@ The approved diagnostics found healthy/licensed sensors in passive mode with
 real-time protection disabled, and retained an extension/direct-health
 event-provider discrepancy. A Monitor pass is not active AV or full EDR proof.
 
-Rehearse the [25-30 minute Arc path](runsheet.md). The optional companion
+Rehearse the [25-28 minute Arc story](runsheet.md). The optional companion
 SRE repo consumes these existing alerts; it does not replace the standalone Arc
 operations plane. Reset/induce faults only as separately authorized scenario
-actions. Do not claim Arc SQL validation: the nested guest scene is experimental
+actions. Do not claim Arc SQL validation: the nested guest is experimental
 and license-only; see [SQL stance](sql-arc-spike.md).
 
 ## 5. Park and wake (separate disruptive approval)
