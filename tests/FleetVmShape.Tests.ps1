@@ -212,6 +212,7 @@ Describe 'Deploy wiring for the declared nested parent' {
             }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
             if ($Arguments[0] -in @('keyvault', 'network', 'consumption')) { return $null }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             throw "Unexpected preview operation: $($Arguments[0..1] -join ' ')"
         }
     }

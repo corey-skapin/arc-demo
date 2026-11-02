@@ -459,6 +459,24 @@ saved: do not redeploy over them. Fix the vault access, then either remove and
 rebuild the lab or, with approval, reset the VM administrator password and rerun
 Deploy with that value as `-AdminPassword`.
 
+## What-if lists the Defender plan with `Delete properties.extensions`
+
+**Symptom** — a manual `az deployment sub what-if` (or deployment) of
+`bicep/main.bicep` shows `Microsoft.Security/pricings/VirtualMachines` as a Modify
+with `Delete properties.extensions`.
+
+**Cause** — The template's default `deployDefenderVmPlan=true` applies the Defender
+for Servers module, which declares no `extensions`. On an enabled plan that would
+remove settings such as AgentlessVmScanning. `Deploy-ArcDemo.ps1` reads the live
+plan and passes `false` when it is already Standard, so its own what-if lists no
+Defender change.
+
+**Fix** — Deploy through `Deploy-ArcDemo.ps1`, or pass `deployDefenderVmPlan=false`
+when using the template directly. Do not edit the plan or its extensions to quiet the
+preview. If Deploy stops with `Cannot read the Defender for Servers plan tier`, the
+plan read was empty or returned an unknown tier: inspect it with
+`az security pricing show --name VirtualMachines`.
+
 ## Preparing the nested SQL parent stops
 
 `Prepare-NestedSqlParent.ps1` stops at the first failing phase, keeps what it

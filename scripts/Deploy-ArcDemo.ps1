@@ -664,6 +664,20 @@ if ($DeployContainerApps) {
     }
 }
 
+# Idempotency: leave an enabled Defender for Servers plan alone. Re-PUTting it without its
+# extensions strips settings such as AgentlessVmScanning, so only a plan that is not
+# Standard yet is enabled (fresh subscriptions and plans disabled by Remove -DisableDefender).
+$defenderOutput = Invoke-DemoAz -Arguments @('security', 'pricing', 'show', '--name', 'VirtualMachines', '-o', 'json')
+$defenderPlan = if ($null -ne $defenderOutput) { $defenderOutput | ConvertFrom-Json }
+if ($defenderPlan.pricingTier -notin @('Free', 'Standard')) {
+    throw "Cannot read the Defender for Servers plan tier (got '$($defenderPlan.pricingTier)'). Inspect it with: az security pricing show --name VirtualMachines"
+}
+$deployDefenderVmPlan = $defenderPlan.pricingTier -ne 'Standard'
+if (-not $deployDefenderVmPlan) {
+    $defenderLabel = "$($defenderPlan.pricingTier) $($defenderPlan.subPlan)".Trim()
+    Write-Step "Found enabled Defender for Servers plan ($defenderLabel) — leaving the plan and its extensions untouched"
+}
+
 $templateParameters = @{
     location                = @{ value = $Location }
     arcResourceGroup        = @{ value = $arcRg }
@@ -679,6 +693,7 @@ $templateParameters = @{
     containerAppSimulateCrash = @{ value = $containerAppSimulateCrash }
     existingNatGatewayId    = @{ value = $existingNatGwId }
     existingBudgetStartDate = @{ value = $existingBudgetStart }
+    deployDefenderVmPlan    = @{ value = $deployDefenderVmPlan }
     tenantId                = @{ value = $TenantId }
     deployerPrincipalId     = @{ value = $principalId }
     keyVaultName            = @{ value = $kvName }

@@ -54,6 +54,7 @@
 - Preserve VM definitions/NICs/disks/Arc identities while parked; never delete/reconstruct VMs as a cost shortcut.
 - Managed Run Command is limited to 25 saved commands per VM. Preserve useful failures; remove only completed demo-owned commands through the working helper, not unrelated commands or an in-flight operation.
 - Keep Defender pricing unchanged on default removal; require separate `-DisableDefender` / `-RemoveOnboardingIdentity` consent.
+- Deploy likewise leaves an enabled Defender for Servers plan (tier, subPlan, extensions such as AgentlessVmScanning) untouched: it reads the live plan and enables Plan 2 only when the tier is not Standard, because a PUT without `extensions` strips them. Never add a plan or extension rewrite to clear what-if output.
 - Keep Remove's `-ForceDeleteWorkspace` (irreversible log deletion) and `-PruneDeploymentHistory` (own `arc-demo-<timestamp>` records only) opt-in; use them only for an intended clean same-prefix rebuild. A failed nested-guest stop warns and removal continues.
 - Verify both groups and named subscription policies/budget absent for Removed; disclose tenant/shared/soft-delete exceptions without purging or claiming zero bill.
 

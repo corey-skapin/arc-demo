@@ -231,6 +231,9 @@ param existingNatGatewayId string = ''
 @description('Existing budget start date (YYYY-MM-01) to preserve on re-runs. Defaults to the first of the current UTC month for fresh deploys.')
 param existingBudgetStartDate string = utcNow('yyyy-MM-01')
 
+@description('Enable the subscription Defender for Servers plan. The wrapper passes false when the plan is already Standard, because a PUT without its extensions strips settings such as AgentlessVmScanning.')
+param deployDefenderVmPlan bool = true
+
 resource rgArc 'Microsoft.Resources/resourceGroups@2024-11-01' = {
   name: arcResourceGroup
   location: location
@@ -388,7 +391,7 @@ module aksMod 'modules/aks.bicep' = if (deployAks) {
 
 // ----- Subscription-scoped pieces -----
 
-module defenderMod 'modules/defender.bicep' = {
+module defenderMod 'modules/defender.bicep' = if (deployDefenderVmPlan) {
   name: 'defender-deploy'
 }
 
