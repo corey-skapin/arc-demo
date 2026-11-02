@@ -35,10 +35,12 @@ Describe 'Estate Overview is a static, self-contained workbook template' {
     }
 
     It 'uses only the parameters the workbook defines' {
-        $known = @('TimeRange:startISO', 'TimeRange:endISO', 'OsFilter', 'EnvironmentFilter', 'RoleFilter', 'SelectedMachine')
-        foreach ($item in $script:Queries) {
-            foreach ($match in [regex]::Matches($item.content.query, '\{([A-Za-z][A-Za-z0-9]*(?::[A-Za-z]+)?)\}')) {
-                $match.Groups[1].Value | Should -BeIn $known -Because "$($item.name) uses {$($match.Groups[1].Value)}"
+        $known = @('TimeRange:startISO', 'TimeRange:endISO', 'OsFilter', 'EnvironmentFilter', 'RoleFilter', 'MachineScope', 'AlertSummary', 'SelectedMachine')
+        $texts = @($script:Queries | ForEach-Object { [pscustomobject]@{ Name = $_.name; Query = $_.content.query } }) +
+            @($script:Parameters | Where-Object { $_.query } | ForEach-Object { [pscustomobject]@{ Name = "parameter $($_.name)"; Query = $_.query } })
+        foreach ($entry in $texts) {
+            foreach ($match in [regex]::Matches($entry.Query, '\{([A-Za-z][A-Za-z0-9]*(?::[A-Za-z]+)?)\}')) {
+                $match.Groups[1].Value | Should -BeIn $known -Because "$($entry.Name) uses {$($match.Groups[1].Value)}"
             }
         }
     }
@@ -50,9 +52,9 @@ Describe 'Estate Overview is a static, self-contained workbook template' {
 
 Describe 'Estate Overview opens with data and zero clicks' {
     It 'gives every parameter a working default' {
-        $script:Parameters.Count | Should -Be 4
+        $script:Parameters.Count | Should -Be 6
         ($script:Parameters | Where-Object name -eq 'TimeRange').value.durationMs | Should -Be 86400000
-        foreach ($name in 'OsFilter', 'EnvironmentFilter', 'RoleFilter') {
+        foreach ($name in 'OsFilter', 'EnvironmentFilter', 'RoleFilter', 'MachineScope', 'AlertSummary') {
             $p = $script:Parameters | Where-Object name -eq $name
             @($p.value) | Should -Be @('value::all') -Because $name
             $p.defaultValue | Should -Be 'value::all' -Because $name
@@ -93,22 +95,41 @@ Describe 'Estate Overview opens with data and zero clicks' {
         }
     }
 
-    It 'accepts an empty list, the literal All marker and an asterisk for every filter in every Log Analytics query' {
-        foreach ($item in $script:LogQueries) {
-            $q = $item.content.query
-            foreach ($f in 'OsF', 'EnvF', 'RoleF') {
-                $q | Should -Match "array_length\($f\) == 0 or set_has_element\($f, 'value::all'\) or set_has_element\($f, '\*'\)" -Because "$($item.name) $f"
+    It 'writes the filter guard inline in every Resource Graph query that uses a filter' {
+        $graphTexts = [ordered]@{
+            'post-updates' = (Get-Query 'post-updates'); 'post-sql' = (Get-Query 'post-sql'); 'post-tags' = (Get-Query 'post-tags')
+            'MachineScope' = ($script:Parameters | Where-Object name -eq 'MachineScope').query
+        }
+        foreach ($name in $graphTexts.Keys) {
+            $q = $graphTexts[$name]
+            foreach ($f in 'OsFilter', 'EnvironmentFilter', 'RoleFilter') {
+                $list = [regex]::Escape("dynamic([{$f}])")
+                $q | Should -Match "array_length\($list\) == 0 or set_has_element\($list, 'value::all'\) or set_has_element\($list, '\*'\)" -Because "$name $f"
             }
-            $q | Should -Match '\(OsAll or Os in \(OsF\)\) and \(EnvAll or Env in \(EnvF\)\) and \(RoleAll or Role in \(RoleF\)\)' -Because $item.name
+            $q | Should -Not -Match '(?m)^\s*let\s' -Because "${name}: Resource Graph rejects a let statement"
         }
     }
 
-    It 'expands to a valid filter list for every form the portal can substitute' {
-        $q = Get-Query 'kpi'
+    It 'scopes every Log Analytics item through the one derived machine list, never through the filters directly' {
+        foreach ($item in $script:LogQueries) {
+            $item.content.query | Should -Match 'let Scope = dynamic\(\[\{MachineScope\}\]\);' -Because $item.name
+            $item.content.query | Should -Not -Match '\{(OsFilter|EnvironmentFilter|RoleFilter)\}' -Because $item.name
+        }
+    }
+
+    It 'expands to a valid filter list and a valid scope list for every form the portal can substitute' {
+        $scope = ($script:Parameters | Where-Object name -eq 'MachineScope').query
         foreach ($case in @('', "'value::all'", "'*'", "'Windows','Linux'", "'Linux'")) {
-            $expanded = $q.Replace('{OsFilter}', $case).Replace('{EnvironmentFilter}', $case).Replace('{RoleFilter}', $case).Replace('{TimeRange:startISO}', '2026-01-01T00:00:00.000Z').Replace('{TimeRange:endISO}', '2026-01-02T00:00:00.000Z')
+            $expanded = $scope.Replace('{OsFilter}', $case).Replace('{EnvironmentFilter}', $case).Replace('{RoleFilter}', $case)
             $expanded | Should -Not -Match '\{[A-Za-z]'
-            $expanded | Should -Match ('let OsF = dynamic\(\[' + [regex]::Escape($case) + '\]\);')
+            ([regex]::Matches($expanded, [regex]::Escape("dynamic([$case])"))).Count | Should -Be 12
+        }
+        $q = Get-Query 'kpi'
+        $record = "'win-app-01|Connected|Windows|WS2016|app|full-monitor|1|Security updates pending|0|2|1|'"
+        foreach ($case in @('', "'value::all'", $record, "$record,$record", "'~none'")) {
+            $expanded = $q.Replace('{MachineScope}', $case).Replace('{AlertSummary}', "'3|Sev2|2026-11-02T01:00:00Z'").Replace('{TimeRange:startISO}', '2026-01-01T00:00:00.000Z').Replace('{TimeRange:endISO}', '2026-01-02T00:00:00.000Z')
+            $expanded | Should -Not -Match '\{[A-Za-z]'
+            $expanded | Should -Match ('let Scope = dynamic\(\[' + [regex]::Escape($case) + '\]\);')
         }
     }
 
@@ -140,6 +161,74 @@ Describe 'Estate Overview opens with data and zero clicks' {
     }
 }
 
+Describe 'Estate Overview works through the ARM workspace query endpoint' {
+    It 'uses no cross-service pattern in any Log Analytics item: the endpoint the portal uses rejects arg() and adx()' {
+        foreach ($item in $script:LogQueries) {
+            $item.content.query | Should -Not -Match '\b(arg|adx)\s*\(' -Because "$($item.name): the ARM workspace query endpoint answers 'The adx pattern cannot be used with the current authentication scheme'"
+        }
+        foreach ($parameter in @($script:Parameters | Where-Object { $_.query -and $_.queryType -eq 0 })) {
+            $parameter.query | Should -Not -Match '\b(arg|adx)\s*\(' -Because $parameter.name
+        }
+        $script:Raw | Should -Not -Match '\barg\s*\('
+    }
+
+    It 'reads the Arc inventory once, through two hidden Resource Graph-driven parameters' {
+        foreach ($name in 'MachineScope', 'AlertSummary') {
+            $p = $script:Parameters | Where-Object name -eq $name
+            $p.type | Should -Be 2
+            $p.multiSelect | Should -BeTrue
+            $p.isHiddenWhenLocked | Should -BeTrue
+            $p.queryType | Should -Be 1
+            $p.resourceType | Should -Be 'microsoft.resourcegraph/resources'
+            @($p.crossComponentResources) | Should -Be @('value::all')
+            $p.quote | Should -Be "'"
+            $p.delimiter | Should -Be ','
+            $p.typeSettings.PSObject.Properties.Name | Should -Not -Contain 'selectAllValue' -Because "${name}: All must expand to every record"
+            @($p.typeSettings.additionalResourceOptions) | Should -Contain 'value::all'
+        }
+    }
+
+    It 'builds one record per machine with twelve fields, clean separators and a sentinel when the filters match nothing' {
+        $query = ($script:Parameters | Where-Object name -eq 'MachineScope').query
+        $record = [regex]::Match($query, '(?s)extend Rec = strcat\((.+?)\)\r?\n\| summarize Recs').Groups[1].Value
+        $record | Should -Not -BeNullOrEmpty
+        ([regex]::Matches($record, "'\|'")).Count | Should -Be 11
+        ([regex]::Matches($query, 'replace_regex')).Count | Should -BeGreaterOrEqual 4
+        $query | Should -Match "dynamic\(\['~none'\]\)"
+        $query | Should -Match "label = iff\(Recs startswith '~', '\(no machine matches the filters\)', tostring\(split\(Recs, '\|'\)\[0\]\)\)"
+        $query | Should -Match "split\(tolower\(id\), '/patchassessmentresults/'\)" -Because 'the assessment key must be lower-cased before it is split'
+    }
+
+    It 'parses every field of that record in the Log Analytics prologue and nothing beyond it' {
+        $q = Get-Query 'kpi'
+        foreach ($index in 0..11) { $q | Should -Match "P\[$index\]" }
+        $q | Should -Not -Match 'P\[12\]'
+        $q | Should -Match "R !in \('value::all', '\*'\)"
+    }
+
+    It 'keeps the page populated if the scope arrives empty, and empty if the filters match nothing' {
+        foreach ($name in 'kpi', 'grid', 'beating') {
+            $q = Get-Query $name
+            $q | Should -Match "let NoMatch = array_length\(Scope\) == 1 and tostring\(Scope\[0\]\) startswith '~'" -Because $name
+            $q | Should -Match 'not\(HasInv\) and not\(NoMatch\)' -Because $name
+        }
+        (Get-Query 'kpi') | Should -Match 'inventory unavailable: heartbeat only'
+        (Get-Query 'beating') | Should -Match 'where ArcCount > 0'
+    }
+
+    It 'takes the alert summary from the derived parameter and says so when it is unavailable' {
+        (Get-Query 'kpi') | Should -Match "split\(tostring\(dynamic\(\[\{AlertSummary\}\]\)\[0\]\), '\|'\)"
+        (Get-Query 'kpi') | Should -Match 'alert data unavailable'
+        $p = $script:Parameters | Where-Object name -eq 'AlertSummary'
+        $p.query | Should -Match '\{TimeRange:startISO\}'
+        $p.query | Should -Match '\{TimeRange:endISO\}'
+    }
+
+    It 'reads the posture tables straight from Resource Graph, scoped by the same filters' {
+        foreach ($name in 'post-updates', 'post-sql', 'post-tags', 'post-alerts') { (Get-Item $name).queryType | Should -Be 1 -Because $name }
+    }
+}
+
 Describe 'Estate Overview tells the estate story with honest numbers' {
     It 'counts Arc machines once and reports telemetry separately, so a machine without an agent is present but not reporting' {
         $q = Get-Query 'kpi'
@@ -158,15 +247,17 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
     }
 
     It 'reads real Update Manager data, never a connection-state estimate' {
-        foreach ($name in 'kpi', 'grid', 'post-updates') {
-            $q = Get-Query $name
-            $q | Should -Match 'patchassessmentresources'
-            $q | Should -Match 'microsoft\.hybridcompute/machines/patchassessmentresults'
-            $q | Should -Match "isempty\(AssessmentStatus\), 'Not assessed'"
-            $q | Should -Match "'Assessment failed'"
-            $q | Should -Not -Match 'HealthScore|EstimatedCritical|daysOffline'
+        $sources = [ordered]@{ 'post-updates' = (Get-Query 'post-updates'); 'MachineScope' = ($script:Parameters | Where-Object name -eq 'MachineScope').query }
+        foreach ($name in $sources.Keys) {
+            $q = $sources[$name]
+            $q | Should -Match 'patchassessmentresources' -Because $name
+            $q | Should -Match 'microsoft\.hybridcompute/machines/patchassessmentresults' -Because $name
+            $q | Should -Match "isempty\(AssessmentStatus\), 'Not assessed'" -Because $name
+            $q | Should -Match "'Assessment failed'" -Because $name
+            $q | Should -Not -Match 'HealthScore|EstimatedCritical|daysOffline' -Because $name
         }
         (Get-Query 'kpi') | Should -Match "Patched = countif\(PatchState == 'Fully patched'\)"
+        (Get-Query 'grid') | Should -Match 'Updates = PatchState'
     }
 
     It 'zero-fills hosts reporting without depending on any heartbeat existing, and draws the Arc inventory as a baseline' {
@@ -296,7 +387,7 @@ Describe 'The presenter template names only what the Estate Overview shows' {
     }
 }
 
-Describe 'Estate Overview queries executed read-only against the live workspace' -Skip:([string]::IsNullOrWhiteSpace($WorkspaceResourceId)) {
+Describe 'Estate Overview queries executed read-only against the live workspace through both query endpoints' -Skip:([string]::IsNullOrWhiteSpace($WorkspaceResourceId)) {
     BeforeAll {
         $ErrorActionPreference = 'Stop'
         $repo = Split-Path $PSScriptRoot
@@ -307,64 +398,127 @@ Describe 'Estate Overview queries executed read-only against the live workspace'
         Initialize-DemoContext -SubscriptionId $SubscriptionId -TenantId $TenantId
         $workspace = Invoke-DemoAz -Arguments @('resource', 'show', '--ids', $WorkspaceResourceId, '-o', 'json') | ConvertFrom-Json
         if ($workspace.id -ne $WorkspaceResourceId -or -not $workspace.properties.customerId) { throw 'Test workspace identity/customerId unknown.' }
-        $token = Get-LawQueryToken
+        $lawToken = Get-LawQueryToken
+        $lawHeaders = @{ Authorization = ('Bearer ' + $lawToken) }
         $uri = "https://api.loganalytics.io/v1/workspaces/$($workspace.properties.customerId)/query"
         $iso = { param([datetime]$d) $d.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [cultureinfo]::InvariantCulture) }
         $end = [datetime]::UtcNow
-        $expansions = [ordered]@{
+        $armToken = Get-MgmtToken
+        $armUri = "https://management.azure.com$WorkspaceResourceId/query?api-version=2017-10-01"
+        $graphUri = 'https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01'
+        $cases = [ordered]@{
             empty = @{ OsFilter = ''; EnvironmentFilter = ''; RoleFilter = '' }
             marker = @{ OsFilter = "'value::all'"; EnvironmentFilter = "'value::all'"; RoleFilter = "'value::all'" }
             star = @{ OsFilter = "'*'"; EnvironmentFilter = "'*'"; RoleFilter = "'*'" }
+            linux = @{ OsFilter = "'Linux'"; EnvironmentFilter = ''; RoleFilter = '' }
+            nomatch = @{ OsFilter = "'Linux'"; EnvironmentFilter = ''; RoleFilter = "'sql'" }
+            scopeEmpty = @{ OsFilter = ''; EnvironmentFilter = ''; RoleFilter = ''; MachineScope = '' }
+            scopeMarker = @{ OsFilter = ''; EnvironmentFilter = ''; RoleFilter = ''; MachineScope = "'value::all'" }
         }
         function Expand([string]$Query, [hashtable]$Values) {
             $text = $Query.Replace('{TimeRange:startISO}', (& $iso $end.AddHours(-24))).Replace('{TimeRange:endISO}', (& $iso $end)).Replace('{SelectedMachine}', 'none-selected')
             foreach ($key in $Values.Keys) { $text = $text.Replace('{' + $key + '}', $Values[$key]) }
             $text
         }
+        function Invoke-Graph([string]$Query) {
+            $body = @{ subscriptions = @($SubscriptionId.ToString()); query = $Query; options = @{ resultFormat = 'objectArray' } } | ConvertTo-Json -Depth 5
+            @((Invoke-RestMethod -Method POST -Uri $graphUri -Headers @{ Authorization = "Bearer $armToken" } -ContentType 'application/json' -Body $body -TimeoutSec 120).data)
+        }
+        # The hidden parameters resolve as the portal resolves All: every option value, quoted and comma separated.
+        foreach ($name in @($cases.Keys)) {
+            $values = $cases[$name]
+            foreach ($derived in 'MachineScope', 'AlertSummary') {
+                if ($values.ContainsKey($derived)) { continue }
+                $parameter = $script:Parameters | Where-Object name -eq $derived
+                $options = @(Invoke-Graph (Expand $parameter.query $values) | ForEach-Object { [string]$_.value })
+                $values[$derived] = (@($options | ForEach-Object { "'$_'" }) -join ',')
+            }
+        }
         $items = @($script:LogQueries | Where-Object { -not $_.conditionalVisibility })
-        $requests = foreach ($case in $expansions.Keys) {
-            foreach ($item in $items) { [pscustomobject]@{ Key = "$case/$($item.name)"; Body = (@{ query = (Expand $item.content.query $expansions[$case]) } | ConvertTo-Json -Depth 5) } }
+        $requests = foreach ($case in $cases.Keys) {
+            foreach ($item in $items) { [pscustomobject]@{ Key = "data/$case/$($item.name)"; Body = (@{ query = (Expand $item.content.query $cases[$case]) } | ConvertTo-Json -Depth 5) } }
+        }
+        $armRequests = foreach ($case in $cases.Keys) {
+            foreach ($item in $items) { [pscustomobject]@{ Key = "arm/$case/$($item.name)"; Body = (@{ query = (Expand $item.content.query $cases[$case]) } | ConvertTo-Json -Depth 5) } }
         }
         $responses = @($requests | ForEach-Object -ThrottleLimit 4 -Parallel {
+            $request = $_
             try {
-                $reply = Invoke-RestMethod -Method POST -Uri $using:uri -Headers @{ Authorization = "******" } -ContentType 'application/json' -Body $_.Body -TimeoutSec 180
+                $reply = Invoke-RestMethod -Method POST -Uri $using:uri -Headers $using:lawHeaders -ContentType 'application/json' -Body $_.Body -TimeoutSec 180
                 [pscustomobject]@{ Key = $_.Key; Reply = $reply; Error = '' }
             } catch {
-                [pscustomobject]@{ Key = $_.Key; Reply = $null; Error = [string]$_.ErrorDetails.Message }
+                [pscustomobject]@{ Key = $request.Key; Reply = $null; Error = $(if ($_.ErrorDetails.Message) { [string]$_.ErrorDetails.Message } else { $_.Exception.Message }) }
+            }
+        })
+        $armResponses = @($armRequests | ForEach-Object -ThrottleLimit 4 -Parallel {
+            $request = $_
+            try {
+                $reply = Invoke-RestMethod -Method POST -Uri $using:armUri -Headers @{ Authorization = "Bearer $using:armToken" } -ContentType 'application/json' -Body $_.Body -TimeoutSec 180
+                [pscustomobject]@{ Key = $_.Key; Reply = $reply; Error = '' }
+            } catch {
+                [pscustomobject]@{ Key = $request.Key; Reply = $null; Error = $(if ($_.ErrorDetails.Message) { [string]$_.ErrorDetails.Message } else { $_.Exception.Message }) }
             }
         })
         $live = @{}
-        foreach ($response in $responses) {
-            $table = if ($response.Reply -and @($response.Reply.tables).Count) { $response.Reply.tables[0] } else { $null }
-            $live[$response.Key] = [pscustomobject]@{
-                Error = $response.Error
-                Columns = @(if ($table) { $table.columns.name })
-                Rows = @(if ($table) { foreach ($row in $table.rows) { $record = [ordered]@{}; for ($i = 0; $i -lt $table.columns.Count; $i++) { $record[$table.columns[$i].name] = $row[$i] }; [pscustomobject]$record } })
+        foreach ($response in @($responses) + @($armResponses)) {
+            # The data plane answers tables/columns/name; the ARM endpoint answers the legacy Tables/Columns/ColumnName shape.
+            $reply = $response.Reply
+            $tables = @(if ($reply) { if ($reply.PSObject.Properties['tables']) { $reply.tables } elseif ($reply.PSObject.Properties['Tables']) { $reply.Tables } })
+            $names = @()
+            $records = @()
+            if ($tables.Count) {
+                $table = $tables[0]
+                $names = @(if ($table.PSObject.Properties['columns']) { $table.columns | ForEach-Object { $_.name } } else { $table.Columns | ForEach-Object { $_.ColumnName } })
+                $rowProperty = if ($table.PSObject.Properties['rows']) { 'rows' } else { 'Rows' }
+                $records = @(foreach ($row in $table.$rowProperty) {
+                    $record = [ordered]@{}
+                    for ($i = 0; $i -lt $names.Count; $i++) { $record[[string]$names[$i]] = $row[$i] }
+                    [pscustomobject]$record
+                })
             }
+            $live[$response.Key] = [pscustomobject]@{ Error = $response.Error; Columns = $names; Rows = $records }
         }
     }
 
-    It 'runs every default-view Log Analytics item under every expansion of All without an error' {
+    It 'runs every default-view Log Analytics item through the ARM workspace query endpoint and the data plane without an error' {
         foreach ($key in $live.Keys) { $live[$key].Error | Should -BeNullOrEmpty -Because $key }
     }
 
     It 'returns data or has a specific no-data reason for every item' {
         foreach ($key in $live.Keys) {
-            $name = ($key -split '/')[1]
+            $name = ($key -split '/')[2]
             if ($live[$key].Rows.Count -eq 0) { (Get-Item $name).noDataMessage | Should -Not -BeNullOrEmpty -Because $key }
         }
     }
 
-    It 'counts the same Arc machines under every form of All' {
-        $counts = foreach ($case in $expansions.Keys) { ($live["$case/kpi"].Rows | Where-Object Label -like '*Arc machines*').Value }
-        @($counts | Select-Object -Unique).Count | Should -Be 1
-        $grid = foreach ($case in $expansions.Keys) { $live["$case/grid"].Rows.Count }
-        @($grid | Select-Object -Unique).Count | Should -Be 1
+    It 'counts the same Arc machines under every form of All and through both endpoints' {
+        foreach ($endpoint in 'arm', 'data') {
+            $counts = foreach ($case in 'empty', 'marker', 'star') { ($live["$endpoint/$case/kpi"].Rows | Where-Object Label -like '*Arc machines*').Value }
+            @($counts | Select-Object -Unique).Count | Should -Be 1 -Because $endpoint
+            $grid = foreach ($case in 'empty', 'marker', 'star') { $live["$endpoint/$case/grid"].Rows.Count }
+            @($grid | Select-Object -Unique).Count | Should -Be 1 -Because $endpoint
+        }
+        ($live['arm/empty/kpi'].Rows | Where-Object Label -like '*Arc machines*').Value | Should -Be ($live['data/empty/kpi'].Rows | Where-Object Label -like '*Arc machines*').Value
+    }
+
+    It 'follows a real selection and shows nothing, rather than everything, when the filters match no machine' {
+        $live['arm/linux/grid'].Rows.Count | Should -BeLessOrEqual $live['arm/empty/grid'].Rows.Count
+        $live['arm/linux/grid'].Rows.Count | Should -BeGreaterThan 0
+        foreach ($row in $live['arm/linux/grid'].Rows) { $row.Os | Should -Be 'Linux' }
+        $live['arm/nomatch/grid'].Rows.Count | Should -Be 0
+        ($live['arm/nomatch/kpi'].Rows | Where-Object Label -like '*Arc machines*').Value | Should -Be 0
+    }
+
+    It 'keeps the page populated, and says why, when the scope arrives empty or as the literal All marker' {
+        foreach ($case in 'scopeEmpty', 'scopeMarker') {
+            $live["arm/$case/grid"].Rows.Count | Should -BeGreaterThan 0 -Because $case
+            ($live["arm/$case/kpi"].Rows | Where-Object Label -like '*Arc machines*').Note | Should -Match 'inventory unavailable' -Because $case
+        }
     }
 
     It 'returns every column that a formatter, label, tile or chart refers to' {
         foreach ($key in $live.Keys) {
-            $name = ($key -split '/')[1]
+            $name = ($key -split '/')[2]
             $content = Get-Item $name
             $columns = $live[$key].Columns
             if (-not $live[$key].Rows.Count) { continue }
@@ -382,7 +536,7 @@ Describe 'Estate Overview queries executed read-only against the live workspace'
     }
 
     It 'keeps tile labels and notes short enough for the default tile width' {
-        $tiles = $live['empty/kpi'].Rows
+        $tiles = $live['arm/empty/kpi'].Rows
         $tiles.Count | Should -Be 8
         foreach ($tile in $tiles) {
             $tile.Label.Length | Should -BeLessOrEqual 20 -Because $tile.Label

@@ -178,9 +178,15 @@ is, apart from pinning its Log Analytics items to the deployment workspace, and 
 - **Filters.** Time range (default 24 hours), operating system, environment and role. Environment and role options are read
   live from the Arc machines' tags (an empty tag reads *(untagged)*). Every filter defaults to *All*, which means no
   filtering, and the queries also accept an empty value, `value::all` and `*`.
-- **Data.** The Arc inventory, Update Manager assessments (`patchassessmentresources`), Arc SQL instances and alerts come
-  from Azure Resource Graph and are read inside the Log Analytics queries with `arg("")`, so one query can combine them
-  with Heartbeat, Perf, InsightsMetrics, Event, Syslog and Change Tracking.
+- **Data.** No Log Analytics item calls `arg()`: the ARM workspace query endpoint, which the portal uses, rejects it
+  ("The 'adx' pattern cannot be used with the current authentication scheme") although the same query runs through the
+  data-plane API. The Arc inventory, Update Manager assessments (`patchassessmentresources`) and Arc SQL instances are read
+  once by a hidden Resource Graph-driven parameter, `MachineScope` (one record per machine, already filtered by the
+  operating system, environment and role selections), and the alert summary by a second hidden parameter, `AlertSummary`.
+  Every Log Analytics item parses `MachineScope`, so one machine list scopes them all, and combines it with Heartbeat, Perf,
+  InsightsMetrics, Event, Syslog and Change Tracking. The update, SQL and tag tables on the *Posture* tab are plain Resource
+  Graph items. If `MachineScope` ever arrives empty the page degrades to the heartbeating machines and says "inventory
+  unavailable" instead of going blank; if the filters match no machine every item shows its own no-data message.
 - **Honest numbers.** *Arc machines* counts the inventory once. *Reporting now* needs a heartbeat in the last 15 minutes,
   so a machine with no Azure Monitor Agent (the nested SQL guest) is present but not reporting, and the grid says so; last
   heartbeat looks back 14 days. Load uses the same canonical CPU, memory and disk counters as *Capacity and headroom*, and
@@ -219,9 +225,12 @@ tag changes or a newly onboarded nested guest.
   deterministic literal tables (spike versus sustained, missing counters, thin history, parked gaps, invalid samples, Linux
   names and pseudo mounts, parent/guest, tags, scenario arithmetic) with the telemetry sources swapped inside the query text.
   Pass the workspace, subscription and tenant through `New-PesterContainer -Data`. It ingests nothing.
-- `tests/EstateOverviewWorkbook.Tests.ps1` covers the static Estate Overview offline: no tokens or identifiers, defaults and
-  All handling, a flat option list, no-data messages, the honest tile logic, colour meaning and the names scene 1 of the
-  presenter template uses. It is explicit opt-in for the live part: pass the workspace, subscription and tenant through
-  `New-PesterContainer -Data` to run its Log Analytics items read-only under every form of All.
-- Query execution against the real workspace and portal rendering are separate evidence. A passing mock or query run does
+- `tests/EstateOverviewWorkbook.Tests.ps1` covers the static Estate Overview offline: no tokens or identifiers, no `arg()` in
+  any Log Analytics item, the shape of the two hidden parameters, defaults and All handling, a flat option list, no-data
+  messages, the honest tile logic, colour meaning and the names scene 1 of the presenter template uses. Its live part is
+  explicit opt-in: pass the workspace, subscription and tenant through `New-PesterContainer -Data` to run every Log
+  Analytics item read-only through both the ARM workspace query endpoint (the portal's path) and the data-plane API, under
+  every form of All, a real selection, a selection that matches nothing, and an empty or literal-marker scope.
+- Query execution against the real workspace and portal rendering are separate evidence. The data-plane API accepts
+  cross-service patterns that the ARM endpoint rejects, so run Log Analytics items through the ARM endpoint too. A passing mock or query run does
   not prove the portal draws a tile or chart the way it should; review the draft in the portal first.

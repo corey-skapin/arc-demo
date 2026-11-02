@@ -102,9 +102,10 @@ intentional sample names; lifecycle follows IDs rather than guessing those names
 
 `workbooks/arc-demo-overview.workbook.json` is a static, self-contained template (no
 deploy-time tokens), so Phase 11 publishes it as is, apart from pinning its Log Analytics
-items to the deployment workspace; it reads the Arc inventory
-through `arg("")` inside its Log Analytics queries and takes its filter options from
-Resource Graph. It and the vendored `workbooks/nseilaz` collection provide the presenter
+items to the deployment workspace. Its Log Analytics queries never call `arg()` (the ARM workspace
+query endpoint the portal uses rejects it): two hidden Resource Graph-driven parameters,
+`MachineScope` and `AlertSummary`, carry the Arc inventory and the alert summary into them, and its
+filter options and posture tables are read from Resource Graph. It and the vendored `workbooks/nseilaz` collection provide the presenter
 surfaces. `docs/runsheet.md` keeps the
 25-30 minute standalone Arc/Monitor path (estate, one view of Windows, Linux and SQL
 including the experimental nested Arc SQL scene, the two engineer workbooks, the
