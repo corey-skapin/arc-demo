@@ -79,7 +79,9 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "redGreen"
+              "palette": "redGreen",
+              "min": 0,
+              "max": 100
             },
             "numberFormat": {
               "unit": 1,
@@ -123,7 +125,9 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "redGreen"
+              "palette": "redGreen",
+              "min": 0,
+              "max": 100
             },
             "numberFormat": {
               "unit": 1,

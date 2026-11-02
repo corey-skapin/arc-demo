@@ -69,9 +69,21 @@ Describe 'Arc asset inventory workbook (rebuilt, repo-native)' {
         }
     }
 
-    It 'scales the tag coverage tiles on a red-to-green palette, never green at zero' {
+    It 'scales the tag coverage tiles on a fixed 0 to 100 red-to-green range, so 100 is green and 0 is red' {
         $tag = $queries | Where-Object { $_.content.title -eq 'Tag coverage' }
         $tag.content.tileSettings.leftContent.formatOptions.palette | Should -Be 'redGreen'
+        $tag.content.tileSettings.leftContent.formatOptions.min | Should -Be 0
+        $tag.content.tileSettings.leftContent.formatOptions.max | Should -Be 100
+    }
+
+    It 'keeps the first filter label short and groups noisy software rows' {
+        $time = $parameters | Where-Object name -eq 'TimeRange'
+        $time.label.Length | Should -BeLessOrEqual 18
+        $top = ($queries | Where-Object { $_.content.title -eq 'Most widely installed software' }).content.query
+        $top | Should -Match 'Microsoft Defender Antivirus definitions'
+        $top | Should -Match 'replace_regex\(Publisher'
+        $changes = ($queries | Where-Object { $_.content.title -eq 'Recent software changes' }).content.query
+        $changes | Should -Match 'Microsoft Defender Antivirus definitions'
     }
 
     It 'accepts the lab tag names and avoids a multi-key top operator' {

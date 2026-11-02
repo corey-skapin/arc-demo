@@ -17,7 +17,7 @@
             "id": "4bde3c22-fa1c-58a6-8d11-25e81c302240",
             "version": "KqlParameterItem/1.0",
             "name": "TimeRange",
-            "label": "Time range (software and telemetry)",
+            "label": "Time range",
             "type": 4,
             "isRequired": true,
             "value": {
@@ -299,7 +299,7 @@
     {
       "type": 1,
       "content": {
-        "json": "## Tagging\nShare of Arc servers carrying each required tag (green is good, red is missing). The lab tags are `owner`, `costcenter` and `env`; the queries also accept the `CostCentre`, `Owner` and `Environment` spellings."
+        "json": "## Tagging\nShare of Arc servers carrying each required tag (green is good, red is missing); the last tile names any server that is missing one. The lab tags are `owner`, `costcenter` and `env`; the queries also accept the `CostCentre`, `Owner` and `Environment` spellings."
       },
       "name": "tags-header"
     },
@@ -307,7 +307,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| summarize Total = count(), HasCostCentre = countif(isnotempty(CostCentre)), HasOwner = countif(isnotempty(Owner)), HasEnvironment = countif(isnotempty(Environment))\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Cost centre tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasCostCentre / Total, 1)), 'Note', strcat(tostring(HasCostCentre), ' of ', tostring(Total), ' servers')),\n    pack('Order', 2, 'Label', 'Owner tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasOwner / Total, 1)), 'Note', strcat(tostring(HasOwner), ' of ', tostring(Total), ' servers')),\n    pack('Order', 3, 'Label', 'Environment tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasEnvironment / Total, 1)), 'Note', strcat(tostring(HasEnvironment), ' of ', tostring(Total), ' servers')))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| extend Untagged = isempty(CostCentre) or isempty(Owner) or isempty(Environment)\n| summarize Total = count(), HasCostCentre = countif(isnotempty(CostCentre)), HasOwner = countif(isnotempty(Owner)), HasEnvironment = countif(isnotempty(Environment)), FullyTagged = countif(not(Untagged)), MissingNames = strcat_array(make_set_if(name, Untagged, 2), ', ')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Cost centre tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasCostCentre / Total, 1)), 'Note', strcat(tostring(HasCostCentre), ' of ', tostring(Total), ' servers')),\n    pack('Order', 2, 'Label', 'Owner tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasOwner / Total, 1)), 'Note', strcat(tostring(HasOwner), ' of ', tostring(Total), ' servers')),\n    pack('Order', 3, 'Label', 'Environment tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasEnvironment / Total, 1)), 'Note', strcat(tostring(HasEnvironment), ' of ', tostring(Total), ' servers')),\n    pack('Order', 4, 'Label', 'Fully tagged', 'Value', iff(Total == 0, 0.0, round(100.0 * FullyTagged / Total, 1)), 'Note', iff(FullyTagged == Total, strcat('all ', tostring(Total), ' servers carry every tag'), substring(strcat('missing: ', MissingNames), 0, 40))))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
         "size": 3,
         "title": "Tag coverage",
         "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
@@ -327,7 +327,9 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "redGreen"
+              "palette": "redGreen",
+              "min": 0,
+              "max": 100
             },
             "numberFormat": {
               "unit": 1,
@@ -345,53 +347,6 @@
         }
       },
       "name": "tag-tiles"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| where isempty(CostCentre) or isempty(Owner) or isempty(Environment)\n| project Server = name, MissingTags = trim_end(', ', strcat(iff(isempty(CostCentre), 'Cost centre, ', ''), iff(isempty(Owner), 'Owner, ', ''), iff(isempty(Environment), 'Environment, ', ''))), OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), ResourceGroup = resourceGroup\n| order by tolower(Server) asc",
-        "size": 0,
-        "title": "Servers missing a required tag",
-        "noDataMessage": "Good news: every Arc server has the cost centre, owner and environment tags, so nothing needs fixing here.",
-        "noDataMessageStyle": 4,
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "value::all"
-        ],
-        "visualization": "table",
-        "gridSettings": {
-          "formatters": [
-            {
-              "columnMatch": "Server",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "16ch"
-              }
-            },
-            {
-              "columnMatch": "MissingTags",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "30ch"
-              }
-            }
-          ],
-          "filter": true,
-          "labelSettings": [
-            {
-              "columnId": "MissingTags",
-              "label": "Missing tags"
-            },
-            {
-              "columnId": "ResourceGroup",
-              "label": "Resource group"
-            }
-          ]
-        }
-      },
-      "name": "missing-tags"
     },
     {
       "type": 1,
@@ -552,7 +507,7 @@
     {
       "type": 1,
       "content": {
-        "json": "## Software\nInstalled software from Change Tracking and Inventory (Windows applications and Linux packages) over the selected time range. Servers without the Azure Monitor Agent, such as the nested SQL guest, are not included."
+        "json": "## Software\nInstalled software from Change Tracking and Inventory (Windows applications and Linux packages) over the selected time range. Defender Antivirus definition and platform updates are grouped into one row each so they do not swamp the lists. Servers without the Azure Monitor Agent, such as the nested SQL guest, are not included."
       },
       "name": "software-header"
     },
@@ -560,7 +515,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion, Publisher) by Computer, SoftwareName\n| summarize Servers = dcount(Computer), Versions = dcount(CurrentVersion) by SoftwareName, Publisher\n| order by Servers desc, SoftwareName asc\n| take 15\n| project Software = SoftwareName, Publisher, Servers, Versions",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion, Publisher) by Computer, SoftwareName\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName), PublisherName = trim(' ', replace_regex(Publisher, @'\\s*<[^>]*>', ''))\n| summarize Servers = dcount(Computer), Versions = dcount(CurrentVersion) by Software, PublisherName\n| order by Servers desc, Software asc\n| take 15\n| project Software, Publisher = PublisherName, Servers, Versions",
         "size": 0,
         "title": "Most widely installed software",
         "noDataMessage": "No software inventory in the selected time range. Change Tracking and Inventory reports software only from Arc servers running the Azure Monitor Agent, and a parked lab reports nothing.",
@@ -605,7 +560,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| where isnotempty(Publisher)\n| summarize Installs = dcount(strcat(Computer, '|', SoftwareName)), Servers = dcount(Computer), Products = dcount(SoftwareName) by Publisher\n| top 10 by Installs desc\n| project Publisher, Products, Installs, Servers",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| where isnotempty(Publisher)\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName), PublisherName = trim(' ', replace_regex(Publisher, @'\\s*<[^>]*>', ''))\n| summarize Installs = dcount(strcat(Computer, '|', Software)), Servers = dcount(Computer), Products = dcount(Software) by Publisher = PublisherName\n| order by Installs desc, Publisher asc\n| take 10\n| project Publisher, Products, Installs, Servers",
         "size": 0,
         "title": "Software by publisher",
         "noDataMessage": "No software inventory in the selected time range. Change Tracking and Inventory reports software only from Arc servers running the Azure Monitor Agent, and a parked lab reports nothing.",
@@ -643,7 +598,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion) by Computer, SoftwareName\n| summarize Versions = dcount(CurrentVersion), Servers = dcount(Computer), VersionList = make_set(CurrentVersion, 6) by SoftwareName\n| where Versions > 1\n| order by Versions desc, SoftwareName asc\n| take 10\n| project Software = SoftwareName, Versions, Servers, VersionList = strcat_array(VersionList, ', ')",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion) by Computer, SoftwareName\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName)\n| where Software !startswith 'Microsoft Defender Antivirus'\n| summarize Versions = dcount(CurrentVersion), Servers = dcount(Computer), VersionList = make_set(CurrentVersion, 6) by Software\n| where Versions > 1\n| order by Versions desc, Software asc\n| take 10\n| project Software, Versions, Servers, VersionList = strcat_array(VersionList, ', ')",
         "size": 0,
         "title": "Software on more than one version",
         "noDataMessage": "Good news: every software item in the selected time range is on a single version across the estate.",
@@ -685,10 +640,10 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and ChangeCategory == 'Added'\n| project Time = TimeGenerated, Server = Computer, Software = SoftwareName, Version = Current\n| order by Time desc\n| take 50",
+        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and isnotempty(ChangeCategory)\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName)\n| summarize Changes = count(), Servers = dcount(Computer), ServerList = strcat_array(make_set(Computer, 3), ', '), arg_max(TimeGenerated, Current, Previous) by Change = ChangeCategory, Software\n| project LastChange = TimeGenerated, Change, Software, Servers, Changes, Version = iff(Change == 'Removed', Previous, Current), ServerList\n| order by LastChange desc, Software asc\n| take 50",
         "size": 0,
-        "title": "Software added",
-        "noDataMessage": "No software was added on any server in the selected time range.",
+        "title": "Recent software changes",
+        "noDataMessage": "No software was added, updated or removed on any server in the selected time range.",
         "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -698,66 +653,84 @@
         "gridSettings": {
           "formatters": [
             {
-              "columnMatch": "Server",
-              "formatter": 1,
+              "columnMatch": "Change",
+              "formatter": 18,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Added",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Modified",
+                    "representation": "info",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Removed",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "14ch"
               }
             },
             {
               "columnMatch": "Software",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "60ch"
-              }
-            }
-          ],
-          "filter": true
-        }
-      },
-      "name": "software-added"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and ChangeCategory == 'Removed'\n| project Time = TimeGenerated, Server = Computer, Software = SoftwareName, PreviousVersion = Previous\n| order by Time desc\n| take 50",
-        "size": 0,
-        "title": "Software removed",
-        "noDataMessage": "No software was removed from any server in the selected time range.",
-        "noDataMessageStyle": 4,
-        "queryType": 0,
-        "resourceType": "microsoft.operationalinsights/workspaces",
-        "crossComponentResources": [],
-        "visualization": "table",
-        "timeContextFromParameter": "TimeRange",
-        "gridSettings": {
-          "formatters": [
-            {
-              "columnMatch": "Server",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "56ch"
               }
             },
             {
-              "columnMatch": "Software",
+              "columnMatch": "Servers",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue",
+                "min": 0,
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "Changes",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "60ch"
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "ServerList",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "30ch"
               }
             }
           ],
           "filter": true,
           "labelSettings": [
             {
-              "columnId": "PreviousVersion",
-              "label": "Previous version"
+              "columnId": "LastChange",
+              "label": "Last change"
+            },
+            {
+              "columnId": "ServerList",
+              "label": "Example servers"
             }
           ]
         }
       },
-      "name": "software-removed"
+      "name": "software-changes"
     },
     {
       "type": 1,
