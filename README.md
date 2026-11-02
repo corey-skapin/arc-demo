@@ -15,11 +15,13 @@ If that file is missing, ask the preparing assistant/operator to
 The [tracked guide](docs/runsheet.md) is its source template.
 Generation is offline; it does not activate the lab or certify current readiness.
 
-The read-only story takes 20-30 minutes:
-**estate workbook -> Arc identity -> fresh telemetry -> change/Linux signals ->
-healthy LOB activity when prepared -> alert routing -> operating posture**.
+The read-only Arc path takes 25-30 minutes:
+**estate workbook -> find a server and check its data is current -> SQL under one
+view (a real workload, then the experimental nested Arc SQL guest) -> capacity and
+optimisation workbooks -> signal to alert -> operating posture**.
 The generated guide links to the optional SRE guide only when its local file
-exists. Leave the lab unchanged at the end.
+exists; live faults and the Review approval belong to that SRE half. Leave the lab
+unchanged at the end.
 
 ## What the lab contains
 
