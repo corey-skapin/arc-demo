@@ -100,15 +100,20 @@ arguments override skin values. Do not commit subscription/tenant IDs or secrets
 Fleet paths resolve from repo root. Optional-workload templates may retain
 intentional sample names; lifecycle follows IDs rather than guessing those names.
 
-`workbooks/arc-demo-overview.workbook.json` and the vendored `workbooks/nseilaz`
-collection provide the presenter surfaces. `docs/runsheet.md` keeps the
+`workbooks/arc-demo-overview.workbook.json` is a static, self-contained template (no
+deploy-time tokens), so Phase 11 publishes it unchanged; it reads the Arc inventory
+through `arg("")` inside its Log Analytics queries and takes its filter options from
+Resource Graph. It and the vendored `workbooks/nseilaz` collection provide the presenter
+surfaces. `docs/runsheet.md` keeps the
 25-30 minute standalone Arc/Monitor path (estate, one view of Windows, Linux and SQL
 including the experimental nested Arc SQL scene, the two engineer workbooks, the
 alert scenes and the three engineer tasks). SRE Agent is an optional later layer
 consuming the same alerts, not a prerequisite or replacement.
-`tests/OriginalWorkbooks.Tests.ps1` keeps those six original workbooks valid and
+`tests/OriginalWorkbooks.Tests.ps1` keeps the six original workbooks valid and
 demo-ready offline: JSON and title checks, subscription-picker defaults, the lab's
-tag names and the Estate Overview tile logic.
+tag names and the Compliance patch tiles. `tests/EstateOverviewWorkbook.Tests.ps1`
+covers the Estate Overview's own behaviour (see the
+[workbook reference](operational-workbooks.md#estate-overview-scene-1)).
 
 `workbooks/capacity-headroom.workbook.json`,
 `workbooks/optimisation-opportunities.workbook.json` and the shared
