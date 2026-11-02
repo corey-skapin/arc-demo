@@ -1,15 +1,2430 @@
 {
   "version": "Notebook/1.0",
   "items": [
-    { "type": 1, "name": "optimisation-introduction", "content": { "json": "# Optimisation opportunities - review, not automation\nStart with ownership and evidence gaps. Heuristics: CPU max >=90% highlights spikes; committed-memory max >=85%, available-memory min <512 MB, or disk-free min <15% asks for pressure review. Low CPU P95 <20% AND max <50% is a conversation candidate only when fresh, >=24h history and >=80% coverage; it is not a resize/shutdown recommendation. Missing memory/disk cannot establish safe headroom. There is no shutdown, delete, pricing, schedule or remediation action here.\n\nOwnership is read live from exact Arc IDs via Resource Graph; blank tags are missing ownership evidence, not proof nobody owns a host. Telemetry and ARG timestamps can differ. Keep parent/guest observations separate; never add their hardware capacities or scenario values. No migration assessment, DR or SQL engine sizing is performed. No billed or realised savings claims." } },
-    { "type": 9, "name": "window", "content": { "version": "KqlParameterItem/1.0", "parameters": [
-      { "id": "window-hours", "name": "LookbackHours", "label": "Elapsed history window", "type": 2, "isRequired": true, "value": "168", "jsonData": "[{\"value\":\"24\",\"label\":\"24 hours\"},{\"value\":\"168\",\"label\":\"7 days\"},{\"value\":\"720\",\"label\":\"30 days\"}]" }
-    ] } },
-    { "type": 3, "name": "review-candidates", "content": { "version": "KqlItem/1.0", "title": "Explainable candidates, including missing evidence", "query": "__CANDIDATES__", "size": 0, "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "visualization": "table" } },
-    { "type": 3, "name": "ownership", "content": { "version": "KqlItem/1.0", "title": "Current ownership tags - exact Arc identities", "query": "__OWNERSHIP__", "size": 0, "queryType": 1, "resourceType": "microsoft.resourcegraph/resources", "visualization": "table" } },
-    { "type": 1, "name": "hypothetical-scenario", "content": { "json": "__SCENARIO__" } },
-    { "type": 1, "name": "scope-note", "content": { "json": "__SCOPE_NOTE__" } }
+    {
+      "type": 1,
+      "content": {
+        "json": "> **DRAFT for review.** This is a separate draft copy; the published workbook is unchanged until this is promoted."
+      },
+      "name": "draft-banner"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "# Optimisation opportunities\n*Which machines are worth a conversation about cost or efficiency, why they were flagged, and what evidence is still missing. Candidates are not approved savings. Nothing here shuts down, resizes, tags or deletes anything: observation is separate from approval.*"
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "dc6feead-6548-5e1f-a174-93cd0aacd570",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 1209600000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                }
+              ],
+              "allowCustom": true
+            }
+          },
+          {
+            "id": "3ea704b8-1856-5945-892b-db3e97815003",
+            "version": "KqlParameterItem/1.0",
+            "name": "OsFilter",
+            "label": "Operating system",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "value": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "jsonData": "__OPTIONS:os__",
+            "defaultValue": "value::all"
+          },
+          {
+            "id": "21fdeab3-3a16-5106-b504-19c352aecad7",
+            "version": "KqlParameterItem/1.0",
+            "name": "EnvironmentFilter",
+            "label": "Environment",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "value": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "jsonData": "__OPTIONS:environment__",
+            "defaultValue": "value::all"
+          },
+          {
+            "id": "b7ed0b42-eb81-5832-bdb7-c1b84d06e1e0",
+            "version": "KqlParameterItem/1.0",
+            "name": "ApplicationFilter",
+            "label": "Application / role",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "value": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "jsonData": "__OPTIONS:application__",
+            "defaultValue": "value::all"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "filters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "**Illustrative thresholds (editable here, not an approved service objective).** Candidates need adequate evidence: low CPU alone never makes one. The fixed constants behind each reason are listed under *Evidence and method*."
+      },
+      "name": "thresholds-label"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "7b5fa18c-f51a-53f2-bd29-17cdffeabff8",
+            "version": "KqlParameterItem/1.0",
+            "name": "CpuHigh",
+            "label": "CPU high (%)",
+            "type": 2,
+            "isRequired": true,
+            "value": "__DEFAULT:CpuHigh__",
+            "typeSettings": {
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"60\", \"label\": \"60%\"}, {\"value\": \"70\", \"label\": \"70%\"}, {\"value\": \"80\", \"label\": \"80%\"}, {\"value\": \"85\", \"label\": \"85%\"}, {\"value\": \"90\", \"label\": \"90%\"}, {\"value\": \"95\", \"label\": \"95%\"}]"
+          },
+          {
+            "id": "6be56fcb-af5c-5345-9d5c-13af5e883455",
+            "version": "KqlParameterItem/1.0",
+            "name": "SustainedMinutes",
+            "label": "Sustained for",
+            "type": 2,
+            "isRequired": true,
+            "value": "__DEFAULT:SustainedMinutes__",
+            "typeSettings": {
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"10\", \"label\": \"10 min\"}, {\"value\": \"15\", \"label\": \"15 min\"}, {\"value\": \"30\", \"label\": \"30 min\"}, {\"value\": \"60\", \"label\": \"60 min\"}, {\"value\": \"120\", \"label\": \"120 min\"}]"
+          },
+          {
+            "id": "b81f2f24-9605-5855-865f-d46480cd8dda",
+            "version": "KqlParameterItem/1.0",
+            "name": "MemHigh",
+            "label": "Memory high (%)",
+            "type": 2,
+            "isRequired": true,
+            "value": "__DEFAULT:MemHigh__",
+            "typeSettings": {
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"70\", \"label\": \"70%\"}, {\"value\": \"80\", \"label\": \"80%\"}, {\"value\": \"85\", \"label\": \"85%\"}, {\"value\": \"90\", \"label\": \"90%\"}, {\"value\": \"95\", \"label\": \"95%\"}]"
+          },
+          {
+            "id": "4509eb20-de12-5ef0-a106-f6e7dc584bdc",
+            "version": "KqlParameterItem/1.0",
+            "name": "DiskLow",
+            "label": "Disk low free (%)",
+            "type": 2,
+            "isRequired": true,
+            "value": "__DEFAULT:DiskLow__",
+            "typeSettings": {
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"5\", \"label\": \"5%\"}, {\"value\": \"10\", \"label\": \"10%\"}, {\"value\": \"15\", \"label\": \"15%\"}, {\"value\": \"20\", \"label\": \"20%\"}, {\"value\": \"30\", \"label\": \"30%\"}]"
+          },
+          {
+            "id": "9d3a087f-fa57-5c55-9141-785571e1b1ca",
+            "version": "KqlParameterItem/1.0",
+            "name": "LowCpuP95",
+            "label": "Low CPU P95 (%)",
+            "type": 2,
+            "isRequired": true,
+            "value": "__DEFAULT:LowCpuP95__",
+            "typeSettings": {
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"10\", \"label\": \"10%\"}, {\"value\": \"15\", \"label\": \"15%\"}, {\"value\": \"20\", \"label\": \"20%\"}, {\"value\": \"30\", \"label\": \"30%\"}]"
+          },
+          {
+            "id": "afdde994-3d7b-57d0-be4e-0ccea9db0927",
+            "version": "KqlParameterItem/1.0",
+            "name": "MinObservedHours",
+            "label": "Evidence needs",
+            "type": 2,
+            "isRequired": true,
+            "value": "__DEFAULT:MinObservedHours__",
+            "typeSettings": {
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\": \"1\", \"label\": \"1 observed h\"}, {\"value\": \"6\", \"label\": \"6 observed h\"}, {\"value\": \"12\", \"label\": \"12 observed h\"}, {\"value\": \"24\", \"label\": \"24 observed h\"}, {\"value\": \"48\", \"label\": \"48 observed h\"}, {\"value\": \"72\", \"label\": \"72 observed h\"}]"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "thresholds"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Opportunity summary\nEach tile counts machines flagged for a review reason; a machine can have several reasons. These are conversation starters for a human decision, **not savings**."
+      },
+      "name": "summary-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "__QUERY:opt-tiles__",
+        "size": 3,
+        "title": "Review reasons",
+        "noDataMessage": "No machines match the current filters.",
+        "noDataMessageStyle": 5,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Machines",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Names",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "summary-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "__QUERY:opt-evidence-chart__",
+        "size": 0,
+        "title": "Review reasons by evidence quality",
+        "description": "A flag backed by thin or missing evidence is visibly different from one backed by adequate evidence.",
+        "noDataMessage": "No review reason is flagged for the current scope and thresholds.",
+        "noDataMessageStyle": 3,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "Reason",
+          "yAxis": [
+            "Machines"
+          ],
+          "group": "EvidenceQuality",
+          "createOtherGroup": 10,
+          "showLegend": true,
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Adequate",
+              "color": "green"
+            },
+            {
+              "seriesName": "Limited",
+              "color": "orange"
+            },
+            {
+              "seriesName": "No telemetry",
+              "color": "gray"
+            }
+          ]
+        }
+      },
+      "name": "summary-evidence"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "__QUERY:opt-candidates__",
+        "size": 0,
+        "title": "Review candidates (select a row for the review detail)",
+        "description": "Flagged = a reason to start a conversation. Needs evidence = a missing measurement, not a clean result. Not flagged = nothing found with the evidence available.",
+        "noDataMessage": "No machines match the current filters.",
+        "noDataMessageStyle": 5,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Machine",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Topology",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "20ch"
+              }
+            },
+            {
+              "columnMatch": "State",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Reporting",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not reporting",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Evidence",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Adequate",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Adequate - not reporting now",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Thin history",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Sparse sampling while active",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Memory or disk history thin",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Memory or disk evidence missing",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "No telemetry in window",
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "CPU telemetry missing",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Parent counters exclude guest load",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Invalid samples - investigate",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "22ch"
+              }
+            },
+            {
+              "columnMatch": "LowUtilisation",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Flagged",
+                    "representation": "info",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Needs evidence",
+                    "representation": "question",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not flagged",
+                    "representation": "none",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "13ch"
+              }
+            },
+            {
+              "columnMatch": "Scheduling",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Flagged",
+                    "representation": "info",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Needs evidence",
+                    "representation": "question",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not flagged",
+                    "representation": "none",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "13ch"
+              }
+            },
+            {
+              "columnMatch": "Consolidation",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Flagged",
+                    "representation": "info",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Needs evidence",
+                    "representation": "question",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not flagged",
+                    "representation": "none",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "13ch"
+              }
+            },
+            {
+              "columnMatch": "Ownership",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Flagged",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not flagged",
+                    "representation": "none",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "NotReporting",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Flagged",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not flagged",
+                    "representation": "none",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Environment",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Non-production (tag)",
+                    "representation": "blue",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Other (tag)",
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Unclassified",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "20ch"
+              }
+            },
+            {
+              "columnMatch": "CpuP95",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed",
+                "min": 0,
+                "max": 100
+              }
+            },
+            {
+              "columnMatch": "CpuPeak",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed",
+                "min": 0,
+                "max": 100
+              }
+            },
+            {
+              "columnMatch": "MemP95",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed",
+                "min": 0,
+                "max": 100
+              }
+            },
+            {
+              "columnMatch": "FreePct",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "min": 0,
+                "max": 100
+              }
+            },
+            {
+              "columnMatch": "IdleSharePct",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blueDark",
+                "min": 0,
+                "max": 100
+              }
+            },
+            {
+              "columnMatch": "Needs",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "24ch"
+              }
+            },
+            {
+              "columnMatch": "Why",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "60ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "LowUtilisation",
+              "label": "Low utilisation"
+            },
+            {
+              "columnId": "NotReporting",
+              "label": "Not reporting"
+            },
+            {
+              "columnId": "CpuP95",
+              "label": "CPU P95 %"
+            },
+            {
+              "columnId": "CpuPeak",
+              "label": "CPU peak %"
+            },
+            {
+              "columnId": "MemP95",
+              "label": "Memory P95 %"
+            },
+            {
+              "columnId": "FreePct",
+              "label": "Lowest free %"
+            },
+            {
+              "columnId": "IdleSharePct",
+              "label": "Idle hours %"
+            },
+            {
+              "columnId": "ObservedHours",
+              "label": "Observed hours"
+            },
+            {
+              "columnId": "Os",
+              "label": "OS"
+            },
+            {
+              "columnId": "Reasons",
+              "label": "Reasons flagged"
+            },
+            {
+              "columnId": "Needs",
+              "label": "Evidence still needed"
+            }
+          ]
+        },
+        "exportFieldName": "Machine",
+        "exportParameterName": "SelectedHost",
+        "exportDefaultValue": "(none)"
+      },
+      "name": "candidates"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "c89e2018-6256-5e74-b32e-a589de47a118",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Underutilisation",
+            "subTarget": "under",
+            "style": "link"
+          },
+          {
+            "id": "bfcef581-edb9-55aa-81c4-821f9866bf4a",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Scheduling and scenario",
+            "subTarget": "sched",
+            "style": "link"
+          },
+          {
+            "id": "4b960c53-eadf-5e89-93ca-e98e4fe04bf8",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Ownership and hygiene",
+            "subTarget": "own",
+            "style": "link"
+          },
+          {
+            "id": "bc0a1bc5-6e8f-5f27-991e-ad1b2314727f",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Consolidation",
+            "subTarget": "consol",
+            "style": "link"
+          },
+          {
+            "id": "3145ea51-2285-5145-8e57-96b58625ce81",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Review detail",
+            "subTarget": "detail",
+            "style": "link"
+          },
+          {
+            "id": "87ca778a-d212-50c0-a6a6-a9c3ef7c7bbf",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Evidence and method",
+            "subTarget": "method",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Underutilisation review\nA low-utilisation candidate needs adequate evidence for **CPU and memory**: CPU P95 below {LowCpuP95}% and memory in use P95 below 50%, with no pressure signal. Missing memory or thin history is shown as *Needs evidence*, never as a clean result. Peaks stay visible next to the P95."
+            },
+            "name": "under-header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-under-grid__",
+              "size": 0,
+              "title": "Underutilisation by machine",
+              "noDataMessage": "No machines match the current filters.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Topology",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "20ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "SizeContext",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "26ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Status",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Flagged",
+                          "representation": "info",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Needs evidence",
+                          "representation": "question",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Not flagged",
+                          "representation": "none",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "CpuMean",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "CpuP95",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "CpuPeak",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "MemP95",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "FreePct",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "redGreen",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "Pattern",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sustained pressure",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Brief spike(s)",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Steady, low",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Steady",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Evidence",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate - not reporting now",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Thin history",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sparse sampling while active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk history thin",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk evidence missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "No telemetry in window",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "CPU telemetry missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Parent counters exclude guest load",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Invalid samples - investigate",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "22ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Reading",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "60ch"
+                    }
+                  }
+                ],
+                "filter": true,
+                "labelSettings": [
+                  {
+                    "columnId": "CpuMean",
+                    "label": "CPU mean %"
+                  },
+                  {
+                    "columnId": "CpuP95",
+                    "label": "CPU P95 %"
+                  },
+                  {
+                    "columnId": "CpuPeak",
+                    "label": "CPU peak %"
+                  },
+                  {
+                    "columnId": "MemP95",
+                    "label": "Memory P95 %"
+                  },
+                  {
+                    "columnId": "FreePct",
+                    "label": "Lowest free %"
+                  },
+                  {
+                    "columnId": "SizeContext",
+                    "label": "Size (Arc inventory)"
+                  },
+                  {
+                    "columnId": "ObservedHours",
+                    "label": "Observed hours"
+                  },
+                  {
+                    "columnId": "Os",
+                    "label": "OS"
+                  },
+                  {
+                    "columnId": "MemBasis",
+                    "label": "Memory basis"
+                  }
+                ]
+              }
+            },
+            "name": "under-grid"
+          }
+        ]
+      },
+      "name": "tab-under",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "under"
+      }
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Non-production scheduling and an illustrative cost scenario\nThe **environment comes from the owner-maintained tag**; a blank tag is *unclassified*, never assumed to be non-production. The off-window below is **your proposal**: nothing here guesses business hours or stops a machine. The scenario is arithmetic on figures you type in: only the eligible share of your baseline scales with running hours, over a 168-hour week. It is **not billing, not a price, not realised or guaranteed savings**."
+            },
+            "name": "sched-header"
+          },
+          {
+            "type": 9,
+            "content": {
+              "version": "KqlParameterItem/1.0",
+              "parameters": [
+                {
+                  "id": "0e5644d1-3a43-51a6-bc2c-d465a2f87d0a",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "UtcOffsetHours",
+                  "label": "Display time zone",
+                  "type": 2,
+                  "isRequired": true,
+                  "value": "__DEFAULT:UtcOffsetHours__",
+                  "typeSettings": {
+                    "showDefault": false
+                  },
+                  "jsonData": "[{\"value\": \"-12\", \"label\": \"UTC-12\"}, {\"value\": \"-11\", \"label\": \"UTC-11\"}, {\"value\": \"-10\", \"label\": \"UTC-10\"}, {\"value\": \"-9\", \"label\": \"UTC-9\"}, {\"value\": \"-8\", \"label\": \"UTC-8\"}, {\"value\": \"-7\", \"label\": \"UTC-7\"}, {\"value\": \"-6\", \"label\": \"UTC-6\"}, {\"value\": \"-5\", \"label\": \"UTC-5\"}, {\"value\": \"-4\", \"label\": \"UTC-4\"}, {\"value\": \"-3\", \"label\": \"UTC-3\"}, {\"value\": \"-2\", \"label\": \"UTC-2\"}, {\"value\": \"-1\", \"label\": \"UTC-1\"}, {\"value\": \"0\", \"label\": \"UTC+0\"}, {\"value\": \"1\", \"label\": \"UTC+1\"}, {\"value\": \"2\", \"label\": \"UTC+2\"}, {\"value\": \"3\", \"label\": \"UTC+3\"}, {\"value\": \"3.5\", \"label\": \"UTC+3.5\"}, {\"value\": \"4\", \"label\": \"UTC+4\"}, {\"value\": \"4.5\", \"label\": \"UTC+4.5\"}, {\"value\": \"5\", \"label\": \"UTC+5\"}, {\"value\": \"5.5\", \"label\": \"UTC+5.5\"}, {\"value\": \"5.75\", \"label\": \"UTC+5.75\"}, {\"value\": \"6\", \"label\": \"UTC+6\"}, {\"value\": \"6.5\", \"label\": \"UTC+6.5\"}, {\"value\": \"7\", \"label\": \"UTC+7\"}, {\"value\": \"8\", \"label\": \"UTC+8\"}, {\"value\": \"8.75\", \"label\": \"UTC+8.75\"}, {\"value\": \"9\", \"label\": \"UTC+9\"}, {\"value\": \"9.5\", \"label\": \"UTC+9.5\"}, {\"value\": \"10\", \"label\": \"UTC+10\"}, {\"value\": \"10.5\", \"label\": \"UTC+10.5\"}, {\"value\": \"11\", \"label\": \"UTC+11\"}, {\"value\": \"12\", \"label\": \"UTC+12\"}, {\"value\": \"12.75\", \"label\": \"UTC+12.75\"}, {\"value\": \"13\", \"label\": \"UTC+13\"}, {\"value\": \"14\", \"label\": \"UTC+14\"}]"
+                },
+                {
+                  "id": "096d1a4f-e0b2-5b9f-a523-5e8bea19d156",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "SchedStartHour",
+                  "label": "Proposed off from (hour)",
+                  "type": 2,
+                  "isRequired": false,
+                  "value": "__DEFAULT:SchedStartHour__",
+                  "typeSettings": {
+                    "showDefault": false
+                  },
+                  "jsonData": "[{\"value\": \"none\", \"label\": \"Not set\"}, {\"value\": \"0\", \"label\": \"00:00\"}, {\"value\": \"1\", \"label\": \"01:00\"}, {\"value\": \"2\", \"label\": \"02:00\"}, {\"value\": \"3\", \"label\": \"03:00\"}, {\"value\": \"4\", \"label\": \"04:00\"}, {\"value\": \"5\", \"label\": \"05:00\"}, {\"value\": \"6\", \"label\": \"06:00\"}, {\"value\": \"7\", \"label\": \"07:00\"}, {\"value\": \"8\", \"label\": \"08:00\"}, {\"value\": \"9\", \"label\": \"09:00\"}, {\"value\": \"10\", \"label\": \"10:00\"}, {\"value\": \"11\", \"label\": \"11:00\"}, {\"value\": \"12\", \"label\": \"12:00\"}, {\"value\": \"13\", \"label\": \"13:00\"}, {\"value\": \"14\", \"label\": \"14:00\"}, {\"value\": \"15\", \"label\": \"15:00\"}, {\"value\": \"16\", \"label\": \"16:00\"}, {\"value\": \"17\", \"label\": \"17:00\"}, {\"value\": \"18\", \"label\": \"18:00\"}, {\"value\": \"19\", \"label\": \"19:00\"}, {\"value\": \"20\", \"label\": \"20:00\"}, {\"value\": \"21\", \"label\": \"21:00\"}, {\"value\": \"22\", \"label\": \"22:00\"}, {\"value\": \"23\", \"label\": \"23:00\"}]"
+                },
+                {
+                  "id": "e76c94a4-bd3f-5d43-ae1c-305d1511bd2d",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "SchedEndHour",
+                  "label": "Proposed off until (hour)",
+                  "type": 2,
+                  "isRequired": false,
+                  "value": "__DEFAULT:SchedEndHour__",
+                  "typeSettings": {
+                    "showDefault": false
+                  },
+                  "jsonData": "[{\"value\": \"none\", \"label\": \"Not set\"}, {\"value\": \"0\", \"label\": \"00:00\"}, {\"value\": \"1\", \"label\": \"01:00\"}, {\"value\": \"2\", \"label\": \"02:00\"}, {\"value\": \"3\", \"label\": \"03:00\"}, {\"value\": \"4\", \"label\": \"04:00\"}, {\"value\": \"5\", \"label\": \"05:00\"}, {\"value\": \"6\", \"label\": \"06:00\"}, {\"value\": \"7\", \"label\": \"07:00\"}, {\"value\": \"8\", \"label\": \"08:00\"}, {\"value\": \"9\", \"label\": \"09:00\"}, {\"value\": \"10\", \"label\": \"10:00\"}, {\"value\": \"11\", \"label\": \"11:00\"}, {\"value\": \"12\", \"label\": \"12:00\"}, {\"value\": \"13\", \"label\": \"13:00\"}, {\"value\": \"14\", \"label\": \"14:00\"}, {\"value\": \"15\", \"label\": \"15:00\"}, {\"value\": \"16\", \"label\": \"16:00\"}, {\"value\": \"17\", \"label\": \"17:00\"}, {\"value\": \"18\", \"label\": \"18:00\"}, {\"value\": \"19\", \"label\": \"19:00\"}, {\"value\": \"20\", \"label\": \"20:00\"}, {\"value\": \"21\", \"label\": \"21:00\"}, {\"value\": \"22\", \"label\": \"22:00\"}, {\"value\": \"23\", \"label\": \"23:00\"}]"
+                },
+                {
+                  "id": "b7d60dd4-ae6c-5a42-9b78-c79696a71260",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "SchedWeekendsOff",
+                  "label": "Weekends off",
+                  "type": 2,
+                  "isRequired": true,
+                  "value": "__DEFAULT:SchedWeekendsOff__",
+                  "typeSettings": {
+                    "showDefault": false
+                  },
+                  "jsonData": "[{\"value\": \"No\", \"label\": \"No\"}, {\"value\": \"Yes\", \"label\": \"Yes\"}]"
+                },
+                {
+                  "id": "80d2da6a-64d2-5742-bcdb-c0479428310b",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "ScenarioBaseline",
+                  "label": "Baseline cost for the selected machine (your figure; 0 = not set)",
+                  "type": 1,
+                  "isRequired": false,
+                  "value": "__DEFAULT:ScenarioBaseline__"
+                },
+                {
+                  "id": "ee0527c7-cbf2-5725-ad98-42bbaf88712a",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "ScenarioSharePct",
+                  "label": "Share that scales with running hours",
+                  "type": 2,
+                  "isRequired": false,
+                  "value": "__DEFAULT:ScenarioSharePct__",
+                  "typeSettings": {
+                    "showDefault": false
+                  },
+                  "jsonData": "[{\"value\": \"none\", \"label\": \"Not set\"}, {\"value\": \"10\", \"label\": \"10%\"}, {\"value\": \"20\", \"label\": \"20%\"}, {\"value\": \"30\", \"label\": \"30%\"}, {\"value\": \"40\", \"label\": \"40%\"}, {\"value\": \"50\", \"label\": \"50%\"}, {\"value\": \"60\", \"label\": \"60%\"}, {\"value\": \"70\", \"label\": \"70%\"}, {\"value\": \"80\", \"label\": \"80%\"}, {\"value\": \"90\", \"label\": \"90%\"}, {\"value\": \"100\", \"label\": \"100%\"}]"
+                }
+              ],
+              "style": "pills",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "name": "sched-params"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-sched-heatmap__",
+              "size": 0,
+              "title": "Observed activity by local hour of day (average CPU %, shared 0-100 scale)",
+              "description": "Darker = busier. A blank cell is an hour with no samples: unknown, not idle. Idle hours = full hours with average CPU below 5%.",
+              "noDataMessage": "No machines match the current filters.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Environment",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Non-production (tag)",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Other (tag)",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Unclassified",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "20ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "IdleSharePct",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blueDark",
+                      "min": 0,
+                      "max": 100,
+                      "customColumnWidthSetting": "10ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "H00|H01|H02|H03|H04|H05|H06|H07|H08|H09|H10|H11|H12|H13|H14|H15|H16|H17|H18|H19|H20|H21|H22|H23",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blue",
+                      "min": 0,
+                      "max": 100,
+                      "customColumnWidthSetting": "5ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "IdleSharePct",
+                    "label": "Idle hours %"
+                  },
+                  {
+                    "columnId": "ObservedHours",
+                    "label": "Observed hours"
+                  }
+                ]
+              }
+            },
+            "name": "sched-heatmap"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-sched-window__",
+              "size": 0,
+              "title": "Proposed off-window checked against observed activity",
+              "noDataMessage": "No machines match the current filters.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Environment",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Non-production (tag)",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Other (tag)",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Unclassified",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "20ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "OffWindowAvgCpu",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "OffWindowP95Cpu",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "OffWindowPeakCpu",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "OutsideWindowAvgCpu",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "Reading",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "70ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "ProposedOffHoursPerWeek",
+                    "label": "Proposed off hours / week"
+                  },
+                  {
+                    "columnId": "ObservedOffWindowHours",
+                    "label": "Observed hours in window"
+                  },
+                  {
+                    "columnId": "OffWindowAvgCpu",
+                    "label": "Avg CPU in window %"
+                  },
+                  {
+                    "columnId": "OffWindowP95Cpu",
+                    "label": "P95 CPU in window %"
+                  },
+                  {
+                    "columnId": "OffWindowPeakCpu",
+                    "label": "Peak CPU in window %"
+                  },
+                  {
+                    "columnId": "OutsideWindowAvgCpu",
+                    "label": "Avg CPU outside window %"
+                  }
+                ]
+              }
+            },
+            "name": "sched-window"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "**Select a machine in the review candidates table** to apply the scenario to one workload."
+            },
+            "name": "scenario-hint",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-scenario__",
+              "size": 3,
+              "title": "Illustrative scenario (your inputs, one workload, never summed)",
+              "noDataMessage": "Set the proposed off-window and your figures above.",
+              "noDataMessageStyle": 4,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Label",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 1
+                },
+                "secondaryContent": {
+                  "columnMatch": "Note",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "name": "scenario-tiles"
+          }
+        ]
+      },
+      "name": "tab-sched",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "sched"
+      }
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Ownership and hygiene\nOwnership is read **live** from the Arc resources' tags. A blank tag is missing evidence, not proof that nobody owns the machine. A machine that stopped reporting, or never reported, is **not necessarily redundant** and is never safe to delete on this evidence alone."
+            },
+            "name": "own-header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-own-grid__",
+              "size": 0,
+              "title": "Current ownership tags (live)",
+              "description": "Filtered like the rest of the page by operating system, environment and application, using each machine's current tags.",
+              "noDataMessage": "No Arc machines returned for the roster.",
+              "noDataMessageStyle": 5,
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Ownership",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Tags present",
+                          "representation": "success",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "warning",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "40ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "ArcStatus",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Connected",
+                          "representation": "success",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Disconnected",
+                          "representation": "warning",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "unknown",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "CostCentre",
+                    "label": "Cost centre"
+                  },
+                  {
+                    "columnId": "ArcStatus",
+                    "label": "Arc status"
+                  },
+                  {
+                    "columnId": "LastStatusChange",
+                    "label": "Last status change"
+                  },
+                  {
+                    "columnId": "CheckedAtUtc",
+                    "label": "Checked (UTC)"
+                  }
+                ]
+              }
+            },
+            "name": "own-grid"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-stale-grid__",
+              "size": 0,
+              "title": "Not reporting or no telemetry (verify before concluding anything)",
+              "noDataMessage": "Every machine in scope reported within a day of the window end.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "State",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "No telemetry",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Not reporting",
+                          "representation": "warning",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "unknown",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Evidence",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate - not reporting now",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Thin history",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sparse sampling while active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk history thin",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk evidence missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "No telemetry in window",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "CPU telemetry missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Parent counters exclude guest load",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Invalid samples - investigate",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "22ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Reading",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "70ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "SilentFor",
+                    "label": "Silent for"
+                  },
+                  {
+                    "columnId": "LastSample",
+                    "label": "Last sample"
+                  },
+                  {
+                    "columnId": "Os",
+                    "label": "OS"
+                  }
+                ]
+              }
+            },
+            "name": "stale-grid"
+          }
+        ]
+      },
+      "name": "tab-own",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "own"
+      }
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Consolidation review\nGroups machines by application or role and operating system, and lists the low-utilisation members side by side. **Observed peaks are not additive and no placement is invented**: dependencies, licensing, performance peaks and ownership are not assessed here. Guests are never consolidation candidates."
+            },
+            "name": "consol-header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-consol-groups__",
+              "size": 0,
+              "title": "Groups",
+              "noDataMessage": "No machines match the current filters.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Application",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "LowUtilisation",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blue",
+                      "min": 0,
+                      "max": 6,
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "LowUtilisationNames",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "36ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "HighestCpuPeak",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "HighestMemP95",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "Reading",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "70ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "LowUtilisation",
+                    "label": "Low-utilisation machines"
+                  },
+                  {
+                    "columnId": "LowUtilisationNames",
+                    "label": "Which"
+                  },
+                  {
+                    "columnId": "HighestCpuPeak",
+                    "label": "Highest CPU peak %"
+                  },
+                  {
+                    "columnId": "HighestMemP95",
+                    "label": "Highest memory P95 %"
+                  },
+                  {
+                    "columnId": "Os",
+                    "label": "OS"
+                  }
+                ]
+              }
+            },
+            "name": "consol-groups"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-consol-members__",
+              "size": 0,
+              "title": "Low-utilisation members (each with its own peak and size)",
+              "noDataMessage": "No low-utilisation machine in scope, so there is nothing to compare.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "SizeContext",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "26ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "CpuP95",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "CpuPeak",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "MemP95",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "FreePct",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "redGreen",
+                      "min": 0,
+                      "max": 100
+                    }
+                  },
+                  {
+                    "columnMatch": "Evidence",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate - not reporting now",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Thin history",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sparse sampling while active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk history thin",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk evidence missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "No telemetry in window",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "CPU telemetry missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Parent counters exclude guest load",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Invalid samples - investigate",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "22ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Consolidation",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Flagged",
+                          "representation": "info",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Needs evidence",
+                          "representation": "question",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Not flagged",
+                          "representation": "none",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "13ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "SizeContext",
+                    "label": "Size (Arc inventory)"
+                  },
+                  {
+                    "columnId": "CpuP95",
+                    "label": "CPU P95 %"
+                  },
+                  {
+                    "columnId": "CpuPeak",
+                    "label": "CPU peak %"
+                  },
+                  {
+                    "columnId": "MemP95",
+                    "label": "Memory P95 %"
+                  },
+                  {
+                    "columnId": "FreePct",
+                    "label": "Lowest free %"
+                  },
+                  {
+                    "columnId": "ObservedHours",
+                    "label": "Observed hours"
+                  },
+                  {
+                    "columnId": "Os",
+                    "label": "OS"
+                  }
+                ]
+              }
+            },
+            "name": "consol-members"
+          }
+        ]
+      },
+      "name": "tab-consol",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "consol"
+      }
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Review detail\n**Select a machine in the review candidates table above** to see why it was flagged, on what evidence, who owns it and who decides."
+            },
+            "name": "detail-hint",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### Review detail: {SelectedHost}\nObservation is separate from approval: this card never triggers an action."
+            },
+            "name": "detail-header",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-detail-card__",
+              "size": 0,
+              "title": "Review card",
+              "noDataMessage": "Select a machine in the review candidates table above.",
+              "noDataMessageStyle": 4,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Aspect",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "24ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Detail",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "110ch"
+                    }
+                  }
+                ],
+                "filter": false
+              }
+            },
+            "name": "detail-card",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:detail-cpu__",
+              "size": 1,
+              "title": "CPU: mean, 95th percentile and peak",
+              "noDataMessage": "No CPU samples for this machine in the window. Missing is not zero.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                },
+                "customThresholdLine": "{CpuHigh}",
+                "customThresholdLineStyle": 1
+              }
+            },
+            "name": "detail-cpu",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:detail-mem-pct__",
+              "size": 1,
+              "title": "Memory in use: mean and peak",
+              "noDataMessage": "No memory samples for this machine in the window.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                },
+                "customThresholdLine": "{MemHigh}",
+                "customThresholdLineStyle": 1
+              }
+            },
+            "name": "detail-mem-pct",
+            "customWidth": "50",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:detail-disk__",
+              "size": 1,
+              "title": "Free space per volume (volumes still reporting)",
+              "noDataMessage": "No per-volume free-space samples for this machine in the window.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                },
+                "customThresholdLine": "{DiskLow}",
+                "customThresholdLineStyle": 1
+              }
+            },
+            "name": "detail-disk",
+            "customWidth": "50",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:detail-evidence__",
+              "size": 0,
+              "title": "Evidence behind the flags (every counter, including missing ones)",
+              "noDataMessage": "No evidence rows for this machine.",
+              "noDataMessageStyle": 5,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Evidence",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Adequate - not reporting now",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Thin history",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sparse sampling while active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk history thin",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Memory or disk evidence missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "No telemetry in window",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "CPU telemetry missing",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Parent counters exclude guest load",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Invalid samples - investigate",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Missing data - not zero",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "26ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Source",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "34ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "SamplingPct",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "redGreen",
+                      "min": 0,
+                      "max": 100
+                    }
+                  }
+                ],
+                "filter": true,
+                "labelSettings": [
+                  {
+                    "columnId": "MinutesBreaching",
+                    "label": "Minutes beyond threshold"
+                  },
+                  {
+                    "columnId": "SamplingPct",
+                    "label": "Sampling while active %"
+                  },
+                  {
+                    "columnId": "FirstSample",
+                    "label": "First sample"
+                  },
+                  {
+                    "columnId": "LastSample",
+                    "label": "Last sample"
+                  }
+                ]
+              }
+            },
+            "name": "detail-evidence",
+            "conditionalVisibility": {
+              "parameterName": "SelectedHost",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          }
+        ]
+      },
+      "name": "tab-detail",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "detail"
+      }
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### How candidates are decided\nThe same samples, windows and thresholds as the *Capacity and headroom* workbook, so identical scope and window give identical metrics. Each reason is **Flagged**, **Needs evidence** or **Not flagged**:\n- **Low utilisation**: adequate CPU evidence (at least {MinObservedHours} observed hours, sampling while active at least 80%), CPU P95 below {LowCpuP95}%, adequate memory evidence with memory in use P95 below 50% (Windows committed bytes or Linux used memory: the basis is shown per machine), and no pressure signal. CPU alone never qualifies. A declared parent is never flagged on its own counters, which do not reflect its guest's load.\n- **Scheduling**: the owner-maintained environment tag is non-production (dev, test, uat, qa, stage, sandbox, demo, lab, poc, nonprod, preprod) and average CPU stayed below 5% in at least half of the observed full hours. No business hours are assumed. A parent that hosts a guest needs more evidence first.\n- **Consolidation**: two or more low-utilisation machines share an application or role and operating system. Guests are excluded because they run inside a parent.\n- **Ownership gap**: the published tags lack an owner, cost centre, environment or application/role. The live tag table on *Ownership and hygiene* is authoritative.\n- **Not reporting**: no telemetry in the window, or silent for more than 24 hours before it ends. Stale does not mean redundant or safe to delete.\n\n### Fixed constants (illustrative, not editable here)\n- Memory in use P95 below **50%** for a low-utilisation candidate; available memory under **512 MB** counts as pressure.\n- An idle hour is a full hour (at least **30 samples**) with average CPU below **5%**; scheduling needs at least **50%** of observed full hours idle.\n- A machine is *not reporting* after more than **24 hours** of silence; *reporting* means a sample within 15 minutes of the window end.\n- A five-minute interval needs at least **3 samples** to count towards a sustained run; percent counters outside 0-100 are invalid and ignored.\n\n### What this view does not do\nThe tiles count each machine once; a declared guest is never extra capacity. No Azure Cost Management data, price lookup, billed or realised savings, or on-premises total cost of ownership. The scenario is arithmetic on figures you supply. No shutdown, resize, schedule, tag change or delete action exists here. No migration or disaster-recovery assessment, and no SQL engine sizing."
+            },
+            "name": "method-text"
+          }
+        ]
+      },
+      "name": "tab-method",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "method"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "*__SCOPE_NOTE__*"
+      },
+      "name": "scope-note"
+    }
   ],
   "isLocked": false,
-  "fallbackResourceIds": []
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
 }

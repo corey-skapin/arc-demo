@@ -310,17 +310,35 @@ with `canFetchContent=true` before comparing it with the deployed JSON. It uses
 native REST so Windows CLI URL parsing does not split the query parameters.
 Do not redeploy the whole lab or change telemetry collection for this symptom.
 
-## Capacity workbook has Linux CPU but blank memory or disk
+## Capacity workbook has Linux CPU but blank or thin memory or disk
 
-The inspected existing demo stream contained Linux total CPU but no matching
-Linux memory/disk `Perf` or VM Insights samples. Configured DCR counters alone
-are not evidence they have arrived. The optional workbooks retain nulls and
-missing-data warnings rather than deriving zero or safe sizing from CPU.
-Windows `_Total` disk evidence is aggregate; per-volume evidence requires actual
-VM Insights rows. More than 15 minutes stale or low elapsed-window coverage can
-also follow parking; verify existing read-only readiness and timestamps, not an
-assumed agent fault. Do not activate, repair or broaden collection just to fill
-a workbook. See the [coverage rules](runbook.md#optional-capacity-and-optimisation-workbooks).
+Linux memory and disk come from four Linux AMA counters in the core DCR
+(`Memory(*)\Available MBytes Memory`, `Memory(*)\% Used Memory`,
+`Logical Disk(*)\% Free Space` and `Logical Disk(*)\Free Megabytes`, table `Perf`).
+The earlier rule carried three placeholder names that Linux AMA never accepted
+(`AvailableMemory`, `PercentUsedMemory`, `FreeSpacePercentage`), so those hosts
+reported only CPU. If memory or disk still read as missing, confirm the rule holds
+the four names and the Arc-ID association, then allow a few sampling intervals on a
+running host. *Thin history* only means fewer observed hours than the
+*Evidence needs* selector (24 by default); lower it to see the rows classified.
+Pseudo mounts (snap, tmpfs, devices) are excluded by design.
+Windows `_Total` disk is aggregate; per-volume evidence requires actual VM Insights
+rows. More than 15 minutes stale or low elapsed-window coverage can also follow
+parking; verify existing read-only readiness and timestamps, not an assumed agent
+fault. Do not activate, repair or broaden collection just to fill a workbook.
+Change the rule only by a targeted read-modify-write that keeps every other data
+source, stream and association. See the [workbook reference](operational-workbooks.md).
+
+## A parent shows insufficient evidence or the nested guest shows no telemetry
+
+A declared Hyper-V parent reads *Insufficient evidence* (*Parent counters exclude
+guest load*) by design: Microsoft documents that root-partition CPU counters do not
+reflect physical CPU use, so a quiet parent is not headroom. Pressure on the parent
+still counts, and parent and guest are never added. A declared guest reads *No
+telemetry* until its own agent and DCR association deliver samples; Arc *Connected*
+is evidence about the agent, not about telemetry. A guest missing from the roster is
+not yet an Arc machine in the group: onboard it, then republish the workbook. Do not
+change associations or collection from the workbook.
 
 ## Linux Change Tracking missing despite healthy AMA
 

@@ -1,0 +1,7 @@
+// include: series
+// Which counters and tables feed each figure, by operating system, with real sample counts and dates.
+Samples
+| lookup kind=inner (Machines | project ResourceId, Machine, Os) on ResourceId
+| summarize Machines = dcount(Machine), Samples = countif(isnotnull(Value)), InvalidSamples = countif(Invalid),
+    FirstSample = min(TimeGenerated), LastSample = max(TimeGenerated) by Os, Metric, Source
+| sort by Os asc, Metric asc, Source asc

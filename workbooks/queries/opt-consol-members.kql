@@ -1,0 +1,8 @@
+// include: candidates
+// Members of consolidation groups: the low-utilisation machines side by side, each with its own observed peak and size context.
+// Never add their figures together; the application owner decides whether any comparison is meaningful.
+Candidates
+| where UnderState == "Flagged" and Layer != "guest"
+| sort by Application asc, Os asc, CpuP95 asc
+| project Application, Os, Machine, SizeContext, CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0), MemP95 = round(MemP95, 1), FreePct = round(DiskFreeNowPct, 1),
+    ObservedHours = CpuObservedHours, Evidence = EvidenceState, Consolidation = ConsolidationState

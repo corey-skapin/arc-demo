@@ -145,6 +145,25 @@ Describe 'Narrow LOB heartbeat collection' {
         $body.properties.destinations.logAnalytics[0].workspaceResourceId | Should -Be '/fixture/workspace'
         @($body.properties.dataFlows | Where-Object { 'Microsoft-Event' -in $_.streams })[0].destinations | Should -Be @('law-fixture')
     }
+    It 'adds valid Linux AMA memory/disk counters to the existing Perf source without dropping the established selectors' {
+        $perf = @($body.properties.dataSources.performanceCounters)
+        $perf.Count | Should -Be 1
+        $perf[0].streams | Should -Be @('Microsoft-Perf')
+        $perf[0].samplingFrequencyInSeconds | Should -Be 60
+        foreach ($counter in @('Memory(*)\Available MBytes Memory', 'Memory(*)\% Used Memory', 'Logical Disk(*)\% Free Space', 'Logical Disk(*)\Free Megabytes')) {
+            $perf[0].counterSpecifiers | Should -Contain $counter
+        }
+        foreach ($counter in @('\Processor Information(_Total)\% Processor Time', '\Memory\% Committed Bytes In Use', '\Memory\Available MBytes',
+                '\LogicalDisk(_Total)\% Free Space', '\Network Interface(*)\Bytes Total/sec', '\Processor(*)\% Processor Time')) {
+            $perf[0].counterSpecifiers | Should -Contain $counter
+        }
+        # These were never valid AMA Linux counter names and produced no Linux samples.
+        foreach ($counter in @('\Memory(*)\AvailableMemory', '\Memory(*)\PercentUsedMemory', '\Logical Disk(*)\FreeSpacePercentage')) {
+            $perf[0].counterSpecifiers | Should -Not -Contain $counter
+        }
+        @($body.properties.dataSources.syslog).Count | Should -Be 1
+        @($body.properties.dataFlows | Where-Object { 'Microsoft-Perf' -in $_.streams })[0].destinations | Should -Be @('law-fixture')
+    }
 }
 
 Describe 'Portable workbook workspace defaults' {

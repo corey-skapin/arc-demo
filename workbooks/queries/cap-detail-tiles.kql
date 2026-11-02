@@ -1,0 +1,29 @@
+// include: hosts
+// Selected-machine summary tiles (driven by the status grid selection). One evaluation, one row per tile.
+let H = Hosts | where Machine == '{SelectedHost}' | extend K = 1;
+datatable(SortKey:long, Label:string)[
+    1, "Assessment",
+    2, "Reporting",
+    3, "Evidence",
+    4, "CPU (95th percentile / peak)",
+    5, "Memory in use (95th percentile / peak)",
+    6, "Tightest volume (free now)"]
+| extend K = 1
+| join kind=inner H on K
+| project SortKey, Label,
+    Value = case(
+        SortKey == 1, Assessment,
+        SortKey == 2, ReportingState,
+        SortKey == 3, EvidenceState,
+        SortKey == 4, iff(HasCpu, strcat(Num(CpuP95, 1), "% / ", Num(CpuMax, 0), "%"), "no data"),
+        SortKey == 5, iff(HasMem, strcat(Num(MemP95, 1), "% / ", Num(MemMax, 1), "%"), "no data"),
+        iff(HasDisk, strcat(Num(DiskFreeNowPct, 1), "% free"), "no data")),
+    Note = case(
+        SortKey == 1, Reason,
+        SortKey == 2, iff(isnull(HostLastSeen), "no sample in this window", strcat("last sample ", tostring(AgeMinutes), " min before the window end")),
+        SortKey == 3, EvidenceNote,
+        SortKey == 4, Pattern,
+        SortKey == 5, iff(HasMem, strcat("lowest available ", Num(AvailMbMin, 0), " MB"), "memory not reported"),
+        iff(HasDisk, strcat("volume ", DiskWorstVolume), "disk not reported"))
+| sort by SortKey asc
+| project Label, Value, Note

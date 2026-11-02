@@ -1,0 +1,8 @@
+// include: candidates
+// Review candidate matrix, one row per machine. Selecting a row drives the review detail below.
+// Each reason is Flagged, Needs evidence or Not flagged; a missing measurement is never read as a clean result.
+Candidates
+| project Machine, Topology, Os, Application, Environment = EnvironmentClass, State = ReportingState, Evidence = EvidenceState,
+    LowUtilisation = UnderState, Scheduling = SchedulingState, Consolidation = ConsolidationState, Ownership = OwnershipState, NotReporting = StaleState,
+    Reasons = strcat_array(Reasons, ", "), CpuP95 = round(CpuP95, 1), CpuPeak = round(CpuMax, 0), MemP95 = round(MemP95, 1),
+    FreePct = round(DiskFreeNowPct, 1), IdleSharePct, ObservedHours = CpuObservedHours, Needs = EvidenceGaps, Why

@@ -1,0 +1,29 @@
+// include: hosts
+// Overview tiles: mutually exclusive assessment counts. Together they equal the machines in scope.
+let Counts = Hosts
+| summarize Total = count(), Guests = countif(Layer == "guest"), GuestNames = strcat_array(make_list_if(Machine, Layer == "guest", 3), ", "),
+    Pressure = countif(Assessment == "Pressure observed"), PressureNames = strcat_array(make_list_if(Machine, Assessment == "Pressure observed", 5), ", "),
+    Headroom = countif(Assessment == "Apparent headroom"), HeadroomNames = strcat_array(make_list_if(Machine, Assessment == "Apparent headroom", 5), ", "),
+    Within = countif(Assessment == "Within thresholds"), WithinNames = strcat_array(make_list_if(Machine, Assessment == "Within thresholds", 5), ", "),
+    Insufficient = countif(Assessment == "Insufficient evidence"), InsufficientNames = strcat_array(make_list_if(Machine, Assessment == "Insufficient evidence", 5), ", "),
+    NoTelemetry = countif(Assessment == "No telemetry"), NoTelemetryNames = strcat_array(make_list_if(Machine, Assessment == "No telemetry", 5), ", ")
+| extend K = 1;
+datatable(SortKey:long, Label:string)[
+    0, "🖥️ Machines in scope",
+    1, "🔴 Pressure observed",
+    2, "🟢 Apparent headroom",
+    3, "🔵 Within thresholds",
+    4, "🟠 Insufficient evidence",
+    5, "⚪ No telemetry"]
+| extend K = 1
+| join kind=inner Counts on K
+| project SortKey, Label,
+    Machines = case(SortKey == 0, Total, SortKey == 1, Pressure, SortKey == 2, Headroom, SortKey == 3, Within, SortKey == 4, Insufficient, NoTelemetry),
+    Names = case(SortKey == 0, iff(Guests > 0,
+            strcat(tostring(Total - Guests), " independent + ", tostring(Guests), " declared guest (", GuestNames, "), counted once and never as extra capacity"),
+            strcat(tostring(Total), " independent machines")),
+        SortKey == 1, PressureNames, SortKey == 2, HeadroomNames, SortKey == 3, WithinNames,
+        SortKey == 4, InsufficientNames, NoTelemetryNames)
+| extend Names = iff(isempty(Names), "none", Names)
+| sort by SortKey asc
+| project Label, Machines, Names

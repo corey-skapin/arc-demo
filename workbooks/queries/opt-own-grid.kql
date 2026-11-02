@@ -1,0 +1,15 @@
+// Live ownership and hygiene evidence for the published roster (Resource Graph): current tags, not the tags captured at publication.
+// Blank tags are missing ownership evidence, not proof that nobody owns a machine. Filtered like the telemetry views, using the current tags.
+Resources
+| where type =~ "microsoft.hybridcompute/machines"
+| where tolower(id) in (__ROSTER_IDS__)
+| extend Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter), Environment = tostring(coalesce(tags.env, tags.environment)),
+    Application = tostring(coalesce(tags.application, tags.app, tags.workload, tags.role)),
+    Os = iff(tostring(properties.osType) =~ "linux", "Linux", iff(tostring(properties.osType) =~ "windows", "Windows", "Unknown"))
+| where Os in ({OsFilter}) and iff(isempty(Environment), "(untagged)", Environment) in ({EnvironmentFilter}) and iff(isempty(Application), "(untagged)", Application) in ({ApplicationFilter})
+| extend Missing = trim(", ", strcat(iff(isempty(Owner), "owner, ", ""), iff(isempty(CostCentre), "cost centre, ", ""),
+    iff(isempty(Environment), "environment, ", ""), iff(isempty(Application), "application or role, ", "")))
+| extend Ownership = iff(isempty(Missing), "Tags present", strcat("Missing: ", Missing))
+| project Machine = name, Ownership, Owner, CostCentre, Environment, Application, ArcStatus = tostring(properties.status),
+    LastStatusChange = todatetime(properties.lastStatusChange), CheckedAtUtc = now()
+| order by Ownership asc, Machine asc

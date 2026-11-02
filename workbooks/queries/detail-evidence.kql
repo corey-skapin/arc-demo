@@ -1,0 +1,8 @@
+// include: summary
+// Selected machine: the evidence behind the assessment, one row per counter and instance, including missing counters.
+Summary
+| where Machine == '{SelectedHost}'
+| sort by Metric asc, Instance asc
+| project Metric, Instance, State = VolumeState, Source = strcat_array(Sources, ", "), Samples, ObservedHours, SamplingPct,
+    FirstSample = FirstSeen, LastSample = LastSeen, Mean = round(Mean, 1), P95 = round(P95, 1), Peak = round(Maximum, 1), Lowest = round(Minimum, 1),
+    MinutesBreaching = BreachMinutes, Evidence

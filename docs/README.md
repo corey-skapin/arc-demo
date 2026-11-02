@@ -8,9 +8,10 @@ bottom. [runsheet.md](runsheet.md) is the single source template; the operator
 local context. Generation is offline, not a current-health check.
 
 The **Optional engineer lens** links to **Capacity and headroom** and
-**Optimisation opportunities** when their published IDs are recorded. Start
-with stale/missing evidence while hosts are parked; gaps are not spare capacity
-or realised savings. The Arc/Monitor story remains 20-30 minutes.
+**Optimisation opportunities** when their published IDs are recorded; read the
+[workbook reference](operational-workbooks.md) first. Start with the tiles and
+the evidence column, and with stale/missing evidence while hosts are parked; gaps
+are not spare capacity or realised savings. The Arc/Monitor story remains 20-30 minutes.
 
 ## Build and operate
 
@@ -20,6 +21,7 @@ or realised savings. The Arc/Monitor story remains 20-30 minutes.
 | [Arc runbook](runbook.md) | Base infrastructure, optional workbooks and presenter context |
 | [Ordered build wrapper](runbook.md#build-everything-in-order-optional-wrapper) | Plan-first build of the whole estate in order, plus read-only snapshot and parity |
 | [Private build folder](private-config.md) | The one private folder: build config, state and evidence |
+| [Capacity and optimisation workbooks](operational-workbooks.md) | What each optional engineer workbook shows, its evidence rules, thresholds and guardrails |
 | [Lifecycle](lifecycle.md) | Explicit targets, retained data, config-driven nested guest, readiness and measured shared-wait park/wake limits |
 | [Troubleshooting](troubleshooting.md) | Practical build/wake failures and fixes |
 | [AI handoff](ai-deploy-handbook.md) | Ask an assistant to prepare the demo |

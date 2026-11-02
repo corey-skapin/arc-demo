@@ -22,7 +22,7 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 | `bicep/modules/defender.bicep`, `tests/DefenderPlan.Tests.ps1` | Subscription Defender for Servers P2, deployed only while the live plan is not already Standard (`deployDefenderVmPlan`, set by Deploy); an enabled plan and its extensions are never re-PUT |
 | `bicep/modules/policy.bicep` | Named MCSB/NIST assignments |
 | `bicep/modules/budget.bicep` | Named budget filtered to demo RGs, notification thresholds |
-| `bicep/modules/operational-workbook.bicep` | Optional standalone shared workbook only; existing workspace, deterministic owned ID, no workload/telemetry changes |
+| `bicep/modules/operational-workbook.bicep` | Optional standalone shared workbook only (a published copy or a separately marked draft); existing workspace, deterministic owned ID, no workload/telemetry changes |
 
 Fresh deployment creates NAT/PIP; hibernation deletes them and activation
 recreates them. A routine Bicep rerun preserves an existing gateway. The backing compute is an Azure-hosted simulation;
@@ -55,7 +55,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved media/terms, bounded startup and hash ownership; guarded emitter-only update preserves normal worker functions and migrates the owned checkpoint with rollback/backups; no Arc SQL, automatic reboot/repair or Defender changes |
 | `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; v2 actual error/wait/session evidence, bounded rollback and independently gated recovery, not synthetic proof or SRE remediation |
 | `scripts/Set-ArcWorkloadAlertDescription.ps1` | Narrow existing-canonical SQL/LOB description-only PATCH/readback; preserves titles, queries, settings, scopes, routes and tags; no DCR, guest or receiver changes |
-| `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1` | Default read-only preview/scoped approved publication; exact Arc roster, optional declared topology, ownership guards, hypothetical one-resource decimal scenario, no lifecycle/collection actions |
+| `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1` | Default read-only preview, scoped approved publication, separate draft copies and draft-only removal; exact bounded Arc roster, config-driven nested guest from the skin plus optional declared topology, ownership/draft guards, shared-query composer and offline scenario reference; no lifecycle/collection actions |
 | `scripts/Invoke-ArcDemoBuild.ps1`, `scripts/lib/BuildPlan.psm1`, `config/build-plan.example.json` | Thin ordered wrapper (P0-P11) over the maintained scripts: plan only by default, explicit switches for first spend, licences, SRE parent creation and the opt-in alert-access grant, per-step resume state and evidence in the private folder, no deployment logic of its own |
 | `scripts/Export-ArcDemoInventory.ps1`, `scripts/Test-ArcDemoParity.ps1`, `scripts/lib/EstateSnapshot.psm1`, `config/expected-inventory.json` | Read-only JSON snapshot (denied reads recorded, no secrets) and a parity check of the expected objects and the manifest fleet; exit 0/1 |
 
@@ -109,13 +109,18 @@ demo-ready offline: JSON and title checks, subscription-picker defaults, the lab
 tag names and the Estate Overview tile logic.
 
 `workbooks/capacity-headroom.workbook.json`,
-`workbooks/optimisation-opportunities.workbook.json` and shared
-`workbooks/queries/operational-*.kql` provide optional existing-telemetry review.
+`workbooks/optimisation-opportunities.workbook.json` and the shared
+`workbooks/queries/*.kql` (fragments `operational-*.kql` plus the `cap-*`, `opt-*` and
+`detail-*` items) provide optional existing-telemetry review; see the
+[workbook reference](operational-workbooks.md). The JSON files are templates the module
+renders with the exact roster, so the same evidence logic serves both workbooks.
 The single presenter template accepts actual published optional links; missing
 or stale telemetry stays explicit and parent/guest rows are never totalled.
-`tests/OperationalWorkbooks.Tests.ps1` covers scope/preview/scenario behavior;
-`tests/OperationalWorkbookQueries.Tests.ps1` explicitly opts into read-only
-execution of deterministic literal-table fixtures, not a live fault or ingestion.
+`tests/OperationalWorkbooks.Tests.ps1` covers rendering, scoping, roster/topology,
+draft and scenario behavior; `tests/OperationalWorkbookQueries.Tests.ps1`
+explicitly opts into read-only execution of the production item queries against
+deterministic literal-table fixtures (`tests/fixtures/operational-telemetry.kql`),
+not a live fault or ingestion.
 
 `tests/Lifecycle.Tests.ps1` exercises waits, errors, config, mixed/native
 classification, retained additive manifests, ShouldProcess previews, guest/job

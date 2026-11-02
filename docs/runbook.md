@@ -32,7 +32,7 @@ actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
 | `lobMachineName` (optional) | The separately prepared LOB host; omit if not part of this demo |
 | `sqlMachineResourceId` (optional) | Actual prepared SQL host Arc ID, with adjacent verified `sql-engine-status.json` from [real SQL Status](sql-engine-workload.md); omit until actually prepared |
 | `sqlIncidentAlertResourceId` (optional) | Exact prepared SQL log-alert ID; requires the SQL host/proof above. Adds a concrete alert link, not an alert-delivery or investigation claim |
-| `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview IDs. Adds optional links, not current-health or savings proof |
+| `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview or draft IDs. Adds optional links, not current-health or savings proof |
 | `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
 
 The assistant/operator writes the approved values once, then runs:
@@ -61,9 +61,13 @@ broken or guessed relative path.
 
 These are optional read-only engineer surfaces after setup, not additional
 workload infrastructure or more required minutes in the 20-30 minute tour.
-They reuse existing `Perf`/`InsightsMetrics` and Arc inventory; no collection,
-retention, guest, SQL, extension, power, price or schedule changes are made.
-DR and Azure Migrate assessment are outside this demo.
+They reuse existing `Perf`/`InsightsMetrics` and Arc inventory; the views make no
+guest, SQL, extension, power, price or schedule changes. The one collection change
+is the explicitly approved Linux memory and disk counters in the core DCR, which
+replaced three placeholder names that were never valid for Linux AMA.
+What each section shows, the evidence rules and the thresholds are in the
+[workbook reference](operational-workbooks.md). DR and Azure Migrate assessment
+are outside this demo.
 
 The scoped entry point defaults to **Preview**, which verifies the explicit
 tenant/subscription, reads only the existing workspace/Arc group and the
@@ -82,87 +86,85 @@ $workbookTarget = @{
 .\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation
 # Only after separate publication approval; this is still a no-write preview.
 .\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Action Deploy -WhatIf
-# Actual publication is a separate approved operation, confirmed by ShouldProcess.
+# Review copies: a separate "(draft)" resource; the published workbook stays intact.
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Draft -Action Deploy
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation -Draft -Action Deploy
+# Promotion after review: the same command without -Draft replaces the published workbook in place.
 .\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Action Deploy
 .\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation -Action Deploy
+# Remove only an owned draft (no Arc roster is read).
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Draft -Action Remove
 ```
 
+Actual publication is a separate approved operation, confirmed by ShouldProcess.
+`-DisplayUtcOffsetHours` sets the default display time zone of the scheduling heat-map
+(the workbook selector can change it).
+
 Only the selected shared workbook is created/updated by the small Bicep module,
-with an exact-content readback. Stable IDs are derived from workspace/purpose;
+with an exact-content readback. Stable IDs are derived from workspace/purpose
+(drafts use their own ID, a `lifecycle: draft` tag and a banner);
 a foreign existing workbook is never adopted. No whole-lab deployment, IAM or
 repair is used. Workbooks survive parking with the workspace, contain no active
 jobs and disappear with the Arc group on approved normal removal. Existing
 lifecycle/readiness gates are unchanged. Re-publishing changed source or
 refreshing roster/topology requires new approval, not an incidental wake.
+The roster is bounded to 1-50 exact Arc IDs because every item query embeds it.
 
-**Coverage before conclusions:** each grid starts with every selected Arc ID,
-including hosts without samples. CPU is only total CPU, not a blend of per-core
-rows or duplicate `Processor`/`Processor Information` streams. `Perf` is preferred
-for CPU/memory, with supported existing VM Insights values as fallback; per-volume
-VM Insights disk data is preferred to `_Total` aggregate free-space evidence.
-One canonical source is selected per host/metric across the window, not mixed
-to conceal source gaps. Source names, first/last timestamps, observed-minute
-coverage and min/mean/P95/max remain visible. Missing values are null, not zero;
-invalid samples warn. Hourly trends omit absent hours instead of filling zeros.
-Disk Delta is first-to-last percentage points, not a growth forecast.
-
-Coverage is observed one-minute bins divided by elapsed-window minute bins,
-including parking; it is not uptime, expected online time or an agent SLA.
-The default window is seven days, with 24-hour/30-day choices. More than
-15 minutes stale, less than 24 hours between samples, or less than 80% coverage
-prevents a low-CPU conversation candidate. A 24-hour window can deliberately
-remain insufficient because its first-to-last sample span is shorter than
-24 hours. The query control's fixed 30-day transport scope encloses all three
-KQL windows; it does not silently clip seven-day analysis to a 24-hour default.
-Low CPU alone never yields a sizing recommendation. SQL host telemetry
-does not establish engine capacity, database performance or licence needs.
-Pressure thresholds (CPU max 90%, committed memory max 85%, available memory
-min 512 MB, disk free min 15%) are explainable triage heuristics, not universal
-right-sizing or availability guarantees.
-
-The inspected existing demo collection provided total CPU for Windows and Linux,
-but memory/committed-memory/disk `Perf` and per-volume VM Insights evidence only
-for Windows. Configured Linux memory/disk counters did **not** prove actual
-samples. Preserve that missing-data warning; do not broaden collection to make
-the view green. These are dated engineering observations, not today's health.
+**Coverage before conclusions:** each table starts with every selected Arc ID,
+including hosts without samples. One canonical source is selected per host and
+metric across the window, source names and observed hours stay visible, missing
+values are null (never zero), invalid samples warn, and charts omit absent
+intervals instead of drawing zeros. The default window is 14 days because the lab
+runs sporadically; coverage is observed one-minute bins, not uptime or an agent SLA.
+Evidence is adequate only with the selected observed hours (default 24) and 80%
+sampling while active, so newly collected Linux memory and disk read as thin for
+about a day. Low CPU alone never yields a sizing recommendation, and SQL host
+telemetry does not establish engine capacity, database performance or licence needs.
+Thresholds (CPU 80%, sustained 30 minutes, memory 85%, disk free 15%, low CPU P95
+20%) are editable, labelled illustrative triage values, not right-sizing or
+availability guarantees; the fixed constants are listed on each workbook's
+*Evidence and method* tab.
 
 **Topology and ownership:** the roster contains exact Arc IDs only, never their
-Azure backing-VM duplicates. New/nested hosts are not silently included;
-refresh after separately approved onboarding. All layers default to
-`unclassified`; names do not prove parent/guest relationships. Optional private
-`-TopologyPath` JSON is `{"schemaVersion":1,"machines":[...]}`; each entry has
-`resourceId`, `layer` (`parent`, `guest` or `standalone`) and, for guests only,
-`parentResourceId` referencing another selected, explicitly classified parent.
-This declares a relationship, not physical hardware capacity. No hardware totals
-are calculated; never add guest and parent measurements. The optimisation view
-reads current `owner`/`costcenter`/`role` tags through Resource Graph for those
-exact IDs. Empty/missing ARG results are missing inventory evidence, not proof
-that a resource or owner is absent; query failures must be reported.
+Azure backing-VM duplicates. The nested guest is declared once in the private
+skin's `nestedSqlGuest` block (parent VM and Arc machine name); the script adds
+the pair to the roster as a declared parent and guest. A guest that is not yet an
+Arc machine in the group is skipped with a warning and appears after onboarding
+and a republish; a disconnected guest is still listed and reads *No telemetry*
+until it reports. Any other machine is `unclassified` unless an optional private
+`-TopologyPath` JSON declares it: `{"schemaVersion":1,"machines":[...]}`, each
+entry with `resourceId`, `layer` (`parent`, `guest` or `standalone`) and, for
+guests only, `parentResourceId` referencing another selected, explicitly classified
+parent. A conflict between the file and the skin is an error. Declared topology is a
+relationship, not physical hardware capacity: no hardware totals are calculated and
+parent and guest measurements are never added. A parent's own counters do not reflect
+its guest's load, so a quiet parent is insufficient evidence, not headroom. The
+optimisation view reads current `owner`/`costcenter`/`role` tags through Resource
+Graph for those exact IDs. Empty/missing ARG results are missing inventory evidence,
+not proof that a resource or owner is absent; query failures must be reported.
 
-Optional operator assumptions `-HypotheticalHourlyRate`,
-`-HypotheticalWeeklyHoursOff` (0-168) and `-HypotheticalMachineResourceId` require
-one explicitly classified parent/standalone resource and positive inputs.
-No guest, inferred currency, price API or estate multiplication is used.
-`rate x hours/week x 4 weeks` is explicitly hypothetical compute-only currency
-units, **not** a calendar month, billed/realised savings, a safe shutdown schedule
-or an all-in cost. Disks/network/monitoring/security/commitments/licences and
-other retained costs remain outside that illustration. With no inputs it stays
-unconfigured. No stop/delete/schedule buttons or resource actions are provided.
+The optional cost scenario is typed into the workbook for one selected non-guest
+workload: `baseline x eligible share x hours off / 168`, labelled illustrative and
+not billing, a price, a calendar month, realised savings or a safe shutdown schedule.
+Fixed, licensed, retained-storage, monitoring and security costs stay outside it.
+No price API, inferred currency, estate multiplication, or stop/delete/schedule
+action is provided.
 
 After actual publication, save only the returned published workbook IDs as the
 optional context fields above and regenerate the existing presenter guide.
-Do not add preview IDs or claim portal rendering has been observed from source
-validation alone. Documented workbook deployment and scope conventions:
+Do not add preview or draft IDs or claim portal rendering has been observed from
+source validation alone. Documented workbook deployment and scope conventions:
 [programmatic workbooks](https://learn.microsoft.com/azure/azure-monitor/visualize/workbooks-automate)
 and [workbook resource templates](https://learn.microsoft.com/azure/templates/microsoft.insights/2023-06-01/workbooks).
 
-Local Pester covers rendering, scope/ownership/preview guards and decimal scenario
-arithmetic. `tests/OperationalWorkbookQueries.Tests.ps1` is deliberately opt-in:
-pass explicit workspace/subscription/tenant via `New-PesterContainer -Data` to
-execute deterministic literal-table KQL fixtures read-only. It ingests nothing,
-touches no guests and tests the actual production query logic for spikes,
-pressure, missing/invalid samples, parked gaps, short histories and separate
-parent/guest rows. Normal CI skips those Azure-dependent tests; a local mock
+Local Pester covers rendering, scoping, roster and topology guards, size bounds,
+draft handling and scenario arithmetic. `tests/OperationalWorkbookQueries.Tests.ps1`
+is deliberately opt-in: pass explicit workspace/subscription/tenant via
+`New-PesterContainer -Data` to execute the production item queries read-only
+against deterministic literal tables. It ingests nothing, touches no guests and
+covers spikes versus sustained pressure, missing, invalid and thin evidence, parked
+gaps, Linux counter names and pseudo mounts, separate parent/guest rows and the
+scenario arithmetic. Normal CI skips those Azure-dependent tests; a local mock
 pass does not imply KQL execution or a published workbook.
 
 ## Build everything in order (optional wrapper)

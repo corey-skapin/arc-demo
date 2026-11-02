@@ -376,9 +376,11 @@ function New-CoreDcrBody {
                             '\LogicalDisk(_Total)\% Free Space'
                             '\Network Interface(*)\Bytes Total/sec'
                             '\Processor(*)\% Processor Time'
-                            '\Memory(*)\AvailableMemory'
-                            '\Memory(*)\PercentUsedMemory'
-                            '\Logical Disk(*)\FreeSpacePercentage'
+                            # Linux AMA names (Learn: metrics-guest-reference); Windows ignores them. Land in Perf.
+                            'Memory(*)\Available MBytes Memory'
+                            'Memory(*)\% Used Memory'
+                            'Logical Disk(*)\% Free Space'
+                            'Logical Disk(*)\Free Megabytes'
                             '\Network(*)\TotalBytesTransmitted'
                             '\Network(*)\TotalBytesReceived'
                         )

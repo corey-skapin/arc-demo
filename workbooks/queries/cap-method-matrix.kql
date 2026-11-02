@@ -1,0 +1,13 @@
+// include: summary
+// Collection coverage matrix: observed hours per counter and machine; missing is shown as missing, never zero.
+Summary
+| summarize CpuHours = maxif(ObservedHours, Metric == "CPU percent" and Samples > 0),
+    MemoryHours = maxif(ObservedHours, Metric == "Memory percent" and Samples > 0),
+    AvailableHours = maxif(ObservedHours, Metric == "Available MB" and Samples > 0),
+    DiskHours = maxif(ObservedHours, Metric == "Disk free percent" and Samples > 0 and VolumeState != "No longer reported") by Machine, Os, Layer
+| extend CPU = iff(isnull(CpuHours), "missing", strcat(tostring(CpuHours), " h")),
+    Memory = iff(isnull(MemoryHours), "missing", strcat(tostring(MemoryHours), " h")),
+    AvailableMemory = iff(isnull(AvailableHours), "missing", strcat(tostring(AvailableHours), " h")),
+    DiskFree = iff(isnull(DiskHours), "missing", strcat(tostring(DiskHours), " h"))
+| sort by Machine asc
+| project Machine, Os, Layer, CPU, Memory, AvailableMemory, DiskFree

@@ -107,13 +107,13 @@ foreach ($entry in $types.GetEnumerator()) {
 }
 $operationalLinks = @()
 if ($context.Contains('capacityWorkbookResourceId')) {
-    $operationalLinks += "[Capacity and headroom]($($values.capacityWorkbookUrl)): compare CPU mean/P95/maximum, memory pressure and per-volume free-space trend only where there are actual samples."
+    $operationalLinks += "[Capacity and headroom]($($values.capacityWorkbookUrl)): read the tiles first, then the colour-coded status grid and its Evidence column; use the CPU, Memory and Disk tabs to tell a sustained pressure from a brief spike, and select a machine for its own detail."
 }
 if ($context.Contains('optimisationWorkbookResourceId')) {
-    $operationalLinks += "[Optimisation opportunities]($($values.optimisationWorkbookUrl)): start with ownership/evidence gaps; explain a review candidate rather than promising a resize or savings."
+    $operationalLinks += "[Optimisation opportunities]($($values.optimisationWorkbookUrl)): start with the review-reason tiles and the evidence-quality chart, select a candidate to see why it was flagged, and explain a conversation starter rather than promising a resize or savings."
 }
 if ($operationalLinks.Count) {
-    $values.OperationalWorkbookSection = ($operationalLinks -join "`n`n") + "`n`nCheck freshness, coverage and history warnings first. Missing data is not zero; parked gaps are not idle headroom. Parent/guest rows are separate observations, never additive hardware capacity. Hypothetical operator inputs are not billed or realised savings. These links record publication only, not current telemetry health."
+    $values.OperationalWorkbookSection = ($operationalLinks -join "`n`n") + "`n`nCheck freshness, coverage and history warnings first. Missing data is not zero; parked gaps are not idle headroom. A declared nested guest and its parent are separate observations, never additive hardware capacity. The optional cost scenario uses only figures typed into the workbook and is not billed or realised savings. These links record publication only, not current telemetry health."
 }
 if ($context.Contains('sqlMachineResourceId')) {
     $proofPath = Join-Path $directory 'sql-engine-status.json'
