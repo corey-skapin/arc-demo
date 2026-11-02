@@ -55,14 +55,20 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   dropdown opens on a Windows host with the Azure Monitor Agent (machines without it, such as the
   nested SQL guest, are listed and labelled), CPU, memory and disk read the `Perf` table for Windows
   and Linux, tile labels are short, every empty tile says why, and its Log Analytics tiles carry no
-  workspace picker (Phase 11 pins them at publish). `tests/MachineIntelligenceWorkbook.Tests.ps1` guards it.
+  workspace picker (Phase 11 pins them at publish). Time series are single-measure column charts
+  without the `(Sum)` legend totals, so a parked or silent interval is a blank gap, never a zero or a
+  straight line; tables use the Full size (a Small table reserves a block of blank space under it),
+  datetimes show as local date and time, and the non-compliant policy grid names the built-in policies
+  and initiatives that Arc machines evaluate here (an unknown definition falls back to its reference
+  ID). `tests/MachineIntelligenceWorkbook.Tests.ps1` guards it.
 - SQL Estate Dashboard is reworked for the lab, not a snapshot: the Arc inventory (instance, version,
   edition, licence and the databases of registered instances only) sits beside the monitored SQL
   workload (`ArcSqlEngineDemo` events 6000, 6201 and 6001 from the Azure Monitor Agent) and the
   lock-timeout alert rule. The nested Arc SQL instance is labelled experimental and unsupported,
   Defender is shown as Arc reports it with no claim, the BPA tiles read `SqlAssessment_CL` through a
-  guarded union and show a "not enabled" note while this lab collects no BPA data, the version and
-  licence charts understand Arc SQL text values such as `SQL Server 2022` and `Free`, and its Log Analytics
+  guarded union and show a "not enabled" note while this lab collects no BPA data, the edition,
+  version and licence mixes are tiles that understand Arc SQL text values such as `SQL Server 2022`
+  and `Free`, the workload charts are column charts with short legends, and its Log Analytics
   tiles carry no workspace picker (Phase 11 pins them at publish). `tests/SqlEstateWorkbook.Tests.ps1` guards it.
 - Governance & Compliance (experimental) is no longer deployed from this folder either. It is rebuilt in
   `workbooks/arc-governance.workbook.json` (attribution kept in its header): policy compliance for all resources

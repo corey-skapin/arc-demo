@@ -100,7 +100,7 @@ Describe 'Machine Intelligence Center opens populated, with no clicks and no wai
         $available = ($la | Where-Object name -eq 'perf-avail').content.query
         $available | Should -Match 'Available MBytes Memory'
         ($la | Where-Object name -eq 'perf-disk').content.query | Should -Match "'Logical Disk', 'LogicalDisk'"
-        foreach ($name in 'perf-cpu', 'perf-mem', 'perf-avail') { ($la | Where-Object name -eq $name).content.query | Should -Not -Match 'InsightsMetrics' -Because $name }
+        foreach ($name in 'perf-cpu-avg', 'perf-cpu-peak', 'perf-mem', 'perf-avail') { ($la | Where-Object name -eq $name).content.query | Should -Not -Match 'InsightsMetrics' -Because $name }
     }
 }
 
@@ -114,7 +114,7 @@ Describe 'Machine Intelligence Center never shows a silent blank' {
     }
 
     It 'explains the missing Azure Monitor Agent on every telemetry tile' {
-        foreach ($name in 'perf-cpu', 'perf-mem', 'perf-avail', 'perf-disk', 'perf-dist', 'perf-volumes', 'events-heartbeat', 'events-sources') {
+        foreach ($name in 'perf-cpu-avg', 'perf-cpu-peak', 'perf-mem', 'perf-avail', 'perf-disk', 'perf-dist', 'perf-volumes', 'events-heartbeat', 'events-sources') {
             ($la | Where-Object name -eq $name).content.noDataMessage | Should -Match 'no Azure Monitor Agent' -Because $name
         }
     }
@@ -141,10 +141,12 @@ Describe 'Machine Intelligence Center never shows a silent blank' {
 }
 
 Describe 'Machine Intelligence Center tiles stay readable and mean what they say' {
-    It 'keeps tile labels at 18 characters and literal notes at 40 characters' {
+    It 'keeps tile labels at 18 characters and every other tile text at 30 characters, so nothing is cut at the default tile width' {
         foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'tiles' })) {
             foreach ($match in [regex]::Matches($item.content.query, "'Label', '([^']*)'")) { $match.Groups[1].Value.Length | Should -BeLessOrEqual 18 -Because "$($item.name): $($match.Groups[1].Value)" }
-            foreach ($match in [regex]::Matches($item.content.query, "'Note', '([^']*)'")) { $match.Groups[1].Value.Length | Should -BeLessOrEqual 40 -Because "$($item.name): $($match.Groups[1].Value)" }
+            foreach ($line in ($item.content.query -split "`n" | Where-Object { $_ -match "pack\('Label'" })) {
+                foreach ($literal in [regex]::Matches($line, "'[^']*'")) { ($literal.Value.Length - 2) | Should -BeLessOrEqual 30 -Because "$($item.name): $($literal.Value)" }
+            }
         }
     }
 
@@ -176,10 +178,119 @@ Describe 'Machine Intelligence Center tiles stay readable and mean what they say
     }
 
     It 'gives every chart a fixed zero baseline and a percentage axis capped at 100' {
-        foreach ($name in 'perf-cpu', 'perf-mem', 'perf-disk', 'events-heartbeat') {
+        foreach ($name in 'perf-cpu-peak', 'perf-mem', 'perf-disk', 'events-heartbeat') {
             $chart = ($la | Where-Object name -eq $name).content.chartSettings.ySettings
             $chart.min | Should -Be 0 -Because $name
             $chart.max | Should -Be 100 -Because $name
         }
+        foreach ($name in 'perf-cpu-avg', 'perf-avail') { ($la | Where-Object name -eq $name).content.chartSettings.ySettings.min | Should -Be 0 -Because $name }
+    }
+}
+
+Describe 'Machine Intelligence Center renders cleanly in the portal' {
+    It 'is titled Center, matching the workbook name' {
+        $title = ($items | Where-Object { $_.name -eq 'title' }).content.json
+        $title | Should -Match '^# Arc Machine Intelligence Center'
+        $raw | Should -Not -Match 'Centre'
+    }
+
+    It 'draws every time series as columns with no legend totals, so a parked or silent interval is a break, never a zero or a straight line' {
+        $charts = @($la | Where-Object { $_.content.visualization -in 'timechart', 'linechart', 'barchart', 'areachart' })
+        $charts.Count | Should -BeGreaterThan 5
+        foreach ($item in $charts) {
+            $item.content.visualization | Should -Be 'barchart' -Because $item.name
+            $item.content.chartSettings.showMetrics | Should -BeFalse -Because "$($item.name) must not show (Sum) totals"
+        }
+        $raw | Should -Not -Match '"visualization":\s*"timechart"'
+    }
+
+    It 'plots a non-additive measure (a percentage, a minimum, a peak) as one series per chart so columns can never be misread as a stack' {
+        foreach ($name in 'perf-cpu-avg', 'perf-cpu-peak', 'perf-mem', 'perf-avail', 'perf-disk', 'events-heartbeat') {
+            $query = ($la | Where-Object name -eq $name).content.query
+            $columns = Get-ProjectedColumn $query
+            @($columns).Count | Should -Be 2 -Because "$name returns TimeGenerated plus exactly one measure"
+            $query | Should -Not -Match 'by Volume' -Because $name
+        }
+    }
+
+    It 'keeps missing intervals null in the measure series instead of filling them with zero' {
+        foreach ($name in 'perf-cpu-avg', 'perf-cpu-peak', 'perf-mem', 'perf-avail', 'perf-disk') {
+            ($la | Where-Object name -eq $name).content.query | Should -Match 'default = real\(null\)' -Because $name
+        }
+    }
+
+    It 'shows a legend only where a chart has several series, and puts it below the chart' {
+        foreach ($name in 'software-chart', 'events-chart', 'sql-workload') {
+            $chart = ($la | Where-Object name -eq $name).content.chartSettings
+            $chart.showLegend | Should -BeTrue -Because $name
+            $chart.simpleLegendSettings.position | Should -Be 'bottom' -Because $name
+        }
+        foreach ($name in 'perf-cpu-avg', 'perf-cpu-peak', 'perf-mem', 'perf-avail', 'perf-disk', 'events-heartbeat') {
+            ($la | Where-Object name -eq $name).content.chartSettings.showLegend | Should -BeFalse -Because $name
+        }
+    }
+
+    It 'leaves no table at the Small size, which reserves a fixed block of blank space under a short table, and bounds every table' {
+        $tables = @($queries | Where-Object { $_.content.visualization -eq 'table' })
+        $tables.Count | Should -BeGreaterThan 8
+        foreach ($item in $tables) {
+            $item.content.size | Should -Be 3 -Because $item.name
+            $bounded = ($item.content.query -match '\| take \d+') -or ($item.content.gridSettings.rowLimit -gt 0) -or ($item.content.query -match 'make-series|summarize')
+            $bounded | Should -BeTrue -Because "$($item.name) must be bounded when it is shown at the Full size"
+        }
+    }
+
+    It 'formats every date and time column as a readable local date instead of a raw ISO string' {
+        foreach ($item in $queries) {
+            foreach ($formatter in @($item.content.gridSettings.formatters | Where-Object { $_.columnMatch -match '^(TimeGenerated|Since|Evaluated|LastSample|LastInventory|Last)$' })) {
+                $formatter.formatter | Should -Be 6 -Because "$($item.name) $($formatter.columnMatch)"
+                $formatter.dateFormat.formatName | Should -Be 'shortDateTimeNoMsPattern' -Because "$($item.name) $($formatter.columnMatch)"
+            }
+        }
+        foreach ($pair in @(@('perf-volumes', 'LastSample'), @('security-open', 'Since'), @('arc-policy-table', 'Evaluated'), @('software-table', 'TimeGenerated'), @('events-sources', 'Last'), @('sql-instances', 'LastInventory'))) {
+            $item = $queries | Where-Object name -eq $pair[0]
+            @($item.content.gridSettings.formatters | Where-Object { $_.columnMatch -eq $pair[1] -and $_.formatter -eq 6 }).Count | Should -Be 1 -Because "$($pair[0]) $($pair[1])"
+        }
+    }
+
+    It 'sizes every grid column so its header and its status chip are not cut' {
+        foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'table' })) {
+            $labels = @{}
+            foreach ($label in @($item.content.gridSettings.labelSettings)) { $labels[$label.columnId] = $label.label }
+            foreach ($formatter in @($item.content.gridSettings.formatters)) {
+                $width = [string]$formatter.formatOptions.customColumnWidthSetting
+                if ($width -notmatch '^(\d+)ch$') { continue }
+                $chars = [int]$Matches[1]
+                $header = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { [string]$formatter.columnMatch }
+                $chars | Should -BeGreaterOrEqual ($header.Length + 4) -Because "$($item.name) header '$header'"
+                if ($formatter.formatter -eq 18) {
+                    $longest = ($formatter.formatOptions.thresholdsGrid | Where-Object { $_.thresholdValue } | ForEach-Object { ([string]$_.thresholdValue).Length } | Measure-Object -Maximum).Maximum
+                    $chars | Should -BeGreaterOrEqual ($longest + 6) -Because "$($item.name) chip $($formatter.columnMatch)"
+                }
+            }
+        }
+    }
+
+    It 'rounds decimals in grids with an explicit number format instead of showing 85.900-style values' {
+        foreach ($pair in @(@('perf-volumes', 'FreePct'), @('perf-volumes', 'LowestPct'), @('perf-volumes', 'FreeGb'), @('perf-volumes', 'SizeGb'), @('perf-dist', 'SharePct'), @('sql-databases', 'SizeMB'))) {
+            $item = $queries | Where-Object name -eq $pair[0]
+            $formatter = $item.content.gridSettings.formatters | Where-Object columnMatch -eq $pair[1]
+            $formatter.numberFormat.options.maximumFractionDigits | Should -BeLessOrEqual 1 -Because "$($pair[0]) $($pair[1])"
+        }
+    }
+
+    It 'shows policy and initiative display names, never the raw definition GUIDs' {
+        $query = ($arg | Where-Object name -eq 'arc-policy-table').content.query
+        $query | Should -Match 'Windows machines should meet requirements of the Azure compute security baseline'
+        $query | Should -Match 'Microsoft cloud security benchmark'
+        $query | Should -Match 'NIST SP 800-53 Rev\. 5'
+        $query | Should -Match '\| project Policy, Initiative, Assignment = tostring\(properties\.policyAssignmentName\), Evaluated = todatetime\(properties\.timestamp\)'
+        $query | Should -Not -Match '(?m)^\| project .*policyDefinitionName'
+    }
+
+    It 'keeps the Operating system tile to a short note that fits the tile' {
+        $query = ($arg | Where-Object name -eq 'glance-identity').content.query
+        $query | Should -Match "replace_string\(OsSku, 'Windows Server ', 'Server '\)"
+        $query | Should -Match 'substring\(OsShort, 0, 30\)'
     }
 }

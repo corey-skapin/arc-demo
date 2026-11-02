@@ -103,7 +103,7 @@ Describe 'SQL Estate Dashboard is honest about what it can and cannot show' {
     It 'makes no Defender claim and does not paint the reported value as an achievement' {
         $markdown | Should -Match 'no Defender for SQL claim'
         $grid = ($arg | Where-Object name -eq 'inventory-instances').content.gridSettings
-        $grid.labelSettings | Where-Object columnId -eq 'Defender' | ForEach-Object { $_.label | Should -Be 'Defender (reported)' }
+        ($grid.labelSettings | Where-Object columnId -eq 'Defender').label | Should -Be 'Defender (Arc)'
         $defender = $grid.formatters | Where-Object columnMatch -eq 'Defender'
         ($defender.formatOptions.thresholdsGrid | Where-Object thresholdValue -eq 'Protected').representation | Should -Not -Be 'green'
         $raw | Should -Not -Match '"seriesName":\s*"Protected"'
@@ -124,7 +124,7 @@ Describe 'SQL Estate Dashboard is honest about what it can and cannot show' {
         $markdown | Should -Match 'not enabled in this lab'
     }
 
-    It 'keeps the version and licence charts that understand Arc SQL text values' {
+    It 'keeps the version and licence mixes that understand Arc SQL text values' {
         ($arg | Where-Object name -eq 'mix-version').content.query | Should -Match "version has '2022', 'SQL 2022'"
         ($arg | Where-Object name -eq 'mix-licence').content.query | Should -Match "licenseType =~ 'Free'"
     }
@@ -144,10 +144,12 @@ Describe 'SQL Estate Dashboard is honest about what it can and cannot show' {
 }
 
 Describe 'SQL Estate Dashboard tiles stay readable and mean what they say' {
-    It 'keeps tile labels at 18 characters and literal notes at 40 characters' {
+    It 'keeps tile labels at 18 characters and every other tile text at 30 characters, so nothing is cut at the default tile width' {
         foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'tiles' })) {
             foreach ($match in [regex]::Matches($item.content.query, "'Label', '([^']*)'")) { $match.Groups[1].Value.Length | Should -BeLessOrEqual 18 -Because "$($item.name): $($match.Groups[1].Value)" }
-            foreach ($match in [regex]::Matches($item.content.query, "'Note', '([^']*)'")) { $match.Groups[1].Value.Length | Should -BeLessOrEqual 40 -Because "$($item.name): $($match.Groups[1].Value)" }
+            foreach ($line in ($item.content.query -split "`n" | Where-Object { $_ -match "pack\('Label'|Note = " })) {
+                foreach ($literal in [regex]::Matches($line, "'[^']*'")) { ($literal.Value.Length - 2) | Should -BeLessOrEqual 30 -Because "$($item.name): $($literal.Value)" }
+            }
         }
     }
 
@@ -173,5 +175,96 @@ Describe 'SQL Estate Dashboard tiles stay readable and mean what they say' {
         $recovery = $grid.formatters | Where-Object columnMatch -eq 'RecoveredAfterSec'
         $recovery.formatter | Should -Be 8
         $recovery.formatOptions.palette | Should -Be 'greenRed'
+    }
+}
+
+Describe 'SQL Estate Dashboard renders cleanly in the portal' {
+    It 'draws every time series as columns with no legend totals, so a parked or silent interval is a break and nothing reads as (Sum)' {
+        $charts = @($la | Where-Object { $_.name -like 'workload-*' -and $_.content.visualization -ne 'table' })
+        $charts.Count | Should -Be 3
+        foreach ($item in $charts) {
+            $item.content.visualization | Should -Be 'barchart' -Because $item.name
+            $item.content.chartSettings.showMetrics | Should -BeFalse -Because "$($item.name) must not show (Sum) totals"
+        }
+        $raw | Should -Not -Match '"visualization":\s*"timechart"'
+    }
+
+    It 'plots latency as one series so columns can never be misread as a stack of an average on a maximum' {
+        $query = ($la | Where-Object name -eq 'workload-latency').content.query
+        $query | Should -Match 'make-series Slowest = max\(Elapsed\)'
+        $query | Should -Not -Match 'Average'
+        ($la | Where-Object name -eq 'workload-latency').content.chartSettings.showLegend | Should -BeFalse
+    }
+
+    It 'labels every series with a short name that fits the legend, and shows a legend only where there are several series' {
+        foreach ($name in 'workload-commits', 'workload-latency', 'workload-locks') {
+            $chart = ($la | Where-Object name -eq $name).content.chartSettings
+            foreach ($series in $chart.seriesLabelSettings) { $series.label.Length | Should -BeLessOrEqual 30 -Because "$name $($series.seriesName)" }
+        }
+        $locks = ($la | Where-Object name -eq 'workload-locks').content.chartSettings
+        $locks.showLegend | Should -BeTrue
+        $locks.simpleLegendSettings.position | Should -Be 'bottom'
+        ($locks.seriesLabelSettings | Where-Object seriesName -like 'Lock timeout*').color | Should -Be 'redBright'
+    }
+
+    It 'shows the edition, version and licence mix as tiles, not single-slice charts' {
+        foreach ($name in 'mix-edition', 'mix-version', 'mix-licence') {
+            $item = $arg | Where-Object name -eq $name
+            $item.content.visualization | Should -Be 'tiles' -Because $name
+            (Get-ProjectedColumn $item.content.query) | Should -Be @('Label', 'Value', 'Note') -Because $name
+        }
+        $raw | Should -Not -Match '"visualization":\s*"piechart"'
+    }
+
+    It 'leaves no table at the Small size, which reserves a fixed block of blank space under a short table, and bounds every table' {
+        $tables = @($queries | Where-Object { $_.content.visualization -eq 'table' })
+        $tables.Count | Should -BeGreaterOrEqual 4
+        foreach ($item in $tables) {
+            $item.content.size | Should -Be 3 -Because $item.name
+            $bounded = ($item.content.query -match '\| take \d+') -or ($item.content.gridSettings.rowLimit -gt 0)
+            $bounded | Should -BeTrue -Because "$($item.name) must be bounded when it is shown at the Full size"
+        }
+    }
+
+    It 'formats every date and time column as a readable local date instead of a raw ISO string' {
+        foreach ($pair in @(@('inventory-instances', 'LastInventory'), @('workload-incidents', 'Detected'), @('workload-alerts', 'Raised'), @('workload-alerts', 'Resolved'))) {
+            $item = $queries | Where-Object name -eq $pair[0]
+            $formatter = $item.content.gridSettings.formatters | Where-Object columnMatch -eq $pair[1]
+            $formatter.formatter | Should -Be 6 -Because "$($pair[0]) $($pair[1])"
+            $formatter.dateFormat.formatName | Should -Be 'shortDateTimeNoMsPattern' -Because "$($pair[0]) $($pair[1])"
+        }
+    }
+
+    It 'reports the latest alert as a relative age like every other tile, not a UTC clock time' {
+        $query = ($arg | Where-Object name -eq 'glance-alerts').content.query
+        $query | Should -Match "strcat\('latest ', RaisedText\)"
+        $query | Should -Not -Match 'UTC|format_datetime'
+    }
+
+    It 'sizes every grid column so its header and its status chip are not cut' {
+        foreach ($item in @($queries | Where-Object { $_.content.visualization -eq 'table' })) {
+            $labels = @{}
+            foreach ($label in @($item.content.gridSettings.labelSettings)) { $labels[$label.columnId] = $label.label }
+            foreach ($formatter in @($item.content.gridSettings.formatters)) {
+                $width = [string]$formatter.formatOptions.customColumnWidthSetting
+                if ($width -notmatch '^(\d+)ch$') { continue }
+                $chars = [int]$Matches[1]
+                $header = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { [string]$formatter.columnMatch }
+                $chars | Should -BeGreaterOrEqual ($header.Length + 4) -Because "$($item.name) header '$header'"
+                if ($formatter.formatter -eq 18) {
+                    $longest = ($formatter.formatOptions.thresholdsGrid | Where-Object { $_.thresholdValue } | ForEach-Object { ([string]$_.thresholdValue).Length } | Measure-Object -Maximum).Maximum
+                    $chars | Should -BeGreaterOrEqual ($longest + 6) -Because "$($item.name) chip $($formatter.columnMatch)"
+                }
+            }
+        }
+    }
+
+    It 'keeps the incident grid within one full-width row: few columns, no identifiers that only widen it' {
+        $grid = ($la | Where-Object name -eq 'workload-incidents').content.gridSettings
+        @($grid.formatters).Count | Should -BeLessOrEqual 8
+        $raw | Should -Not -Match '"columnMatch":\s*"IncidentId"'
+        $total = 0
+        foreach ($formatter in $grid.formatters) { if ([string]$formatter.formatOptions.customColumnWidthSetting -match '^(\d+)ch$') { $total += [int]$Matches[1] } }
+        $total | Should -BeLessOrEqual 135
     }
 }
