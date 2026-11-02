@@ -43,6 +43,56 @@ Describe 'Arc agent bracketed block list' {
     }
 }
 
+Describe 'Nested guest onboarding identity tags' {
+    BeforeAll {
+        $ast = [Management.Automation.Language.Parser]::ParseFile($script:connect, [ref]$null, [ref]$null)
+        $configAssignment = @($ast.FindAll({
+            param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$config' -and $node.Right.Extent.Text -match 'tags='
+        }, $true))
+        if ($configAssignment.Count -ne 1) { throw 'Expected one Arc enrollment config builder.' }
+        $script:buildEnrollmentConfig = [scriptblock]::Create($configAssignment[0].Extent.Text + "`n`$config")
+    }
+    BeforeEach {
+        $Subscription = 'fixture-subscription'
+        $Tenant = 'fixture-tenant'
+        $Group = 'rg-fixture'
+        $Region = 'australiaeast'
+        $Name = 'FixtureSqlGuest'
+        $Application = 'fixture-application'
+        $OnboardingSecret = ConvertTo-SecureString 'Synthetic-Onboarding-Secret-Only-In-Memory' -AsPlainText -Force
+        $script:enrollment = & $script:buildEnrollmentConfig | ConvertFrom-Json
+        $script:enrollmentTags = @{}
+        foreach ($pair in $script:enrollment.tags.Split(',')) {
+            $parts = $pair.Split('=', 2)
+            $script:enrollmentTags.Add($parts[0], $parts[1])
+        }
+    }
+    AfterEach { $OnboardingSecret.Dispose() }
+
+    It 'enrolls with exactly the minimal identity tags and retained SQL-extension block tag' {
+        $expected = @{
+            ArcSQLServerExtensionDeployment = 'Disabled'
+            costcenter = 'demo'; env = 'demo'; owner = 'demo'; purpose = 'arc-demo'
+            role = 'sql'; osType = 'Windows'; osTier = 'WS2022'; inventory = 'arc'
+        }
+        $script:enrollmentTags.Count | Should -Be $expected.Count
+        foreach ($tag in $expected.GetEnumerator()) {
+            $script:enrollmentTags[$tag.Key] | Should -BeExactly $tag.Value
+        }
+        $script:enrollment.'resource-name' | Should -BeExactly 'FixtureSqlGuest'
+        $script:enrollment.'subscription-id' | Should -BeExactly 'fixture-subscription'
+    }
+
+    It 'does not claim unsupported <Tag> intent' -ForEach @(
+        @{ Tag = 'monitorTier' }, @{ Tag = 'defender' },
+        @{ Tag = 'updateManager' }, @{ Tag = 'machineConfig' }
+    ) {
+        $script:enrollmentTags.ContainsKey($Tag) | Should -BeFalse
+    }
+}
+
 Describe 'Simple nested demo step previews' {
     BeforeEach {
         $script:password = ConvertTo-SecureString 'Synthetic!Credential12345678901234567890' -AsPlainText -Force

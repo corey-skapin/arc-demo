@@ -157,6 +157,15 @@ rerun the whole build against an existing guest.
 The individual New/Wait/Connect/Engine/Enable/Test scripts support targeted
 continuation through `Invoke-NestedSqlDemoStep.ps1`.
 
+New Arc enrollment applies only the guest's ownership and identity tags:
+`costcenter=demo`, `env=demo`, `owner=demo`, `purpose=arc-demo`, `role=sql`,
+`osType=Windows`, `osTier=WS2022` and `inventory=arc`, alongside the existing
+`ArcSQLServerExtensionDeployment=Disabled` onboarding tag. These are not parent
+tags or proof of monitoring coverage: do not copy `monitorTier`, `defender`,
+`updateManager` or `machineConfig` intent to this guest. Connecting an
+already-connected guest does not retag it; an explicitly approved existing-guest
+correction must merge tags and preserve unrelated tags, not replace the tag set.
+
 | One-day-credential scratch-build step | Observed time |
 | --- | ---: |
 | Create/image/first boot | 10m37s |

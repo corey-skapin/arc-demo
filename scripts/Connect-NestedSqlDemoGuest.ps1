@@ -99,7 +99,7 @@ Invoke-Command -VMName $VmName -Credential $GuestCredential -ArgumentList $Onboa
                 'subscription-id'=$Subscription; 'tenant-id'=$Tenant; 'resource-group'=$Group
                 'resource-name'=$Name; location=$Region; 'service-principal-id'=$Application
                 'service-principal-secret'=[pscredential]::new('onboarding',$OnboardingSecret).GetNetworkCredential().Password
-                tags='ArcSQLServerExtensionDeployment=Disabled'
+                tags='ArcSQLServerExtensionDeployment=Disabled,costcenter=demo,env=demo,owner=demo,purpose=arc-demo,role=sql,osType=Windows,osTier=WS2022,inventory=arc'
             } | ConvertTo-Json
             [IO.File]::WriteAllText($path,$config)
             $config = $null
