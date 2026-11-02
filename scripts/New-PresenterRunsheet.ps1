@@ -12,6 +12,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot
+function ConvertTo-LocalFileLink {
+    # Pure string work so Windows and Linux paths both give file:/// links; a [uri] cast would treat a Unix path as relative.
+    param([Parameter(Mandatory)][string]$LocalPath)
+    $segments = @(($LocalPath -replace '\\', '/') -split '/' | ForEach-Object {
+            if ($_ -match '^[A-Za-z]:$') { $_ } else { [uri]::EscapeDataString($_) }
+        })
+    $joined = $segments -join '/'
+    if ($joined.StartsWith('/')) { "file://$joined" } else { "file:///$joined" }
+}
 $contextFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ContextPath)
 $directory = Split-Path $contextFile
 if ((Split-Path $directory -Leaf) -ne '.local' -or (Split-Path $contextFile -Leaf) -ne 'demo-context.json') {
@@ -181,8 +190,9 @@ if ($context.Contains('sqlMachineResourceId')) {
         $committed -gt $checked -or ($checked - $committed).TotalSeconds -gt 120) {
         throw 'Saved SQL evidence is incomplete, unverified or belongs to a different host; no SQL presentation claim.'
     }
-    $proofLink = if ($AbsoluteLocalLinks) { ([uri]$proofPath).AbsoluteUri -replace '\(', '%28' -replace '\)', '%29' } else { 'sql-engine-status.json' }
-    $values.SqlAvailability = "Prepared real SQL host: **$($values.sqlMachineName)**. [Saved engine/query proof]($proofLink): SQL Server $($data.version) Developer, instance ARCDEMO, database ArcDemoOrders, $($data.orderCount) rows; last commit $($committed.UtcDateTime.ToString('o')), checked $($checked.UtcDateTime.ToString('o')). This is dated evidence, not a new guest query."
+    $proofLink = 'sql-engine-status.json'
+        if ($AbsoluteLocalLinks) { $proofLink = ConvertTo-LocalFileLink $proofPath }
+        $values.SqlAvailability = "Prepared real SQL host: **$($values.sqlMachineName)**. [Saved engine/query proof]($proofLink): SQL Server $($data.version) Developer, instance ARCDEMO, database ArcDemoOrders, $($data.orderCount) rows; last commit $($committed.UtcDateTime.ToString('o')), checked $($checked.UtcDateTime.ToString('o')). This is dated evidence, not a new guest query."
     $values.SqlHostFilter = '| where tolower(_ResourceId) == "' + $context.sqlMachineResourceId.ToLowerInvariant() + '"'
 }
 if ($context.Contains('sqlIncidentAlertResourceId')) {
@@ -200,7 +210,7 @@ if ($context.Contains('companionSreRunsheetPath')) {
     if (-not [IO.Path]::IsPathFullyQualified($companion)) { throw 'companionSreRunsheetPath must be an explicit absolute local path.' }
     if (Test-Path -LiteralPath $companion -PathType Leaf) {
         if ($AbsoluteLocalLinks) {
-            $link = ([uri]$companion).AbsoluteUri -replace '\(', '%28' -replace '\)', '%29'
+            $link = ConvertTo-LocalFileLink $companion
         } else {
             $relative = [IO.Path]::GetRelativePath($directory, $companion)
             if ([IO.Path]::IsPathRooted($relative)) { throw 'Companion guide must be on the same drive to create a relative Markdown link.' }

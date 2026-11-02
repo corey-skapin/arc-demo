@@ -276,7 +276,7 @@ Describe 'Offline private presenter guide' {
         $text = Get-Content $output -Raw
         $match = [regex]::Match($text, '\[SRE presenter guide\]\((file:///[^)]+)\)')
         $match.Success | Should -BeTrue
-        $match.Groups[1].Value | Should -Match 'companion%20folder/afternoon%20%28guide%29\.md$'
+        $match.Groups[1].Value | Should -Match '^file:///[^\\]+/companion%20folder/afternoon%20%28guide%29\.md$'
         [uri]::UnescapeDataString($match.Groups[1].Value) | Should -Match 'afternoon \(guide\)\.md$'
     }
 
@@ -293,7 +293,7 @@ Describe 'Offline private presenter guide' {
         & $generator -ContextPath $path | Out-Null
         Get-Content $output -Raw | Should -Match '\[Saved engine/query proof\]\(sql-engine-status\.json\)'
         & $generator -ContextPath $path -AbsoluteLocalLinks | Out-Null
-        Get-Content $output -Raw | Should -Match '\[Saved engine/query proof\]\(file:///.*sql-engine-status\.json\)'
+        Get-Content $output -Raw | Should -Match '\[Saved engine/query proof\]\(file:///[^)\\]+/sql-engine-status\.json\)'
     }
 
     It 'fails explicitly on a missing context' {
