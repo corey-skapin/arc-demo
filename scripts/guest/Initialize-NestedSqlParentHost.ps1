@@ -9,7 +9,8 @@
     the operator script, never from here.
 
       Inspect  data volume, Hyper-V role/service/hypervisor, switch/vNIC/NAT, media files
-      Volume   initialise the blank Azure data disk as the data volume (default D:, NestedSQL)
+      Volume   initialise the blank Azure data disk as the data volume (default D:, NestedSQL);
+               the empty virtual DVD-ROM that a size without a temp disk puts on D: moves to Z:
       HyperV   install the Hyper-V role with management tools (a restart is needed afterwards)
       Network  internal switch, host address and NAT for the nested guest
 #>
@@ -41,6 +42,8 @@ function Get-DataVolumeState {
     $letter = [string]$Settings.driveLetter
     $volume = Get-Volume -DriveLetter $letter -ErrorAction SilentlyContinue
     if (-not $volume) { return [pscustomobject]@{ present = $false } }
+    # A size without a temp disk (Dsv5) leaves D: to the empty virtual DVD-ROM; that is not a data volume.
+    if ([string]$volume.DriveType -eq 'CD-ROM' -and -not [int64]$volume.Size) { return [pscustomobject]@{ present = $false; opticalDrive = $true } }
     $lun = $null
     $partition = Get-Partition -DriveLetter $letter -ErrorAction SilentlyContinue
     if ($partition) {
@@ -107,10 +110,28 @@ function Get-MediaState {
     }
 }
 
+function Move-EmptyOpticalDrive {
+    param([string]$Letter)
+    $from = "${Letter}:"
+    $drives = @(Get-CimInstance -ClassName Win32_Volume -Filter "DriveLetter = '$from' AND DriveType = 5")
+    if ($drives.Count -ne 1 -or $drives[0].Capacity) { throw "Drive ${from} is not one empty optical drive; refusing to change it." }
+    $taken = @(Get-CimInstance -ClassName Win32_Volume | Where-Object { $_.DriveLetter } | ForEach-Object { ([string]$_.DriveLetter).Substring(0, 1).ToUpperInvariant() })
+    $spare = @('Z', 'Y', 'X', 'W') | Where-Object { $_ -notin $taken } | Select-Object -First 1
+    if (-not $spare) { throw "No spare drive letter (Z to W) is free for the optical drive on ${from}." }
+    Set-CimInstance -InputObject $drives[0] -Property @{ DriveLetter = "${spare}:" }
+    if (@(Get-CimInstance -ClassName Win32_Volume -Filter "DriveLetter = '$from'").Count) { throw "Drive ${from} is still taken after moving the optical drive to ${spare}:." }
+    $spare
+}
+
 function Initialize-DataVolume {
     param($Settings)
     $letter = [string]$Settings.driveLetter
     $state = Get-DataVolumeState $Settings
+    $movedTo = $null
+    if ($state.opticalDrive) {
+        $movedTo = Move-EmptyOpticalDrive $letter
+        $state = Get-DataVolumeState $Settings
+    }
     if ($state.present) {
         if ($state.label -ne [string]$Settings.label -or $state.fileSystem -ne 'NTFS') {
             throw "Drive ${letter}: is already used by another volume; refusing to change it."
@@ -136,7 +157,7 @@ function Initialize-DataVolume {
     New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter $letter | Out-Null
     Format-Volume -DriveLetter $letter -FileSystem NTFS -NewFileSystemLabel ([string]$Settings.label) -AllocationUnitSize 65536 -Confirm:$false | Out-Null
     foreach ($folder in 'VMs', 'Media') { New-Item -ItemType Directory -Path (Join-Path $Settings.root $folder) -Force | Out-Null }
-    [pscustomobject]@{ changed = $true }
+    [pscustomobject]@{ changed = $true; opticalDriveMovedTo = $movedTo }
 }
 
 function Install-HyperVRole {

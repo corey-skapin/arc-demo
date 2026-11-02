@@ -22,7 +22,8 @@ BeforeAll {
         'New-Partition' = 'DiskNumber', 'UseMaximumSize', 'DriveLetter'
         'Format-Volume' = 'DriveLetter', 'FileSystem', 'NewFileSystemLabel', 'AllocationUnitSize'
         'Get-WindowsFeature' = 'Name'; 'Install-WindowsFeature' = 'Name', 'IncludeManagementTools'
-        'Get-CimInstance' = 'ClassName'; 'Get-VMHost' = ''; 'Get-VM' = ''; 'Get-VMSwitch' = 'Name'
+        'Get-CimInstance' = 'ClassName', 'Filter'; 'Set-CimInstance' = 'InputObject', 'Property'
+        'Get-VMHost' = ''; 'Get-VM' = ''; 'Get-VMSwitch' = 'Name'
         'New-VMSwitch' = 'Name', 'SwitchType'; 'Get-NetIPAddress' = 'InterfaceAlias', 'InterfaceIndex', 'AddressFamily'
         'New-NetIPAddress' = 'InterfaceIndex', 'IPAddress', 'PrefixLength', 'AddressFamily'
         'Get-NetNat' = ''; 'New-NetNat' = 'Name', 'InternalIPInterfaceAddressPrefix'; 'Get-NetAdapter' = 'Name'
@@ -126,6 +127,58 @@ Describe 'Parent host: data volume' {
         { Initialize-DataVolume $script:settings } | Should -Throw '*already has partitions*'
         Should -Invoke Format-Volume -Times 0
         Should -Invoke Initialize-Disk -Times 0
+    }
+
+    Context 'when a size without a temp disk leaves D: to the empty virtual DVD-ROM' {
+        BeforeEach {
+            # Mock bodies run in the caller's scope, so the shared state lives in a global.
+            $global:DvdTest = @{ Moved = $false; Taken = @('C', 'D') }
+            Mock Get-Volume {
+                if ($global:DvdTest.Moved) { return }
+                [pscustomobject]@{ DriveType = 'CD-ROM'; FileSystem = ''; FileSystemLabel = ''; Size = 0; SizeRemaining = 0 }
+            }
+            Mock Get-CimInstance { @([pscustomobject]@{ DriveLetter = 'D:'; DriveType = 5; Capacity = $null }) } -ParameterFilter { $Filter -like '*DriveType = 5*' }
+            Mock Get-CimInstance { @($global:DvdTest.Taken | ForEach-Object { [pscustomobject]@{ DriveLetter = "${_}:" } }) } -ParameterFilter { -not $Filter }
+            Mock Get-CimInstance { if ($global:DvdTest.Moved) { @() } else { @([pscustomobject]@{ DriveLetter = 'D:' }) } } -ParameterFilter { $Filter -eq "DriveLetter = 'D:'" }
+            Mock Set-CimInstance { $global:DvdTest.Moved = $true } -RemoveParameterType InputObject
+        }
+        AfterEach { Remove-Variable DvdTest -Scope Global -ErrorAction SilentlyContinue }
+        It 'reports an empty optical D: as not a data volume' {
+            $state = Get-DataVolumeState $script:settings
+            $state.present | Should -BeFalse
+            $state.opticalDrive | Should -BeTrue
+        }
+        It 'moves the empty DVD-ROM to Z: and then initialises the data disk as D:' {
+            $result = Initialize-DataVolume $script:settings
+            $result.changed | Should -BeTrue
+            $result.opticalDriveMovedTo | Should -Be 'Z'
+            Should -Invoke Set-CimInstance -Times 1 -Exactly -ParameterFilter { $Property.DriveLetter -eq 'Z:' }
+            Should -Invoke New-Partition -Times 1 -Exactly -ParameterFilter { $DriveLetter -eq 'D' }
+            Should -Invoke Format-Volume -Times 1 -Exactly
+        }
+        It 'takes the next spare letter when Z: is in use' {
+            $global:DvdTest.Taken = @('C', 'D', 'Z')
+            (Initialize-DataVolume $script:settings).opticalDriveMovedTo | Should -Be 'Y'
+            Should -Invoke Set-CimInstance -Times 1 -Exactly -ParameterFilter { $Property.DriveLetter -eq 'Y:' }
+        }
+        It 'never touches a DVD-ROM that holds a disc' {
+            Mock Get-Volume { [pscustomobject]@{ DriveType = 'CD-ROM'; FileSystem = 'UDF'; FileSystemLabel = 'SOMEDISC'; Size = 4GB; SizeRemaining = 0 } }
+            { Initialize-DataVolume $script:settings } | Should -Throw '*already used by another volume*'
+            Should -Invoke Set-CimInstance -Times 0
+            Should -Invoke Format-Volume -Times 0
+        }
+        It 'stops when no spare letter is free or D: is not one empty optical drive' {
+            $global:DvdTest.Taken = @('C', 'D', 'Z', 'Y', 'X', 'W')
+            { Initialize-DataVolume $script:settings } | Should -Throw '*No spare drive letter*'
+            Mock Get-CimInstance { @([pscustomobject]@{ DriveLetter = 'D:'; DriveType = 5; Capacity = 1GB }) } -ParameterFilter { $Filter -like '*DriveType = 5*' }
+            { Initialize-DataVolume $script:settings } | Should -Throw '*not one empty optical drive*'
+            Should -Invoke Set-CimInstance -Times 0
+            Should -Invoke Format-Volume -Times 0
+        }
+        It 'fails when the letter is still taken after the move' {
+            Mock Set-CimInstance {} -RemoveParameterType InputObject
+            Should -Invoke Format-Volume -Times 0
+        }
     }
 }
 
@@ -237,7 +290,7 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
                 Power = 'VM running'; Size = $(if ($Declared -or $Prepared) { 'Standard_D4s_v5' } else { $Size }); Attached = $attached; Disks = @{}
                 Nat = $NatAttached; Calls = [System.Collections.Generic.List[string]]::new(); GuestRunningGuests = 0
                 Volume = $Prepared; HyperVInstalled = $Prepared; HypervisorRunning = $Prepared; Network = $Prepared; Media = $mediaPresent
-                ForeignD = $false; ResizeFails = $false; MediaHashOk = $true; RestartKeepsHypervisorOff = $false
+                ForeignD = $false; ResizeFails = $false; MediaHashOk = $true; RestartKeepsHypervisorOff = $false; OpticalDrive = $false
             }
         }
         $script:skin = Join-Path $TestDrive 'nested-skin.json'
@@ -316,7 +369,7 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
                         media = $media
                     } | ConvertTo-Json -Depth 8 | ConvertFrom-Json)
                 }
-                'Volume' { if ($w.ForeignD) { throw 'Guest action Volume failed on win-sql-02: Drive D: is already used by another volume; refusing to change it.' }; $w.Volume = $true; return [pscustomobject]@{ changed = $true } }
+                'Volume' { if ($w.ForeignD) { throw 'Guest action Volume failed on win-sql-02: Drive D: is already used by another volume; refusing to change it.' }; $w.Volume = $true; return [pscustomobject]@{ changed = $true; opticalDriveMovedTo = $(if ($w.OpticalDrive) { 'Z' }) } }
                 'HyperV' { $w.HyperVInstalled = $true; return [pscustomobject]@{ changed = $true; restartNeeded = $true } }
                 'Network' { $w.Network = $true; return [pscustomobject]@{ changed = $true } }
                 'Save' {
@@ -419,6 +472,15 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         { & $script:prepare @script:common -Confirm:$false -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms } | Should -Throw '*already used by another volume*'
         @($global:PrepWorld.Calls | Where-Object { $_ -in @('guest HyperV', 'guest Network', 'guest Save', 'vm restart') }) | Should -BeNullOrEmpty
     }
+    It 'reports the empty virtual DVD-ROM that the guest moved off D:' {
+        $global:PrepWorld = New-FakeWorld -Declared $true
+        $global:PrepWorld.Volume = $false
+        $global:PrepWorld.OpticalDrive = $true
+        $result = & $script:prepare @script:common -Phase Volume -Confirm:$false
+        $volume = $result.phases | Where-Object phase -eq 'Volume'
+        $volume.status | Should -Be 'changed'
+        $volume.detail | Should -BeLike '*DVD-ROM moved to Z:*'
+    }
     It 'refuses LUN 0 held by another disk and a retained disk that differs from its declaration' {
         $global:PrepWorld = New-FakeWorld -Declared $true
         $global:PrepWorld.Attached = @(@{ name = 'someone-elses-disk'; lun = 0; caching = 'None'; diskSizeGb = 64; managedDisk = @{ storageAccountType = 'Standard_LRS' } })
@@ -443,6 +505,7 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         Set-Content -LiteralPath $script:build -Value '{"OperatorNote":"keep me","Gateway":"stale"}'
         $result = & $script:prepare @script:common -Phase Verify -BuildInputPath $script:build
         $result.status | Should -Be 'pass'
+        ($result.phases | Where-Object phase -eq 'Preflight').detail | Should -BeLike '*lab Active: not checked*'
         $merged = Get-Content -LiteralPath $script:build -Raw | ConvertFrom-Json
         $merged.OperatorNote | Should -Be 'keep me'
         $merged.Gateway | Should -Be '172.31.240.1'

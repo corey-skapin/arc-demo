@@ -491,11 +491,13 @@ drive letter for you.
 | `Resize to ... failed` | Usually no capacity for the size in that region. The parent stays deallocated at its old size; retry later or request quota. No other size is tried. Restore it with the approved lifecycle if the demo needs it now. |
 | `A nested guest is running; stop it gracefully` | Size and HyperV restart the parent. Stop the guest with the pair-only state helper first. |
 | `LUN 0 already holds ...` or `Disk ... already exists but is attached elsewhere or differs` | Prepare never reuses, resizes, converts or moves a disk. Declare the existing disk in the skin or remove the stray disk deliberately. |
-| `Drive D: is already used by another volume` or `Refusing to initialise a data disk that already has partitions` | Volume will not touch a `D:` or a disk that is not blank (a temp disk takes `D:` on sizes that have one). Inspect the VM and decide deliberately. |
+| `Drive D: is already used by another volume` or `Refusing to initialise a data disk that already has partitions` | Volume moves the empty virtual DVD-ROM that a size without a temp disk leaves on `D:` to `Z:` (seen on a fresh `Standard_D4s_v5`), but will not touch any other `D:` (a temp disk on a `d` size, a data volume, a DVD-ROM that holds a disc) or a disk that is not blank. Inspect the VM and decide deliberately. |
 | `Hyper-V is not running after the restart` | The size or security type blocks nested virtualization; Trusted Launch is not supported, the parent must be `Standard`. Check both, then rerun `-Phase HyperV`. |
 | `Guest prefix ... overlaps ...`, `An existing NAT conflicts ...` or `Switch ... exists with type ...` | `172.31.240.0/24` collides with the Azure address space, a route or a different switch or NAT. Pass other `-GuestNetworkPrefix`, `-GatewayAddress` and `-GuestAddress` and use the same values in the build. |
 | Pinned-size or hash errors while staging media | See [Media staging stops on a size or hash mismatch](#media-staging-stops-on-a-size-or-hash-mismatch). |
 | `Verify failed: ...` | The result's `checks` name each failing check. Run the matching `-Phase`, then Verify again. Verify never starts a parked parent; run Activate first. |
+| Verify takes about five minutes after a start | It hashes both ISOs (about 6 GiB) read cold from the data disk, observed at 4m45s on a `Standard_D4s_v5` with a `StandardSSD_LRS` disk against about one minute when the files are cached. It is not stuck; the guest call allows 15 minutes (`-TimeoutSeconds`). |
+
 ## Deploy refuses a retained VM's size or data disk
 
 **Symptom** — `Deploy-ArcDemo.ps1` stops before any preview with
