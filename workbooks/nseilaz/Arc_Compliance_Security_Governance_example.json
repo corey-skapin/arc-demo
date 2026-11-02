@@ -56,7 +56,7 @@
           {
             "id": "p_subscriptions",
             "version": "KqlParameterItem/1.0",
-            "name": "Subscriptions",
+            "name": "Subscriptions", "value": ["value::all"],
             "type": 6,
             "label": "🔧 Subscriptions",
             "isRequired": true,

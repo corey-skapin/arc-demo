@@ -102,6 +102,9 @@ intentional sample names; lifecycle follows IDs rather than guessing those names
 collection provide the presenter surfaces. `docs/runsheet.md` keeps the
 20-30 minute standalone Arc/Monitor story. SRE Agent is an optional later layer
 consuming the same alerts, not a prerequisite or replacement.
+`tests/OriginalWorkbooks.Tests.ps1` keeps those six original workbooks valid and
+demo-ready offline: JSON and title checks, subscription-picker defaults, the lab's
+tag names and the Estate Overview tile logic.
 
 `workbooks/capacity-headroom.workbook.json`,
 `workbooks/optimisation-opportunities.workbook.json` and shared
