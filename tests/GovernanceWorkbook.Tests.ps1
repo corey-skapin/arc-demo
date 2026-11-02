@@ -105,6 +105,12 @@ Describe 'Arc governance and compliance workbook (rebuilt, repo-native, experime
         $raw | Should -Not -Match 'Machines should have vulnerability findings resolved'
     }
 
+    It 'shows policy assignments in a full-width table so the names are not cut off' {
+        $assignments = $queries | Where-Object { $_.content.title -eq 'Compliance by policy assignment' }
+        $assignments.PSObject.Properties.Name | Should -Not -Contain 'customWidth'
+        $assignments.content.visualization | Should -Be 'table'
+    }
+
     It 'carries no real subscription path, no replacement character and keeps the upstream attribution' {
         $raw | Should -Not -Match '/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
         $raw.Contains([string][char]0xFFFD) | Should -BeFalse

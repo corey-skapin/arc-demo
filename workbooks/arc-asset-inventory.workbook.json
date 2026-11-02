@@ -248,14 +248,25 @@
               "columnMatch": "AgentVersion",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "LastStatusChange",
+              "formatter": 6,
+              "formatOptions": {
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
               }
             },
             {
               "columnMatch": "Environment",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "16ch"
               }
             },
             {
@@ -269,7 +280,7 @@
               "columnMatch": "CostCentre",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "16ch"
               }
             }
           ],
@@ -585,7 +596,7 @@
               "formatOptions": {
                 "palette": "blue",
                 "min": 0,
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "14ch"
               }
             }
           ],
@@ -640,7 +651,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and isnotempty(ChangeCategory)\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName)\n| summarize Changes = count(), Servers = dcount(Computer), ServerList = strcat_array(make_set(Computer, 3), ', '), arg_max(TimeGenerated, Current, Previous) by Change = ChangeCategory, Software\n| project LastChange = TimeGenerated, Change, Software, Servers, Changes, Version = iff(Change == 'Removed', Previous, Current), ServerList\n| order by LastChange desc, Software asc\n| take 50",
+        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and isnotempty(ChangeCategory)\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName)\n| summarize A = countif(ChangeCategory == 'Added'), U = countif(ChangeCategory == 'Modified'), R = countif(ChangeCategory == 'Removed'), Servers = dcount(Computer), ServerList = strcat_array(make_set(Computer, 3), ', '), arg_max(TimeGenerated, Current, Previous) by Software\n| project LastChange = TimeGenerated, Software, Added = iff(A == 0, long(null), A), Updated = iff(U == 0, long(null), U), Removed = iff(R == 0, long(null), R), Servers, Version = iff(A + U == 0, Previous, Current), ServerList\n| order by LastChange desc, Software asc\n| take 50",
         "size": 0,
         "title": "Recent software changes",
         "noDataMessage": "No software was added, updated or removed on any server in the selected time range.",
@@ -653,37 +664,14 @@
         "gridSettings": {
           "formatters": [
             {
-              "columnMatch": "Change",
-              "formatter": 18,
+              "columnMatch": "LastChange",
+              "formatter": 6,
               "formatOptions": {
-                "thresholdsOptions": "icons",
-                "thresholdsGrid": [
-                  {
-                    "operator": "==",
-                    "thresholdValue": "Added",
-                    "representation": "success",
-                    "text": "{0}{1}"
-                  },
-                  {
-                    "operator": "==",
-                    "thresholdValue": "Modified",
-                    "representation": "info",
-                    "text": "{0}{1}"
-                  },
-                  {
-                    "operator": "==",
-                    "thresholdValue": "Removed",
-                    "representation": "warning",
-                    "text": "{0}{1}"
-                  },
-                  {
-                    "operator": "Default",
-                    "thresholdValue": null,
-                    "representation": "unknown",
-                    "text": "{0}{1}"
-                  }
-                ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
               }
             },
             {
@@ -699,14 +687,14 @@
               "formatOptions": {
                 "palette": "blue",
                 "min": 0,
-                "customColumnWidthSetting": "10ch"
+                "customColumnWidthSetting": "12ch"
               }
             },
             {
-              "columnMatch": "Changes",
+              "columnMatch": "Version",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "10ch"
+                "customColumnWidthSetting": "18ch"
               }
             },
             {
@@ -788,6 +776,17 @@
                   }
                 ],
                 "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "LastHeartbeat",
+              "formatter": 6,
+              "formatOptions": {
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
               }
             }
           ],

@@ -93,6 +93,13 @@ Describe 'Arc asset inventory workbook (rebuilt, repo-native)' {
         foreach ($item in $queries) { $item.content.query | Should -Not -Match '\|\s*top\s+\d+\s+by\s+[^|\r\n]*,' -Because $item.content.title }
     }
 
+    It 'lists each software item once in Recent software changes, with added, updated and removed counts' {
+        $changes = ($queries | Where-Object { $_.content.title -eq 'Recent software changes' }).content.query
+        $changes | Should -Match 'by Software\b'
+        $changes | Should -Not -Match 'by Change\b'
+        foreach ($column in 'Added', 'Updated', 'Removed', 'LastChange') { $changes | Should -Match "\b$column\b" }
+    }
+
     It 'carries no real subscription path, no replacement character and keeps the upstream attribution' {
         $raw | Should -Not -Match '/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
         $raw.Contains([string][char]0xFFFD) | Should -BeFalse

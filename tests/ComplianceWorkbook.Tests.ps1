@@ -110,6 +110,27 @@ Describe 'Arc compliance, security and governance workbook (rebuilt, repo-native
         }
     }
 
+    It 'plots configuration changes by server on a categorical axis, one series per type of change' {
+        $chart = $queries | Where-Object { $_.content.title -eq 'Configuration changes by server' }
+        $chart.content.visualization | Should -Be 'barchart'
+        $chart.content.chartSettings.xAxis | Should -Be 'Server'
+        @($chart.content.chartSettings.yAxis) | Should -Be @('Changes')
+        $chart.content.chartSettings.group | Should -Be 'ChangeType'
+        $chart.content.query | Should -Match 'summarize Changes = count\(\) by Server = Computer, ChangeType'
+    }
+
+    It 'shows no update counts or reboot state for a server whose assessment failed or has not run' {
+        $table = ($queries | Where-Object { $_.content.title -eq 'Arc servers with pending critical or security updates' }).content.query
+        foreach ($column in 'Critical', 'Security', 'UpdateRollup', 'Definition') { $table | Should -Match "$column = iff\(AssessmentStatus =~ 'Succeeded', $column, int\(null\)\)" }
+        $table | Should -Match "RebootPending = iff\(AssessmentStatus =~ 'Succeeded'"
+    }
+
+    It 'shows policy assignments in a full-width table so the names are not cut off' {
+        $assignments = $queries | Where-Object { $_.content.title -eq 'Compliance by policy assignment' }
+        $assignments.PSObject.Properties.Name | Should -Not -Contain 'customWidth'
+        $assignments.content.visualization | Should -Be 'table'
+    }
+
     It 'carries no real subscription path, no replacement character and keeps the upstream attribution' {
         $raw | Should -Not -Match '/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
         $raw.Contains([string][char]0xFFFD) | Should -BeFalse

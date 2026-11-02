@@ -102,6 +102,98 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), AppliedAt = iff(scope startswith '/providers/microsoft.management', 'Management group', 'Subscription'), Evaluated = Passing + Failing\n| project Assignment, AppliedAt, Evaluated, Passing, Failing, Unknown, CompliancePercent = iff(Evaluated == 0, 0.0, round(100.0 * Passing / Evaluated, 1))\n| order by Evaluated desc, Assignment asc",
+        "size": 0,
+        "title": "Compliance by policy assignment",
+        "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Assignment",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "50ch"
+              }
+            },
+            {
+              "columnMatch": "AppliedAt",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "22ch"
+              }
+            },
+            {
+              "columnMatch": "Evaluated",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Passing",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Failing",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "Unknown",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12ch"
+              }
+            },
+            {
+              "columnMatch": "CompliancePercent",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "min": 0,
+                "max": 100,
+                "customColumnWidthSetting": "24ch"
+              },
+              "numberFormat": {
+                "unit": 1,
+                "options": {
+                  "style": "decimal",
+                  "maximumFractionDigits": 1
+                }
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "AppliedAt",
+              "label": "Applied at"
+            },
+            {
+              "columnId": "CompliancePercent",
+              "label": "Compliance"
+            }
+          ]
+        }
+      },
+      "name": "by-assignment"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
         "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend state = tostring(properties.complianceState), rid = tostring(properties.resourceId)\n| extend rg = iff(tolower(tostring(split(rid, '/')[3])) == 'resourcegroups', tostring(split(rid, '/')[4]), '')\n| where isnotempty(rg) and state in ('Compliant', 'NonCompliant')\n| summarize Pass = countif(state == 'Compliant'), Total = count() by ResourceGroup = rg\n| project ResourceGroup, CompliancePercent = round(100.0 * Pass / Total, 1)\n| order by CompliancePercent asc, ResourceGroup asc",
         "size": 1,
         "title": "Compliance by resource group",
@@ -121,60 +213,6 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), Level = iff(scope startswith '/providers/microsoft.management', 'Inherited from management group', 'This subscription'), Evaluated = Passing + Failing\n| project Assignment, Level, Evaluated, Passing, Failing, Unknown, CompliancePercent = iff(Evaluated == 0, 0.0, round(100.0 * Passing / Evaluated, 1))\n| order by Evaluated desc, Assignment asc",
-        "size": 0,
-        "title": "Compliance by policy assignment",
-        "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
-        "noDataMessageStyle": 4,
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "crossComponentResources": [
-          "value::all"
-        ],
-        "visualization": "table",
-        "gridSettings": {
-          "formatters": [
-            {
-              "columnMatch": "Assignment",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "30ch"
-              }
-            },
-            {
-              "columnMatch": "Level",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "24ch"
-              }
-            },
-            {
-              "columnMatch": "CompliancePercent",
-              "formatter": 8,
-              "formatOptions": {
-                "palette": "redGreen",
-                "min": 0,
-                "customColumnWidthSetting": "16ch",
-                "max": 100
-              }
-            }
-          ],
-          "filter": true,
-          "labelSettings": [
-            {
-              "columnId": "CompliancePercent",
-              "label": "Compliance %"
-            }
-          ]
-        }
-      },
-      "name": "by-assignment",
-      "customWidth": "50"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
         "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| where tostring(properties.complianceState) == 'NonCompliant'\n| summarize FailingChecks = count() by ResourceType = tostring(properties.resourceType)\n| order by FailingChecks desc, ResourceType asc\n| take 10",
         "size": 1,
         "title": "Failing checks by resource type",
@@ -187,7 +225,8 @@
         ],
         "visualization": "barchart"
       },
-      "name": "failing-types"
+      "name": "failing-types",
+      "customWidth": "50"
     },
     {
       "type": 1,
@@ -295,6 +334,17 @@
                   }
                 ],
                 "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "LastChecked",
+              "formatter": 6,
+              "formatOptions": {
+                "customColumnWidthSetting": "23ch"
+              },
+              "dateFormat": {
+                "showUtcTime": null,
+                "formatName": "shortDateTimeNoMsPattern"
               }
             }
           ],
