@@ -93,7 +93,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -128,7 +128,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -151,7 +151,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend OperatingSystem = coalesce(tostring(properties.osSku), tostring(properties.osName))\n| summarize Servers = count() by OperatingSystem\n| order by Servers desc",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend OperatingSystem = replace_regex(replace_regex(coalesce(tostring(properties.osSku), tostring(properties.osName)), @' (Datacenter|Standard)( Azure Edition| Evaluation)?$', ''), @'^(Ubuntu \\d+\\.\\d+)\\.\\d+ LTS$', @'\\1')\n| summarize Servers = count() by OperatingSystem\n| order by Servers desc",
         "size": 1,
         "title": "Operating system",
         "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
@@ -161,7 +161,11 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "barchart"
+        "visualization": "barchart",
+        "chartSettings": {
+          "showLegend": false,
+          "showMetrics": false
+        }
       },
       "name": "os-chart",
       "customWidth": "50"
@@ -180,7 +184,11 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "barchart"
+        "visualization": "barchart",
+        "chartSettings": {
+          "showLegend": false,
+          "showMetrics": false
+        }
       },
       "name": "agent-chart",
       "customWidth": "50"
@@ -189,7 +197,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| project Server = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), Status = iff(tostring(properties.status) == 'Connected', 'Connected', 'Disconnected'), AgentVersion = tostring(properties.agentVersion), LastStatusChange = todatetime(properties.lastStatusChange), Environment, Owner, CostCentre, ResourceGroup = resourceGroup, Location = location\n| order by tolower(Server) asc",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| where '{OsFilter}' in ('', '*', 'value::all') or tolower(tostring(properties.osType)) == '{OsFilter}'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| project Server = name, OS = replace_regex(replace_regex(coalesce(tostring(properties.osSku), tostring(properties.osName)), @' (Datacenter|Standard)( Azure Edition| Evaluation)?$', ''), @'^(Ubuntu \\d+\\.\\d+)\\.\\d+ LTS$', @'\\1'), Status = iff(tostring(properties.status) == 'Connected', 'Connected', 'Disconnected'), AgentVersion = tostring(properties.agentVersion), LastStatusChange = todatetime(properties.lastStatusChange), Environment\n| order by tolower(Server) asc",
         "size": 3,
         "title": "Server inventory",
         "noDataMessage": "No Arc-enabled servers match the operating system filter in the subscriptions you can see.",
@@ -206,7 +214,14 @@
               "columnMatch": "Server",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14fr"
+              }
+            },
+            {
+              "columnMatch": "OS",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "22fr"
               }
             },
             {
@@ -234,28 +249,21 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
-              }
-            },
-            {
-              "columnMatch": "OS",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "40ch"
+                "customColumnWidthSetting": "16fr"
               }
             },
             {
               "columnMatch": "AgentVersion",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "18fr"
               }
             },
             {
               "columnMatch": "LastStatusChange",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
@@ -266,21 +274,7 @@
               "columnMatch": "Environment",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
-              }
-            },
-            {
-              "columnMatch": "Owner",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "10ch"
-              }
-            },
-            {
-              "columnMatch": "CostCentre",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "16fr"
               }
             }
           ],
@@ -293,15 +287,7 @@
             },
             {
               "columnId": "LastStatusChange",
-              "label": "Last status change"
-            },
-            {
-              "columnId": "CostCentre",
-              "label": "Cost centre"
-            },
-            {
-              "columnId": "ResourceGroup",
-              "label": "Resource group"
+              "label": "Last change"
             }
           ]
         }
@@ -391,7 +377,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -417,7 +403,11 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "piechart"
+        "visualization": "piechart",
+        "chartSettings": {
+          "showLegend": true,
+          "showMetrics": false
+        }
       },
       "name": "sql-edition",
       "customWidth": "50"
@@ -436,7 +426,11 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "piechart"
+        "visualization": "piechart",
+        "chartSettings": {
+          "showLegend": true,
+          "showMetrics": false
+        }
       },
       "name": "sql-license",
       "customWidth": "50"
@@ -445,7 +439,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| project Server = tostring(split(properties.containerResourceId, '/')[8]), Instance = name, Edition = tostring(properties.edition), Version = tostring(properties.version), License = tostring(properties.licenseType), Defender = tostring(properties.azureDefenderStatus), VCores = toint(properties.vCore), Status = tostring(properties.status), ResourceGroup = resourceGroup\n| order by tolower(Server) asc",
+        "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| project Server = tostring(split(properties.containerResourceId, '/')[8]), Instance = name, Edition = tostring(properties.edition), Version = tostring(properties.version), License = tostring(properties.licenseType), Defender = tostring(properties.azureDefenderStatus), VCores = toint(properties.vCore), Status = tostring(properties.status)\n| order by tolower(Server) asc",
         "size": 3,
         "title": "SQL Server instance inventory",
         "noDataMessage": "No Arc-enabled SQL Server instances were found. SQL Server is inventoried here only when the Arc SQL Server extension is installed on the host (in this lab, the nested guest).",
@@ -462,14 +456,49 @@
               "columnMatch": "Server",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14fr"
+              }
+            },
+            {
+              "columnMatch": "Instance",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14fr"
+              }
+            },
+            {
+              "columnMatch": "Edition",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "Version",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "16fr"
+              }
+            },
+            {
+              "columnMatch": "License",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
+              }
+            },
+            {
+              "columnMatch": "Defender",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14fr"
+              }
+            },
+            {
+              "columnMatch": "VCores",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
@@ -497,7 +526,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "16fr"
               }
             }
           ],
@@ -505,12 +534,12 @@
           "rowLimit": 25,
           "labelSettings": [
             {
-              "columnId": "VCores",
-              "label": "vCores"
+              "columnId": "License",
+              "label": "Licence"
             },
             {
-              "columnId": "ResourceGroup",
-              "label": "Resource group"
+              "columnId": "VCores",
+              "label": "vCores"
             }
           ]
         }
@@ -528,7 +557,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion, Publisher) by Computer, SoftwareName\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName), PublisherName = trim(' ', replace_regex(Publisher, @'\\s*<[^>]*>', ''))\n| summarize Servers = dcount(Computer), Versions = dcount(CurrentVersion) by Software, PublisherName\n| order by Servers desc, Software asc\n| take 15\n| project Software, Publisher = PublisherName, Servers, Versions",
+        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| summarize arg_max(TimeGenerated, CurrentVersion, Publisher) by Computer, SoftwareName\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName), PublisherName = trim(' ', replace_regex(Publisher, @'\\s*<[^>]*>', ''))\n| summarize Servers = dcount(Computer) by Software, PublisherName\n| order by Servers desc, Software asc\n| take 15\n| project Software, Publisher = PublisherName, Servers",
         "size": 0,
         "title": "Most widely installed software",
         "noDataMessage": "No software inventory in the selected time range. Change Tracking and Inventory reports software only from Arc servers running the Azure Monitor Agent, and a parked lab reports nothing.",
@@ -544,14 +573,14 @@
               "columnMatch": "Software",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "46ch"
+                "customColumnWidthSetting": "66fr"
               }
             },
             {
               "columnMatch": "Publisher",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "30ch"
+                "customColumnWidthSetting": "26fr"
               }
             },
             {
@@ -560,7 +589,7 @@
               "formatOptions": {
                 "palette": "blue",
                 "min": 0,
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             }
           ],
@@ -589,7 +618,14 @@
               "columnMatch": "Publisher",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "36ch"
+                "customColumnWidthSetting": "50fr"
+              }
+            },
+            {
+              "columnMatch": "Products",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "13fr"
               }
             },
             {
@@ -598,7 +634,14 @@
               "formatOptions": {
                 "palette": "blue",
                 "min": 0,
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "14fr"
+              }
+            },
+            {
+              "columnMatch": "Servers",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
               }
             }
           ],
@@ -615,7 +658,7 @@
         "size": 3,
         "title": "Software on more than one version",
         "noDataMessage": "Good news: every software item in the selected time range is on a single version across the estate.",
-        "noDataMessageStyle": 4,
+        "noDataMessageStyle": 3,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
         "crossComponentResources": [],
@@ -627,14 +670,28 @@
               "columnMatch": "Software",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "40ch"
+                "customColumnWidthSetting": "44fr"
+              }
+            },
+            {
+              "columnMatch": "Versions",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "13fr"
+              }
+            },
+            {
+              "columnMatch": "Servers",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "VersionList",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "60ch"
+                "customColumnWidthSetting": "40fr"
               }
             }
           ],
@@ -653,7 +710,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and isnotempty(ChangeCategory)\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName)\n| summarize A = countif(ChangeCategory == 'Added'), U = countif(ChangeCategory == 'Modified'), R = countif(ChangeCategory == 'Removed'), Servers = dcount(Computer), ServerList = strcat_array(make_set(Computer, 3), ', '), arg_max(TimeGenerated, Current, Previous) by Software\n| project LastChange = TimeGenerated, Software, Added = iff(A == 0, long(null), A), Updated = iff(U == 0, long(null), U), Removed = iff(R == 0, long(null), R), Servers, Version = iff(A + U == 0, Previous, Current), ServerList\n| order by LastChange desc, Software asc\n| take 50",
+        "query": "ConfigurationChange\n| where ConfigChangeType == 'Software' and isnotempty(ChangeCategory)\n| extend Software = case(SoftwareName startswith 'Security Intelligence Update for Microsoft Defender Antivirus', 'Microsoft Defender Antivirus definitions', SoftwareName matches regex @'^Update for (Microsoft|Windows) Defender Antivirus antimalware platform', 'Microsoft Defender Antivirus platform', SoftwareName)\n| summarize A = countif(ChangeCategory == 'Added'), U = countif(ChangeCategory == 'Modified'), R = countif(ChangeCategory == 'Removed'), Servers = dcount(Computer), LastChange = max(TimeGenerated) by Software\n| project LastChange, Software, Added = iff(A == 0, long(null), A), Updated = iff(U == 0, long(null), U), Removed = iff(R == 0, long(null), R), Servers\n| order by LastChange desc, Software asc\n| take 50",
         "size": 0,
         "title": "Recent software changes",
         "noDataMessage": "No software was added, updated or removed on any server in the selected time range.",
@@ -669,7 +726,7 @@
               "columnMatch": "LastChange",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
@@ -680,30 +737,35 @@
               "columnMatch": "Software",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "56ch"
+                "customColumnWidthSetting": "40fr"
+              }
+            },
+            {
+              "columnMatch": "Added",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10fr"
+              }
+            },
+            {
+              "columnMatch": "Updated",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
+              }
+            },
+            {
+              "columnMatch": "Removed",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "Servers",
-              "formatter": 8,
-              "formatOptions": {
-                "palette": "blue",
-                "min": 0,
-                "customColumnWidthSetting": "12ch"
-              }
-            },
-            {
-              "columnMatch": "Version",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
-              }
-            },
-            {
-              "columnMatch": "ServerList",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "30ch"
+                "customColumnWidthSetting": "12fr"
               }
             }
           ],
@@ -712,10 +774,6 @@
             {
               "columnId": "LastChange",
               "label": "Last change"
-            },
-            {
-              "columnId": "ServerList",
-              "label": "Example servers"
             }
           ]
         }
@@ -749,7 +807,14 @@
               "columnMatch": "Server",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14fr"
+              }
+            },
+            {
+              "columnMatch": "OS",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10fr"
               }
             },
             {
@@ -777,18 +842,25 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "16fr"
               }
             },
             {
               "columnMatch": "LastHeartbeat",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
                 "formatName": "shortDateTimeNoMsPattern"
+              }
+            },
+            {
+              "columnMatch": "MinutesAgo",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16fr"
               }
             }
           ],

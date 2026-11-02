@@ -85,7 +85,6 @@ Describe 'Arc governance and compliance workbook (rebuilt, repo-native, experime
 
     It 'draws failing checks by resource type with short friendly labels, the tail grouped as Other, in red' {
         $chart = $queries | Where-Object { $_.content.title -eq 'Failing checks by resource type' }
-        $chart.content.visualization | Should -Be 'barchart'
         $chart.content.chartSettings.xAxis | Should -Be 'ResourceType'
         @($chart.content.chartSettings.yAxis) | Should -Be @('FailingChecks')
         $chart.content.chartSettings.seriesLabelSettings[0].color | Should -Be 'redBright'
@@ -96,6 +95,28 @@ Describe 'Arc governance and compliance workbook (rebuilt, repo-native, experime
         $labels.Count | Should -BeGreaterThan 5
         foreach ($label in $labels) { $label.Length | Should -BeLessOrEqual 16 -Because "category label '$label' is cut off or rotated when long" }
         $chart.content.query | Should -Match "replace_string\(t, 'microsoft\.', ''\)"
+    }
+
+    It 'draws both category charts as categorical columns on a full-width row with the aggregate legend hidden' {
+        foreach ($title in 'Compliance by resource group', 'Failing checks by resource type') {
+            $chart = $queries | Where-Object { $_.content.title -eq $title }
+            $chart.content.visualization | Should -Be 'categoricalbar' -Because $title
+            $chart.PSObject.Properties.Name | Should -Not -Contain 'customWidth' -Because "$title needs the full width for every category label"
+            $chart.content.chartSettings.showMetrics | Should -Be $false -Because "$title : the (Sum) totals page through three categories at a time"
+            $chart.content.chartSettings.showLegend | Should -Be $false -Because $title
+        }
+    }
+
+    It 'pairs half-width tile items with the same number of tiles, so neither leaves a blank band beneath it' {
+        foreach ($pair in @(@('Policy compliance', 'Policy results'), @('Guest configuration pass rate', 'Guest configuration status'))) {
+            $tileCounts = foreach ($title in $pair) {
+                $item = $queries | Where-Object { $_.content.title -eq $title }
+                $item.customWidth | Should -Be '50' -Because $title
+                [regex]::Matches($item.content.query, "pack\('Label'").Count
+            }
+            $tileCounts[0] | Should -Be $tileCounts[1] -Because "$($pair -join ' and ') sit side by side"
+            $tileCounts[0] | Should -BeLessOrEqual 2 -Because 'three or more tiles wrap into a second row at half width'
+        }
     }
 
     It 'prints compliance by resource group as percentages on a fixed 0 to 100 axis' {
@@ -115,9 +136,7 @@ Describe 'Arc governance and compliance workbook (rebuilt, repo-native, experime
     }
 
     It 'only treats resource-group-scoped resource ids as belonging to a resource group' {
-        foreach ($title in 'Policy results', 'Compliance by resource group') {
-            ($queries | Where-Object { $_.content.title -eq $title }).content.query | Should -Match "== 'resourcegroups'"
-        }
+        ($queries | Where-Object { $_.content.title -eq 'Compliance by resource group' }).content.query | Should -Match "== 'resourcegroups'"
     }
 
     It 'never joins more than two Resource Graph tables or mixes security and patch tables in one query' {
