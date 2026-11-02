@@ -57,10 +57,12 @@ Describe 'Arc compliance, security and governance workbook (rebuilt, repo-native
         }
     }
 
-    It 'scales the posture percentages on a red-to-green palette, never green at zero' {
+    It 'scales the posture percentages on a fixed 0 to 100 red-to-green range, never green at zero' {
         foreach ($title in 'Policy and secure score', 'Patching and Defender agent') {
             $tile = $queries | Where-Object { $_.content.title -eq $title }
             $tile.content.tileSettings.leftContent.formatOptions.palette | Should -Be 'redGreen' -Because $title
+            $tile.content.tileSettings.leftContent.formatOptions.min | Should -Be 0 -Because $title
+            $tile.content.tileSettings.leftContent.formatOptions.max | Should -Be 100 -Because $title
             $tile.content.tileSettings.leftContent.numberFormat.unit | Should -Be 1 -Because $title
         }
         foreach ($item in $queries) { $raw | Should -Not -Match 'greenRed' }
