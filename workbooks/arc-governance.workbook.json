@@ -1,0 +1,425 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Arc governance and compliance (experimental)\n*How well do the resources in this subscription follow Azure Policy, and how do the Arc servers compare? This workbook is outside the guided demo path; the Compliance, Security & Governance workbook is the one to present. Everything here is live from Azure Resource Graph. Queries adapted from Nic Seilaz's Arc workbooks (MIT licence).*"
+      },
+      "name": "header"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Policy compliance\nAzure Policy results for every resource in the subscription, next to the Arc servers on their own. Percentages count only checks that returned a result; checks with no result yet are shown as Unknown. The Arc server figure is the one on the Compliance, Security & Governance workbook."
+      },
+      "name": "policy-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend state = tostring(properties.complianceState), isArc = tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| summarize AllPass = countif(state == 'Compliant'), AllFail = countif(state == 'NonCompliant'), ArcPass = countif(isArc and state == 'Compliant'), ArcFail = countif(isArc and state == 'NonCompliant')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'All resources', 'Value', iff(AllPass + AllFail == 0, 0.0, round(100.0 * AllPass / (AllPass + AllFail), 1)), 'Note', strcat(tostring(AllPass), ' of ', tostring(AllPass + AllFail), ' evaluated checks pass')),\n    pack('Order', 2, 'Label', 'Arc servers', 'Value', iff(ArcPass + ArcFail == 0, 0.0, round(100.0 * ArcPass / (ArcPass + ArcFail), 1)), 'Note', strcat(tostring(ArcPass), ' of ', tostring(ArcPass + ArcFail), ' checks pass')))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Policy compliance",
+        "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen",
+              "min": 0,
+              "max": 100
+            },
+            "numberFormat": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 1
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "policy-percent",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend state = tostring(properties.complianceState), rid = tostring(properties.resourceId)\n| extend rg = iff(tolower(tostring(split(rid, '/')[3])) == 'resourcegroups', tostring(split(rid, '/')[4]), '')\n| summarize Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown'), Assignments = dcount(tostring(properties.policyAssignmentName)), Groups = dcountif(rg, isnotempty(rg))\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Checks failing', 'Value', Failing, 'Note', 'non-compliant policy checks'),\n    pack('Order', 2, 'Label', 'No result yet', 'Value', Unknown, 'Note', 'checks reported as Unknown'),\n    pack('Order', 3, 'Label', 'Assignments', 'Value', Assignments, 'Note', 'policy assignments evaluated'),\n    pack('Order', 4, 'Label', 'Resource groups', 'Value', Groups, 'Note', 'with policy results'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Policy results",
+        "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "policy-counts",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend state = tostring(properties.complianceState), rid = tostring(properties.resourceId)\n| extend rg = iff(tolower(tostring(split(rid, '/')[3])) == 'resourcegroups', tostring(split(rid, '/')[4]), '')\n| where isnotempty(rg) and state in ('Compliant', 'NonCompliant')\n| summarize Pass = countif(state == 'Compliant'), Total = count() by ResourceGroup = rg\n| project ResourceGroup, CompliancePercent = round(100.0 * Pass / Total, 1)\n| order by CompliancePercent asc, ResourceGroup asc",
+        "size": 1,
+        "title": "Compliance by resource group",
+        "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "rg-compliance",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), Level = iff(scope startswith '/providers/microsoft.management', 'Inherited from management group', 'This subscription'), Evaluated = Passing + Failing\n| project Assignment, Level, Evaluated, Passing, Failing, Unknown, CompliancePercent = iff(Evaluated == 0, 0.0, round(100.0 * Passing / Evaluated, 1))\n| order by Evaluated desc, Assignment asc",
+        "size": 0,
+        "title": "Compliance by policy assignment",
+        "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Assignment",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "30ch"
+              }
+            },
+            {
+              "columnMatch": "Level",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "24ch"
+              }
+            },
+            {
+              "columnMatch": "CompliancePercent",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "min": 0,
+                "customColumnWidthSetting": "16ch",
+                "max": 100
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "CompliancePercent",
+              "label": "Compliance %"
+            }
+          ]
+        }
+      },
+      "name": "by-assignment",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| where tostring(properties.complianceState) == 'NonCompliant'\n| summarize FailingChecks = count() by ResourceType = tostring(properties.resourceType)\n| order by FailingChecks desc, ResourceType asc\n| take 10",
+        "size": 1,
+        "title": "Failing checks by resource type",
+        "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "failing-types"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Guest configuration\nGuest configuration audits settings inside the operating system (the Azure Windows baseline, Defender Exploit Guard, secure protocols). Only machines with an assignment appear here."
+      },
+      "name": "guest-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "guestconfigurationresources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend status = tostring(properties.complianceStatus), machine = tolower(tostring(split(tostring(properties.targetResourceId), '/')[8]))\n| summarize Total = count(), Compliant = countif(status == 'Compliant'), NonCompliant = countif(status == 'NonCompliant'), Machines = dcount(machine)\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Assignments', 'Value', Total, 'Note', 'guest configuration assignments'),\n    pack('Order', 2, 'Label', 'Compliant', 'Value', Compliant, 'Note', 'assignments passing'),\n    pack('Order', 3, 'Label', 'Non-compliant', 'Value', NonCompliant, 'Note', 'assignments failing'),\n    pack('Order', 4, 'Label', 'Machines', 'Value', Machines, 'Note', 'machines with an assignment'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Guest configuration status",
+        "noDataMessage": "No machine has a guest configuration assignment yet. Guest configuration audits settings inside the operating system and only machines with an assignment appear here.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "guest-tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "guestconfigurationresources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| project Machine = tostring(split(tostring(properties.targetResourceId), '/')[8]), Configuration = tostring(properties.guestConfiguration.name), Status = tostring(properties.complianceStatus), LastChecked = todatetime(properties.lastComplianceStatusChecked)\n| extend Rank = iff(Status == 'NonCompliant', 0, 1)\n| order by Rank asc, Machine asc, Configuration asc\n| project-away Rank",
+        "size": 0,
+        "title": "Guest configuration results",
+        "noDataMessage": "No machine has a guest configuration assignment yet. Guest configuration audits settings inside the operating system and only machines with an assignment appear here.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Machine",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "18ch"
+              }
+            },
+            {
+              "columnMatch": "Configuration",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "34ch"
+              }
+            },
+            {
+              "columnMatch": "Status",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Compliant",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "NonCompliant",
+                    "representation": "failed",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Pending",
+                    "representation": "pending",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "16ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "LastChecked",
+              "label": "Last checked"
+            }
+          ]
+        }
+      },
+      "name": "guest-table"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Tags and ownership\nShare of Arc servers carrying each required tag (green is good, red is missing); the last tile names any server that is missing one. The lab tags are `owner`, `costcenter` and `env`; the queries also accept the `CostCentre`, `Owner` and `Environment` spellings."
+      },
+      "name": "tags-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| extend CostCentre = tostring(coalesce(tags.CostCentre, tags.costcentre, tags.CostCenter, tags.costcenter)), Owner = tostring(coalesce(tags.Owner, tags.owner)), Environment = tostring(coalesce(tags.Environment, tags.environment, tags.Env, tags.env))\n| extend Untagged = isempty(CostCentre) or isempty(Owner) or isempty(Environment)\n| summarize Total = count(), HasCostCentre = countif(isnotempty(CostCentre)), HasOwner = countif(isnotempty(Owner)), HasEnvironment = countif(isnotempty(Environment)), FullyTagged = countif(not(Untagged)), MissingNames = strcat_array(make_set_if(name, Untagged, 2), ', ')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Cost centre tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasCostCentre / Total, 1)), 'Note', strcat(tostring(HasCostCentre), ' of ', tostring(Total), ' servers')),\n    pack('Order', 2, 'Label', 'Owner tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasOwner / Total, 1)), 'Note', strcat(tostring(HasOwner), ' of ', tostring(Total), ' servers')),\n    pack('Order', 3, 'Label', 'Environment tag', 'Value', iff(Total == 0, 0.0, round(100.0 * HasEnvironment / Total, 1)), 'Note', strcat(tostring(HasEnvironment), ' of ', tostring(Total), ' servers')),\n    pack('Order', 4, 'Label', 'Fully tagged', 'Value', iff(Total == 0, 0.0, round(100.0 * FullyTagged / Total, 1)), 'Note', iff(FullyTagged == Total, strcat('all ', tostring(Total), ' servers carry every tag'), substring(strcat('missing: ', MissingNames), 0, 40))))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = todouble(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Tag coverage",
+        "noDataMessage": "No Arc-enabled servers were found in the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "redGreen",
+              "min": 0,
+              "max": 100
+            },
+            "numberFormat": {
+              "unit": 1,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 1
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "tag-tiles"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Policy remediation\nRemediation tasks bring existing resources into compliance with deploy-if-not-exists and modify policies. A zero here means Resource Graph holds no remediation task for this subscription."
+      },
+      "name": "remediation-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/remediations'\n| extend state = tostring(properties.provisioningState)\n| summarize Total = count(), Succeeded = countif(state == 'Succeeded'), Failed = countif(state == 'Failed'), Running = countif(state in ('Running', 'Evaluating', 'Accepted'))\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Remediation tasks', 'Value', Total, 'Note', iff(Total == 0, 'none found in this subscription', 'policy remediation tasks')),\n    pack('Order', 2, 'Label', 'Succeeded', 'Value', Succeeded, 'Note', 'tasks completed'),\n    pack('Order', 3, 'Label', 'Failed', 'Value', Failed, 'Note', 'tasks that failed'),\n    pack('Order', 4, 'Label', 'In progress', 'Value', Running, 'Note', 'tasks still running'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "size": 3,
+        "title": "Remediation tasks",
+        "noDataMessage": "Azure Policy remediation tasks could not be read from Resource Graph for the subscriptions you can see.",
+        "noDataMessageStyle": 4,
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "remediation-tiles"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Vulnerability findings\n**Not applicable in this lab.** Defender for Cloud reports no vulnerability findings for the Arc machines in this lab, so there is no fleet risk or CVSS view on this page. The Compliance, Security & Governance workbook lists the Defender recommendations that do apply to these servers."
+      },
+      "name": "vulnerability-note"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "*Policy results refresh about once a day, so a fix can take a while to show here. Percentages use only checks that returned a result.*"
+      },
+      "name": "footer"
+    }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

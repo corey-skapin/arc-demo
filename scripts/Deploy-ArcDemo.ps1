@@ -1133,11 +1133,13 @@ Publish-Workbook -FilePath (Join-Path $repoRoot 'workbooks\arc-asset-inventory.w
 # Compliance, security and governance rebuilt for this lab (queries adapted from the vendored upstream workbook)
 Publish-Workbook -FilePath (Join-Path $repoRoot 'workbooks\arc-compliance.workbook.json') -DisplayName 'Arc — Compliance, Security & Governance' | Out-Null
 
+# Governance and compliance (experimental) rebuilt for this lab (queries adapted from the vendored upstream workbook)
+Publish-Workbook -FilePath (Join-Path $repoRoot 'workbooks\arc-governance.workbook.json') -DisplayName 'Arc — Governance & Compliance (experimental)' | Out-Null
+
 # Nic Seilaz's workbook collection (vendored snapshot)
 $nseilazDir = Join-Path $repoRoot 'workbooks\nseilaz'
 $nseilazSet = @(
     @{ file = 'ArcMachineIntelligenceCenter.json';               name = 'Arc — Machine Intelligence Center' }
-    @{ file = 'GovernanceComplianceWorkbook_Experiment.json';    name = 'Arc — Governance & Compliance (experimental)' }
     @{ file = 'SQL_Estate_Dashboard.json';                       name = 'Arc — SQL Estate Dashboard' }
 )
 foreach ($wb in $nseilazSet) {

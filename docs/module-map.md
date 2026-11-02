@@ -115,12 +115,14 @@ demo-ready offline: JSON and title checks, subscription-picker defaults, the lab
 tag names and the Compliance patch tiles. `tests/EstateOverviewWorkbook.Tests.ps1`
 covers the Estate Overview's own behaviour (see the
 [workbook reference](operational-workbooks.md#estate-overview-scene-1)).
-`workbooks/arc-asset-inventory.workbook.json` and `workbooks/arc-compliance.workbook.json` are the rebuilt asset
-inventory and compliance workbooks. Phase 11 (`Set-WorkbookWorkspaceDefaults`) pins every Log Analytics item of
+`workbooks/arc-asset-inventory.workbook.json`, `workbooks/arc-compliance.workbook.json` and
+`workbooks/arc-governance.workbook.json` are the rebuilt asset inventory, compliance and (experimental)
+governance workbooks. Phase 11 (`Set-WorkbookWorkspaceDefaults`) pins every Log Analytics item of
 the workbooks it publishes to the deployment workspace, so the repo JSON carries no workspace id, and
-`tests/AssetInventoryWorkbook.Tests.ps1`, `tests/ComplianceWorkbook.Tests.ps1` and
-`tests/WorkbookWorkspaceScope.Tests.ps1` guard them (Resource Graph allows at most two tables per query and
-never the security and patch tables together, so the compliance tiles are one query per table pair).
+`tests/AssetInventoryWorkbook.Tests.ps1`, `tests/ComplianceWorkbook.Tests.ps1`,
+`tests/GovernanceWorkbook.Tests.ps1` and `tests/WorkbookWorkspaceScope.Tests.ps1` guard them (Resource Graph
+allows at most two tables per query and never the security and patch tables together, so the compliance
+tiles are one query per table pair).
 
 `tests/MachineIntelligenceWorkbook.Tests.ps1` and `tests/SqlEstateWorkbook.Tests.ps1` guard the two reworked
 engineer workbooks offline: defaults and a no-click open, no workspace picker, a specific message for
