@@ -4,106 +4,1770 @@
     {
       "type": 1,
       "content": {
-        "json": "# Azure Arc Demo — Estate Overview\n\n*Story-first dashboard modelled on the persona-led flow. Tiles below open the conversation from exec down to ops.*"
-      }
+        "json": "# Azure Arc demo: Estate overview\n*Which servers are in the Arc estate, are they connected and sending telemetry, how busy are they, what changed, and what needs attention? Read-only: nothing on this page changes a machine, a rule or a setting.*\n\n*Deeper evidence for the same machines: the Capacity and headroom and Optimisation opportunities workbooks.*"
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "2edeb9cd-6afd-5f8b-b614-52e4bc12c422",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 86400000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                }
+              ],
+              "allowCustom": true
+            }
+          },
+          {
+            "id": "a2bfc1b8-4d7d-5dc3-a8d8-3cf3352a04ee",
+            "version": "KqlParameterItem/1.0",
+            "name": "OsFilter",
+            "label": "Operating system",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "value": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "selectAllValue": "",
+              "showDefault": false
+            },
+            "jsonData": "[{\"value\":\"Windows\",\"label\":\"Windows\"},{\"value\":\"Linux\",\"label\":\"Linux\"}]",
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "defaultValue": "value::all"
+          },
+          {
+            "id": "5648feb4-fb3d-5734-8f03-8bed6addd991",
+            "version": "KqlParameterItem/1.0",
+            "name": "EnvironmentFilter",
+            "label": "Environment",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "resources | where type =~ 'microsoft.hybridcompute/machines' | extend v = tostring(tags.env) | extend v = iff(isempty(v), '(untagged)', v) | summarize by v | project value = v, label = v | order by value asc",
+            "value": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "selectAllValue": "",
+              "showDefault": false
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "defaultValue": "value::all",
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          },
+          {
+            "id": "9b61fc8a-765c-58fe-94f8-96fc45248615",
+            "version": "KqlParameterItem/1.0",
+            "name": "RoleFilter",
+            "label": "Role",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "resources | where type =~ 'microsoft.hybridcompute/machines' | extend v = tostring(tags.role) | extend v = iff(isempty(v), '(untagged)', v) | summarize by v | project value = v, label = v | order by value asc",
+            "value": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "selectAllValue": "",
+              "showDefault": false
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "defaultValue": "value::all",
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "filters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## The estate at a glance\nMachines in the Arc inventory against machines that are sending telemetry. A machine with no monitoring agent appears in Arc but not under *Reporting now*: present, not silent. Tiles answer for the filters above; alerts cover every alert rule in the subscription."
+      },
+      "name": "kpi-header"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "Heartbeat\n| where TimeGenerated > ago(15m)\n| summarize LastSeen = max(TimeGenerated) by Computer, OSType\n| extend Status = iff(LastSeen > ago(10m), 'Connected', 'Stale')\n| summarize Hosts = count() by Status, OSType\n| order by OSType asc",
+        "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet PatchRows = arg(\"\").patchassessmentresources\n| where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n| project Machine = tolower(tostring(split(id, '/')[8])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical),\n    Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup),\n    Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime);\nlet AllMachines = union ArcInv, Beat, PatchRows\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs),\n    AssessmentStatus = take_any(AssessmentStatus), Critical = take_any(Critical), Security = take_any(Security), UpdateRollup = take_any(UpdateRollup),\n    Definition = take_any(Definition), LastAssessed = max(LastAssessed) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role)\n| extend PatchState = case(\n    not(InArc), 'Not applicable',\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed');\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet SqlRows = arg(\"\").Resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| project Machine = tolower(tostring(split(tostring(properties.containerResourceId), '/')[8])), SqlName = name, SqlVersion = tostring(properties.version);\nlet AlertRows = arg(\"\").alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| project Fired = todatetime(properties.essentials.startDateTime), Severity = tostring(properties.essentials.severity)\n| where Fired >= todatetime('{TimeRange:startISO}') and Fired <= todatetime('{TimeRange:endISO}');\nlet SqlStats = toscalar(Machines | lookup kind=inner (SqlRows) on Machine | summarize pack('n', count(), 'names', strcat_array(make_list(SqlName, 3), ', ')));\nlet AlertStats = toscalar(AlertRows | summarize pack('n', count(), 'lastfired', max(Fired), 'top', min(Severity)));\nlet Counts = Machines\n| extend Reporting = isnotnull(LastBeat) and LastBeat > ago(15m), Silent = isnotnull(LastBeat) and LastBeat <= ago(15m), NoBeat = isnull(LastBeat)\n| extend NoAgent = NoBeat and InArc and isempty(MonitorTier)\n| summarize Total = count(), InArcN = countif(InArc), Connected = countif(InArc and ArcStatus =~ 'Connected'),\n    Windows = countif(Os == 'Windows'), Linux = countif(Os == 'Linux'),\n    WinTiers = strcat_array(make_set_if(Tier, Os == 'Windows' and isnotempty(Tier), 4), ' · '), LinTiers = strcat_array(make_set_if(Tier, Os == 'Linux' and isnotempty(Tier), 4), ' · '),\n    Reporting = countif(Reporting), Silent = countif(Silent), NoAgent = countif(NoAgent), NoData = countif(NoBeat and not(NoAgent)),\n    Tagged = countif(InArc and isnotempty(Owner) and isnotempty(CostCentre)),\n    Pending = countif(PatchState in ('Critical updates pending', 'Security updates pending')),\n    PatchGap = countif(PatchState in ('Not assessed', 'Assessment failed', 'Assessment in progress')),\n    Patched = countif(PatchState == 'Fully patched');\nCounts\n| extend SqlN = tolong(SqlStats.n), SqlNames = tostring(SqlStats.names), AlertN = tolong(AlertStats.n), AlertLatest = todatetime(AlertStats.lastfired), AlertTop = tostring(AlertStats.top)\n| extend AlertAgeMin = datetime_diff('minute', now(), AlertLatest)\n| extend ReportNote = case(\n    Total == 0, 'no machine matches the filters',\n    Reporting == Total, strcat('all ', Total, ' sent a heartbeat in 15 min'),\n    Reporting == 0 and Silent > 0, 'none in 15 min: parked or silent',\n    Reporting == 0, 'no machine has sent telemetry',\n    strcat('of ', Total, iff(NoAgent > 0, strcat(' · ', NoAgent, ' without agent'), ''), iff(Silent > 0, strcat(' · ', Silent, ' silent'), ''), iff(NoData > 0, strcat(' · ', NoData, ' no data'), '')))\n| extend Tiles = pack_array(\n    pack('o', 0, 'l', '🖥️ Arc machines', 'v', InArcN, 'n', iff(InArcN == 0, 'none in scope', strcat(Connected, ' connected · ', InArcN - Connected, ' not connected'))),\n    pack('o', 1, 'l', '📡 Reporting now', 'v', Reporting, 'n', ReportNote),\n    pack('o', 2, 'l', '🪟 Windows', 'v', Windows, 'n', iff(Windows == 0, 'none in scope', iff(isempty(WinTiers), 'no tier tag', WinTiers))),\n    pack('o', 3, 'l', '🐧 Linux', 'v', Linux, 'n', iff(Linux == 0, 'none in scope', iff(isempty(LinTiers), 'no tier tag', LinTiers))),\n    pack('o', 4, 'l', '🗄️ SQL instances', 'v', SqlN, 'n', iff(SqlN == 0, 'no Arc SQL instance in scope', SqlNames)),\n    pack('o', 5, 'l', '🏷️ Tagged (%)', 'v', iff(InArcN == 0, 0, tolong(round(100.0 * Tagged / InArcN, 0))), 'n', iff(InArcN == 0, 'none in scope', strcat(Tagged, ' of ', InArcN, ' have owner + cost centre'))),\n    pack('o', 6, 'l', '🩹 Updates pending', 'v', Pending, 'n', case(InArcN == 0, 'none in scope', Pending == 0 and PatchGap == 0, 'all machines fully patched', strcat(PatchGap, ' failed or not assessed · ', Patched, ' patched'))),\n    pack('o', 7, 'l', '🔔 Alerts fired', 'v', AlertN, 'n', iff(AlertN == 0, 'none in this window', strcat('highest ', AlertTop, ' · latest ', iff(AlertAgeMin < 120, strcat(AlertAgeMin, ' min ago'), iff(AlertAgeMin < 2880, strcat(tolong(round(AlertAgeMin / 60.0, 0)), ' h ago'), strcat(tolong(round(AlertAgeMin / 1440.0, 0)), ' d ago')))))))\n| mv-expand Tiles\n| project SortKey = tolong(Tiles.o), Label = tostring(Tiles.l), Value = tolong(Tiles.v), Note = tostring(Tiles.n)\n| order by SortKey asc\n| project Label, Value, Note\n",
         "size": 3,
-        "title": "Estate connectivity (last 15m)",
+        "title": "Estate",
+        "noDataMessage": "No Arc machine or telemetry matches the current filters.",
+        "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "barchart"
-      }
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Label",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Note",
+            "formatter": 1
+          },
+          "showBorder": true
+        }
+      },
+      "name": "kpi"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Is the estate reporting, and how busy is it?\nHosts reporting counts distinct machines with a heartbeat in each interval; a parked period reads as zero hosts, which is expected and is not continuous uptime. The *Arc machines* line is the inventory: the gap to the reporting lines is machines with no monitoring agent."
+      },
+      "name": "trend-header"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "Heartbeat\n| where TimeGenerated > ago(24h)\n| make-series HostsBeating = dcount(Computer) default = 0 on TimeGenerated from bin(ago(24h), 15m) to now() step 15m",
-        "size": 0,
-        "title": "Hosts beating over time (24h)",
+        "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet Bins = range TimeGenerated from bin(Start, Step) to End step Step;\nlet Beats = Heartbeat\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| lookup (Machines | project Machine, Os) on Machine\n| summarize Hosts = dcount(Machine) by TimeGenerated = bin(TimeGenerated, Step), Os;\nlet OsSeries = datatable(Os:string, K:int)['Windows', 1, 'Linux', 1] | where OsAll or Os in (OsF);\nlet ArcCount = toscalar(Machines | where InArc | count);\nunion\n    (Bins | extend K = 1 | join kind=inner OsSeries on K | project TimeGenerated, Os | join kind=leftouter Beats on TimeGenerated, Os | project TimeGenerated, Series = Os, Hosts = tolong(coalesce(Hosts, 0))),\n    (Bins | project TimeGenerated, Series = 'Arc machines', Hosts = tolong(ArcCount))\n| order by TimeGenerated asc\n",
+        "size": 1,
+        "title": "Hosts reporting over time (zero when parked)",
+        "noDataMessage": "No Arc machine or heartbeat matches the current filters.",
+        "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "timechart"
-      }
+        "visualization": "timechart",
+        "chartSettings": {
+          "ySettings": {
+            "min": 0
+          },
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Windows",
+              "color": "blue"
+            },
+            {
+              "seriesName": "Linux",
+              "color": "orange"
+            },
+            {
+              "seriesName": "Arc machines",
+              "color": "gray"
+            }
+          ]
+        }
+      },
+      "name": "beating",
+      "customWidth": "50"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "Perf\n| where TimeGenerated > ago(24h) and CounterName has 'Processor Time' and InstanceName in ('_Total', 'total')\n| summarize AvgCPU = avg(CounterValue), MaxCPU = max(CounterValue), P95 = percentile(CounterValue, 95) by Computer\n| order by AvgCPU desc",
-        "size": 0,
-        "title": "Per-host CPU utilisation (24h)",
+        "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nSamples\n| where Metric == \"CPU percent\"\n| lookup (Machines | project Machine, Name) on Machine\n| make-series CpuAverage = avg(Value) default = real(null) on TimeGenerated from bin(Start, Step) to End step Step by Name\n",
+        "size": 1,
+        "title": "CPU average by machine (%)",
+        "noDataMessage": "No CPU samples for the machines and time range selected. Missing is not zero: check collection and power state.",
+        "noDataMessageStyle": 5,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "table"
-      }
+        "visualization": "timechart",
+        "chartSettings": {
+          "ySettings": {
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      "name": "cpu-avg",
+      "customWidth": "50"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Machines\nOne row per Arc machine: connection, telemetry, last heartbeat, load and update state. **Select a machine** to drive *Machine detail* below. A blank load figure is missing data, never zero."
+      },
+      "name": "grid-header"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "ConfigurationChange\n| where TimeGenerated > ago(24h) and isnotempty(ConfigChangeType)\n| summarize Changes = count() by Computer, ConfigChangeType\n| order by Changes desc",
+        "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet PatchRows = arg(\"\").patchassessmentresources\n| where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n| project Machine = tolower(tostring(split(id, '/')[8])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical),\n    Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup),\n    Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime);\nlet AllMachines = union ArcInv, Beat, PatchRows\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs),\n    AssessmentStatus = take_any(AssessmentStatus), Critical = take_any(Critical), Security = take_any(Security), UpdateRollup = take_any(UpdateRollup),\n    Definition = take_any(Definition), LastAssessed = max(LastAssessed) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role)\n| extend PatchState = case(\n    not(InArc), 'Not applicable',\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed');\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nlet CpuStat = Samples | where Metric == \"CPU percent\" | summarize CpuMean = round(avg(Value), 1), CpuPeak = round(max(Value), 1) by Machine;\nlet MemStat = Samples | where Metric == \"Memory percent\" | summarize MemP95 = round(percentile(Value, 95), 1) by Machine;\nlet DiskLast = Samples | where Metric == \"Disk free percent\" | summarize MachineLast = max(TimeGenerated) by Machine;\nlet DiskStat = Samples\n| where Metric == \"Disk free percent\"\n| summarize LastSample = max(TimeGenerated), LowFree = min(Value) by Machine, Instance\n| lookup (DiskLast) on Machine\n| where LastSample >= MachineLast - 30m\n| summarize FreePct = round(min(LowFree), 1) by Machine;\nMachines\n| lookup (CpuStat) on Machine\n| lookup (MemStat) on Machine\n| lookup (DiskStat) on Machine\n| extend Age = iff(isnull(LastBeat), long(null), datetime_diff('minute', now(), LastBeat))\n| extend Telemetry = case(isnotnull(Age) and Age <= 15, 'Reporting', isnotnull(Age), 'Silent', InArc and isempty(MonitorTier), 'No monitoring agent', 'No telemetry')\n| extend LastHeartbeat = case(isnull(Age), 'none in 14 days', Age < 2, 'just now', Age < 120, strcat(Age, ' min ago'), Age < 2880, strcat(tolong(round(Age / 60.0, 0)), ' h ago'), strcat(tolong(round(Age / 1440.0, 0)), ' d ago'))\n| extend Note = case(\n    Telemetry == 'Reporting', '',\n    Telemetry == 'Silent', 'No heartbeat in 15 minutes: parked, or the agent is stopped. Values are the last observed.',\n    Telemetry == 'No monitoring agent', 'No Azure Monitor Agent: listed from Arc inventory only, so no telemetry is expected.',\n    'No heartbeat in 14 days although a monitoring tier is declared: check the agent.')\n| order by tolower(Name) asc\n| project Machine = Name, Arc = iff(InArc, ArcStatus, 'Not in Arc'), Telemetry, LastHeartbeat, Os, Tier, Role, CpuMean, CpuPeak, MemP95, FreePct, Updates = PatchState, Note\n",
         "size": 0,
-        "title": "Configuration changes (24h)",
+        "title": "Arc machines (select a row)",
+        "description": "Colour = status. Load figures are for the time range; parked gaps are unknown time, not idle time.",
+        "noDataMessage": "No Arc machine or telemetry matches the current filters.",
+        "noDataMessageStyle": 4,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "barchart"
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Machine",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Arc",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Connected",
+                    "representation": "success",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Disconnected",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Expired",
+                    "representation": "warning",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not in Arc",
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "unknown",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "Telemetry",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Reporting",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Silent",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "No monitoring agent",
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "No telemetry",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "20ch"
+              }
+            },
+            {
+              "columnMatch": "LastHeartbeat",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "16ch"
+              }
+            },
+            {
+              "columnMatch": "Os",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "10ch"
+              }
+            },
+            {
+              "columnMatch": "Tier",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "14ch"
+              }
+            },
+            {
+              "columnMatch": "Role",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "9ch"
+              }
+            },
+            {
+              "columnMatch": "CpuMean",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed",
+                "min": 0,
+                "max": 100,
+                "customColumnWidthSetting": "11ch"
+              }
+            },
+            {
+              "columnMatch": "CpuPeak",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed",
+                "min": 0,
+                "max": 100,
+                "customColumnWidthSetting": "11ch"
+              }
+            },
+            {
+              "columnMatch": "MemP95",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed",
+                "min": 0,
+                "max": 100,
+                "customColumnWidthSetting": "11ch"
+              }
+            },
+            {
+              "columnMatch": "FreePct",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "min": 0,
+                "max": 100,
+                "customColumnWidthSetting": "11ch"
+              }
+            },
+            {
+              "columnMatch": "Updates",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Critical updates pending",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Security updates pending",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Fully patched",
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Assessment failed",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Assessment in progress",
+                    "representation": "blue",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not assessed",
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Not applicable",
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "gray",
+                    "text": "{0}{1}"
+                  }
+                ],
+                "customColumnWidthSetting": "26ch"
+              }
+            },
+            {
+              "columnMatch": "Note",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "60ch"
+              }
+            }
+          ],
+          "filter": true,
+          "labelSettings": [
+            {
+              "columnId": "LastHeartbeat",
+              "label": "Last heartbeat"
+            },
+            {
+              "columnId": "Os",
+              "label": "OS"
+            },
+            {
+              "columnId": "CpuMean",
+              "label": "CPU avg %"
+            },
+            {
+              "columnId": "CpuPeak",
+              "label": "CPU peak %"
+            },
+            {
+              "columnId": "MemP95",
+              "label": "Memory P95 %"
+            },
+            {
+              "columnId": "FreePct",
+              "label": "Lowest free disk %"
+            }
+          ]
+        },
+        "exportFieldName": "Machine",
+        "exportParameterName": "SelectedMachine",
+        "exportDefaultValue": "(none)"
+      },
+      "name": "grid"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "f07d0bd0-b042-5ba0-9e8f-1063c05d5d0e",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Memory, disk and CPU peaks",
+            "subTarget": "load",
+            "style": "link"
+          },
+          {
+            "id": "eddc495b-e46f-5b53-8814-e9ef86b57b2a",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Events and logs",
+            "subTarget": "events",
+            "style": "link"
+          },
+          {
+            "id": "2c6e4e0a-ad57-5465-8ce2-8903647f4b75",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Changes and software",
+            "subTarget": "changes",
+            "style": "link"
+          },
+          {
+            "id": "17158715-f6d2-5118-9554-cbad9f44e865",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Posture",
+            "subTarget": "posture",
+            "style": "link"
+          },
+          {
+            "id": "0df5e338-c5e5-5fd6-aad2-763c9831cf5c",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Machine detail",
+            "subTarget": "detail",
+            "style": "link"
+          },
+          {
+            "id": "817bf214-4747-51b3-81ca-0571e9483324",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "How to read this",
+            "subTarget": "method",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Memory in use, free disk and CPU peaks\nMemory is Windows committed bytes in use or Linux used memory. Free disk is the tightest volume still reporting. Gaps are parked or silent periods: unknown, not idle. Linux memory and disk counters exist since they were added to the core data collection rule, so Linux history starts later."
+            },
+            "name": "load-header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nSamples\n| where Metric == \"CPU percent\"\n| lookup (Machines | project Machine, Name) on Machine\n| make-series CpuPeak = max(Value) default = real(null) on TimeGenerated from bin(Start, Step) to End step Step by Name\n",
+              "size": 1,
+              "title": "CPU peak by machine (%)",
+              "noDataMessage": "No CPU samples for the machines and time range selected.",
+              "noDataMessageStyle": 5,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "cpu-peak",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nSamples\n| where Metric == \"Memory percent\"\n| lookup (Machines | project Machine, Name) on Machine\n| make-series MemoryInUse = avg(Value) default = real(null) on TimeGenerated from bin(Start, Step) to End step Step by Name\n",
+              "size": 1,
+              "title": "Memory in use by machine (%)",
+              "noDataMessage": "No memory samples for the machines and time range selected. Linux memory exists only since the data collection rule counters were added.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "mem",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine in (MachineList)\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nSamples\n| where Metric == \"Disk free percent\"\n| lookup (Machines | project Machine, Name) on Machine\n| make-series LowestFree = min(Value) default = real(null) on TimeGenerated from bin(Start, Step) to End step Step by Name\n",
+              "size": 1,
+              "title": "Lowest free disk space by machine (%)",
+              "noDataMessage": "No per-volume free-space samples for the machines and time range selected.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "disk"
+          }
+        ]
+      },
+      "name": "tab-load",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "load"
       }
     },
     {
-      "type": 3,
+      "type": 12,
       "content": {
-        "version": "KqlItem/1.0",
-        "query": "ConfigurationData\n| where ConfigDataType == 'Software'\n| where SoftwareType == 'Application'\n| summarize Installed = dcount(Computer) by SoftwareName\n| top 25 by Installed desc",
-        "size": 0,
-        "title": "Top 25 applications across the estate",
-        "queryType": 0,
-        "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "table"
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Windows events and Linux syslog\nWindows: critical, error and warning events (level-0 audit rows are excluded). Linux: syslog severities, where the agent reports *error* for errors; informational messages are left out of the chart. Both are ranked with the most severe first."
+            },
+            "name": "events-header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nEvent\n| where TimeGenerated between (Start .. End) and EventLevel in (1, 2, 3)\n| where tolower(Computer) in (MachineList)\n| extend Level = case(EventLevel == 1, 'Critical', EventLevel == 2, 'Error', 'Warning')\n| summarize Events = count() by Machine = tolower(Computer), Level\n| lookup (Machines | project Machine, Name) on Machine\n| project Name, Level, Events\n| order by Name asc\n",
+              "size": 1,
+              "title": "Windows events by machine and severity",
+              "noDataMessage": "No Windows critical, error or warning events for the machines and time range selected. That is good news, or no Windows machine is in scope.",
+              "noDataMessageStyle": 3,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart",
+              "chartSettings": {
+                "xAxis": "Name",
+                "yAxis": [
+                  "Events"
+                ],
+                "group": "Level",
+                "createOtherGroup": 10,
+                "showLegend": true,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Critical",
+                    "color": "redBright"
+                  },
+                  {
+                    "seriesName": "Error",
+                    "color": "red"
+                  },
+                  {
+                    "seriesName": "Warning",
+                    "color": "yellow"
+                  }
+                ]
+              }
+            },
+            "name": "ev-chart",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nSyslog\n| where TimeGenerated between (Start .. End)\n| where tolower(Computer) in (MachineList)\n| extend Severity = case(SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error'), 'Error', SeverityLevel == 'warning', 'Warning', SeverityLevel == 'notice', 'Notice', 'Info')\n| where Severity != 'Info'\n| summarize Messages = count() by Machine = tolower(Computer), Severity\n| lookup (Machines | project Machine, Name) on Machine\n| project Name, Severity, Messages\n| order by Name asc\n",
+              "size": 1,
+              "title": "Linux syslog by machine and severity",
+              "noDataMessage": "No Linux syslog errors, warnings or notices for the machines and time range selected. That is good news, or no Linux machine is in scope.",
+              "noDataMessageStyle": 3,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart",
+              "chartSettings": {
+                "xAxis": "Name",
+                "yAxis": [
+                  "Messages"
+                ],
+                "group": "Severity",
+                "createOtherGroup": 10,
+                "showLegend": true,
+                "seriesLabelSettings": [
+                  {
+                    "seriesName": "Error",
+                    "color": "red"
+                  },
+                  {
+                    "seriesName": "Warning",
+                    "color": "yellow"
+                  },
+                  {
+                    "seriesName": "Notice",
+                    "color": "blue"
+                  }
+                ]
+              }
+            },
+            "name": "sys-chart",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nEvent\n| where TimeGenerated between (Start .. End) and EventLevel in (1, 2, 3)\n| where tolower(Computer) in (MachineList)\n| extend Level = case(EventLevel == 1, 'Critical', EventLevel == 2, 'Error', 'Warning')\n| summarize Events = count(), Machines = dcount(Computer), LastSeen = max(TimeGenerated) by Level, EventLog, Source, EventID\n| extend Rank = case(Level == 'Critical', 1, Level == 'Error', 2, 3)\n| order by Rank asc, Events desc\n| take 20\n| project Level, EventLog, Source, EventID, Events, Machines, LastSeen\n",
+              "size": 0,
+              "title": "What is logging errors on Windows (top 20, most severe first)",
+              "noDataMessage": "No Windows critical, error or warning events in this time range.",
+              "noDataMessageStyle": 3,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Level",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Error",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Warning",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "EventLog",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "14ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Source",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "34ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Events",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blue",
+                      "min": 0,
+                      "max": 200,
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "EventLog",
+                    "label": "Log"
+                  },
+                  {
+                    "columnId": "EventID",
+                    "label": "Event ID"
+                  },
+                  {
+                    "columnId": "Machines",
+                    "label": "Machines"
+                  },
+                  {
+                    "columnId": "LastSeen",
+                    "label": "Last seen"
+                  }
+                ]
+              }
+            },
+            "name": "ev-grid"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nSyslog\n| where TimeGenerated between (Start .. End)\n| where tolower(Computer) in (MachineList)\n| summarize Events = count(), LastSeen = max(TimeGenerated) by Computer, Facility, SeverityLevel\n| extend SeverityRank = case(\n    SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error'), 1,\n    SeverityLevel == 'warning', 2,\n    SeverityLevel == 'notice', 3,\n    SeverityLevel == 'info', 4,\n    5)\n| order by SeverityRank asc, Events desc\n| take 20\n| project Machine = Computer, Facility, Severity = SeverityLevel, Events, LastSeen\n",
+              "size": 0,
+              "title": "Linux syslog ranking (errors first)",
+              "noDataMessage": "No Linux syslog for the machines and time range selected.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Facility",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "14ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Severity",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "error",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "err",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "crit",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "alert",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "emerg",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "warning",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "notice",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "info",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Events",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blue",
+                      "min": 0,
+                      "max": 5000,
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "LastSeen",
+                    "label": "Last seen"
+                  }
+                ]
+              }
+            },
+            "name": "sys-grid"
+          }
+        ]
+      },
+      "name": "tab-events",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "events"
       }
     },
     {
-      "type": 3,
+      "type": 12,
       "content": {
-        "version": "KqlItem/1.0",
-        "query": "resources\n| where type == 'microsoft.hybridcompute/machines'\n| extend hasOwner = tobool(tags.owner != ''), hasCostCenter = tobool(tags.costcenter != '')\n| summarize Total=count(), Tagged=countif(hasOwner and hasCostCenter)",
-        "size": 0,
-        "title": "Tagging hygiene (Arc machines)",
-        "queryType": 1,
-        "resourceType": "microsoft.resourcegraph/resources",
-        "visualization": "table"
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Configuration changes and installed software\nChange Tracking records software, service and daemon changes; blank-type twin rows are excluded. Installed software is the latest inventory snapshot (last 7 days) counted by machines."
+            },
+            "name": "changes-header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nConfigurationChange\n| where TimeGenerated between (Start .. End) and isnotempty(ConfigChangeType)\n| where tolower(Computer) in (MachineList)\n| summarize Changes = count() by Type = ConfigChangeType, Category = ChangeCategory\n| order by Changes desc\n",
+              "size": 1,
+              "title": "Configuration changes by type",
+              "noDataMessage": "No configuration changes were recorded for the machines and time range selected.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart",
+              "chartSettings": {
+                "xAxis": "Type",
+                "yAxis": [
+                  "Changes"
+                ],
+                "group": "Category",
+                "createOtherGroup": 10,
+                "showLegend": true
+              }
+            },
+            "name": "chg-chart",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nConfigurationChange\n| where TimeGenerated between (Start .. End) and isnotempty(ConfigChangeType)\n| where tolower(Computer) in (MachineList)\n| summarize Software = countif(ConfigChangeType == 'Software'), Services = countif(ConfigChangeType == 'WindowsServices'), Daemons = countif(ConfigChangeType == 'Daemons'),\n    Other = countif(ConfigChangeType !in ('Software', 'WindowsServices', 'Daemons')), Total = count(), LastChange = max(TimeGenerated) by Machine = tolower(Computer)\n| lookup (Machines | project Machine, Name) on Machine\n| order by Total desc\n| project Machine = Name, Software, Services, Daemons, Other, Total, LastChange\n",
+              "size": 1,
+              "title": "Configuration changes by machine",
+              "noDataMessage": "No configuration changes were recorded for the machines and time range selected.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Total",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blue",
+                      "min": 0,
+                      "max": 400,
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "LastChange",
+                    "label": "Last change"
+                  }
+                ]
+              }
+            },
+            "name": "chg-hosts",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nConfigurationData\n| where TimeGenerated > ago(7d) and ConfigDataType == 'Software' and SoftwareType in ('Application', 'Package')\n| where tolower(Computer) in (MachineList)\n| summarize Machines = dcount(Computer), Versions = dcount(CurrentVersion) by Software = SoftwareName, Kind = SoftwareType\n| order by Machines desc, Software asc\n| take 15\n",
+              "size": 0,
+              "title": "Most common installed software (Windows applications and Linux packages, top 15)",
+              "noDataMessage": "No software inventory in the last 7 days for the machines selected.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Software",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "60ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Kind",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "14ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Machines",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blue",
+                      "min": 0,
+                      "max": 9,
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  }
+                ],
+                "filter": false
+              }
+            },
+            "name": "chg-apps"
+          }
+        ]
+      },
+      "name": "tab-changes",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "changes"
       }
     },
     {
-      "type": 3,
+      "type": 12,
       "content": {
-        "version": "KqlItem/1.0",
-        "query": "Event\n| where TimeGenerated > ago(24h) and EventLevel in (1, 2)\n| summarize Critical = countif(EventLevel == 1), Errors = countif(EventLevel == 2) by Computer, EventLog\n| order by Critical desc, Errors desc",
-        "size": 0,
-        "title": "Critical & Error events (Windows, 24h)",
-        "queryType": 0,
-        "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "table"
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Update, SQL, tag and alert posture\nUpdate state is the latest Azure Update Manager assessment per machine: a failed or never-run assessment is shown as such and is never counted as patched. Arc SQL inventory and alerts come from Azure Resource Graph."
+            },
+            "name": "posture-header"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet PatchRows = arg(\"\").patchassessmentresources\n| where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n| project Machine = tolower(tostring(split(id, '/')[8])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical),\n    Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup),\n    Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime);\nlet AllMachines = union ArcInv, Beat, PatchRows\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs),\n    AssessmentStatus = take_any(AssessmentStatus), Critical = take_any(Critical), Security = take_any(Security), UpdateRollup = take_any(UpdateRollup),\n    Definition = take_any(Definition), LastAssessed = max(LastAssessed) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role)\n| extend PatchState = case(\n    not(InArc), 'Not applicable',\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed');\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nMachines\n| where InArc\n| extend Rank = case(PatchState == 'Critical updates pending', 0, PatchState == 'Security updates pending', 1, PatchState == 'Assessment failed', 2, PatchState == 'Assessment in progress', 3, PatchState == 'Not assessed', 4, 5)\n| order by Rank asc, tolower(Name) asc\n| project Machine = Name, Os, State = PatchState, Critical, Security, UpdateRollup, Definition, LastAssessed, AssessmentStatus\n",
+              "size": 0,
+              "title": "Update Manager assessment by machine",
+              "noDataMessage": "No Arc machine is in scope for the current filters.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Os",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "10ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "State",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical updates pending",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Security updates pending",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Fully patched",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Assessment failed",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Assessment in progress",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Not assessed",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Not applicable",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "26ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Critical",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 5,
+                      "customColumnWidthSetting": "10ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Security",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 5,
+                      "customColumnWidthSetting": "10ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "UpdateRollup",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 5,
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Definition",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "greenRed",
+                      "min": 0,
+                      "max": 5,
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "Os",
+                    "label": "OS"
+                  },
+                  {
+                    "columnId": "UpdateRollup",
+                    "label": "Update rollup"
+                  },
+                  {
+                    "columnId": "LastAssessed",
+                    "label": "Last assessed"
+                  },
+                  {
+                    "columnId": "AssessmentStatus",
+                    "label": "Assessment status"
+                  }
+                ]
+              }
+            },
+            "name": "post-updates"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet SqlDetail = arg(\"\").Resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances'\n| project Machine = tolower(tostring(split(tostring(properties.containerResourceId), '/')[8])), Instance = name, Version = tostring(properties.version), Edition = tostring(properties.edition),\n    Licence = tostring(properties.licenseType), Status = tostring(properties.status);\nMachines\n| lookup kind=inner (SqlDetail) on Machine\n| order by Instance asc\n| project Instance, Host = Name, Version, Edition, Licence, Status\n",
+              "size": 1,
+              "title": "Arc-enabled SQL Server instances",
+              "noDataMessage": "No Arc-enabled SQL Server instance is registered for the machines in scope.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Instance",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Status",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Connected",
+                          "representation": "success",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "warning",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "14ch"
+                    }
+                  }
+                ],
+                "filter": false
+              }
+            },
+            "name": "post-sql",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nMachines\n| where InArc\n| extend Complete = isnotempty(Owner) and isnotempty(CostCentre)\n| order by Complete asc, tolower(Name) asc\n| project Machine = Name, Complete = iff(Complete, 'Complete', 'Missing owner or cost centre'), Owner, CostCentre, Env, Role, Tier\n",
+              "size": 1,
+              "title": "Tag completeness (owner and cost centre)",
+              "noDataMessage": "No Arc machine is in scope for the current filters.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Machine",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Complete",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Complete",
+                          "representation": "success",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "warning",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "30ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "Env",
+                    "label": "Environment"
+                  },
+                  {
+                    "columnId": "Tier",
+                    "label": "OS tier"
+                  },
+                  {
+                    "columnId": "CostCentre",
+                    "label": "Cost centre"
+                  }
+                ]
+              }
+            },
+            "name": "post-tags",
+            "customWidth": "50"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "alertsmanagementresources\n| where type =~ 'microsoft.alertsmanagement/alerts'\n| extend Fired = todatetime(properties.essentials.startDateTime)\n| where Fired >= todatetime('{TimeRange:startISO}') and Fired <= todatetime('{TimeRange:endISO}')\n| order by Fired desc\n| take 15\n| project Fired, Rule = extract('[^/]+$', 0, tostring(properties.essentials.alertRule)), Severity = tostring(properties.essentials.severity),\n    Condition = tostring(properties.essentials.monitorCondition), State = tostring(properties.essentials.alertState), Target = tostring(properties.essentials.targetResourceName)\n",
+              "size": 0,
+              "title": "Alerts fired in the time range (most recent 15, all alert rules)",
+              "noDataMessage": "No alerts fired in this time range.",
+              "noDataMessageStyle": 3,
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Severity",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sev0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sev1",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sev2",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sev3",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Sev4",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "10ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Rule",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "50ch"
+                    }
+                  }
+                ],
+                "filter": false,
+                "labelSettings": [
+                  {
+                    "columnId": "Fired",
+                    "label": "Fired (UTC)"
+                  }
+                ]
+              }
+            },
+            "name": "post-alerts"
+          }
+        ]
+      },
+      "name": "tab-posture",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "posture"
       }
     },
     {
-      "type": 3,
+      "type": 12,
       "content": {
-        "version": "KqlItem/1.0",
-        "query": "Syslog\n| where TimeGenerated > ago(24h)\n| summarize Events = count(), LastSeen = max(TimeGenerated) by Computer, Facility, SeverityLevel\n| extend SeverityRank = case(\n    SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error'), 1,\n    SeverityLevel == 'warning', 2,\n    SeverityLevel == 'notice', 3,\n    SeverityLevel == 'info', 4,\n    5\n)\n| order by SeverityRank asc, Events desc",
-        "size": 0,
-        "title": "Linux syslog activity (24h)",
-        "queryType": 0,
-        "resourceType": "microsoft.operationalinsights/workspaces",
-        "visualization": "table"
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### Machine detail\n**Select a machine in the table above** to see its connection, update state, load and recent errors for the time range."
+            },
+            "name": "detail-hint",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### Machine detail: {SelectedMachine}\nSame time range as the rest of the page. Read-only."
+            },
+            "name": "detail-title",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet PatchRows = arg(\"\").patchassessmentresources\n| where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n| project Machine = tolower(tostring(split(id, '/')[8])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical),\n    Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup),\n    Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime);\nlet AllMachines = union ArcInv, Beat, PatchRows\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs),\n    AssessmentStatus = take_any(AssessmentStatus), Critical = take_any(Critical), Security = take_any(Security), UpdateRollup = take_any(UpdateRollup),\n    Definition = take_any(Definition), LastAssessed = max(LastAssessed) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role)\n| extend PatchState = case(\n    not(InArc), 'Not applicable',\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed');\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nlet One = Machines | where Machine == tolower('{SelectedMachine}');\nlet CpuStat = Samples | where Metric == \"CPU percent\" | summarize CpuN = count(), CpuMean = round(avg(Value), 1), CpuPeak = round(max(Value), 1);\nlet MemStat = Samples | where Metric == \"Memory percent\" | summarize MemN = count(), MemP95 = round(percentile(Value, 95), 1);\nlet DiskStat = Samples | where Metric == \"Disk free percent\" | summarize LastSample = max(TimeGenerated), LowFree = min(Value) by Instance | where LastSample >= toscalar(Samples | where Metric == \"Disk free percent\" | summarize max(TimeGenerated)) - 30m | summarize FreePct = round(min(LowFree), 1);\nOne\n| extend K = 1\n| join kind=leftouter (CpuStat | extend K = 1) on K\n| join kind=leftouter (MemStat | extend K = 1) on K\n| join kind=leftouter (DiskStat | extend K = 1) on K\n| extend Age = iff(isnull(LastBeat), long(null), datetime_diff('minute', now(), LastBeat))\n| extend Tiles = pack_array(\n    pack('o', 0, 'l', '🔗 Arc status', 'v', iff(InArc, ArcStatus, 'Not in Arc'), 'n', strcat(Os, ' · ', iff(isempty(Tier), 'no tier tag', Tier), ' · ', Role)),\n    pack('o', 1, 'l', '📡 Last heartbeat', 'v', case(isnull(Age), 'none in 14 days', Age < 2, 'just now', Age < 120, strcat(Age, ' min ago'), Age < 2880, strcat(tolong(round(Age / 60.0, 0)), ' h ago'), strcat(tolong(round(Age / 1440.0, 0)), ' d ago')),\n        'n', case(isnotnull(Age) and Age <= 15, 'reporting', isnotnull(Age), 'silent: parked or agent stopped', InArc and isempty(MonitorTier), 'no Azure Monitor Agent', 'no telemetry: check the agent')),\n    pack('o', 2, 'l', '🩹 Updates', 'v', PatchState, 'n', iff(PatchState in ('Critical updates pending', 'Security updates pending', 'Fully patched'), strcat(coalesce(Critical, 0), ' critical · ', coalesce(Security, 0), ' security · ', coalesce(UpdateRollup, 0), ' rollup'), 'no usable assessment')),\n    pack('o', 3, 'l', '⚙️ CPU avg / peak', 'v', iff(coalesce(CpuN, 0) == 0, 'no samples', strcat(CpuMean, ' / ', CpuPeak)), 'n', iff(coalesce(CpuN, 0) == 0, 'missing is not zero', '% over the time range')),\n    pack('o', 4, 'l', '🧠 Memory P95', 'v', iff(coalesce(MemN, 0) == 0, 'no samples', tostring(MemP95)), 'n', iff(coalesce(MemN, 0) == 0, 'missing is not zero', '% in use over the time range')),\n    pack('o', 5, 'l', '💽 Lowest free disk', 'v', iff(isnull(FreePct), 'no samples', tostring(FreePct)), 'n', iff(isnull(FreePct), 'missing is not zero', '% on the tightest volume')))\n| mv-expand Tiles\n| project SortKey = tolong(Tiles.o), Label = tostring(Tiles.l), Value = tostring(Tiles.v), Note = tostring(Tiles.n)\n| order by SortKey asc\n| project Label, Value, Note\n",
+              "size": 3,
+              "title": "Selected machine",
+              "noDataMessage": "Nothing to show for the selected machine under the current filters: select a machine in the table above.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Label",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 1
+                },
+                "secondaryContent": {
+                  "columnMatch": "Note",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "name": "detail-tiles",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nSamples\n| where Metric == \"CPU percent\"\n| make-series Average = avg(Value), Peak = max(Value) default = real(null) on TimeGenerated from bin(Start, Step) to End step Step\n",
+              "size": 1,
+              "title": "CPU: average and peak (%)",
+              "noDataMessage": "No CPU samples for this machine in the time range. Missing is not zero.",
+              "noDataMessageStyle": 5,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "detail-cpu",
+            "customWidth": "50",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nSamples\n| where Metric == \"Memory percent\"\n| make-series Average = avg(Value), Peak = max(Value) default = real(null) on TimeGenerated from bin(Start, Step) to End step Step\n",
+              "size": 1,
+              "title": "Memory in use: average and peak (%)",
+              "noDataMessage": "No memory samples for this machine in the time range.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "detail-mem",
+            "customWidth": "50",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet PerfRows = Perf\n| where TimeGenerated between (Start .. End)\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = case(\n    ObjectName in (\"Processor Information\", \"Processor\") and CounterName == \"% Processor Time\" and InstanceName in (\"_Total\", \"total\"), \"CPU percent\",\n    ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\"), \"Memory percent\",\n    ObjectName in (\"LogicalDisk\", \"Logical Disk\") and CounterName == \"% Free Space\", \"Disk free percent\", \"\")\n| where Metric != \"\"\n| extend IsAggregate = InstanceName in (\"_Total\", \"total\")\n| where not(Metric == \"Disk free percent\" and not(IsAggregate) and (InstanceName startswith \"/snap/\" or InstanceName startswith \"/run\" or InstanceName startswith \"/dev\"\n    or InstanceName startswith \"/sys\" or InstanceName startswith \"/proc\" or InstanceName startswith \"/var/lib/snapd\" or InstanceName startswith \"/var/snap\"))\n| extend Instance = iff(Metric == \"Disk free percent\", iff(IsAggregate, \"_Total (aggregate)\", InstanceName), \"\"),\n    Priority = case(ObjectName == \"Processor Information\", 0, Metric == \"Disk free percent\", iff(IsAggregate, 2, 0), 1),\n    Value = todouble(CounterValue)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet InsightsRows = InsightsMetrics\n| where TimeGenerated between (Start .. End) and Origin == \"vm.azm.ms\" and Namespace == \"LogicalDisk\" and Name == \"FreeSpacePercentage\"\n| extend Machine = tolower(Computer)\n| where Machine == tolower('{SelectedMachine}')\n| extend Metric = \"Disk free percent\", Instance = tostring(todynamic(Tags)[\"vm.azm.ms/mountId\"]), Priority = 0, Value = todouble(Val)\n| where isnotempty(Instance)\n| project TimeGenerated, Machine, Metric, Instance, Priority, Value;\nlet AllSamples = materialize(union PerfRows, InsightsRows);\nlet Preferred = AllSamples | summarize Priority = min(Priority) by Machine, Metric;\nlet Samples = AllSamples\n| join kind=inner Preferred on Machine, Metric, Priority\n| where isnotnull(Value) and not(isnan(Value)) and not(isinf(Value)) and Value >= 0 and Value <= 100\n| project TimeGenerated, Machine, Metric, Instance, Value;\nSamples\n| where Metric == \"Disk free percent\"\n| make-series LowestFree = min(Value) default = real(null) on TimeGenerated from bin(Start, Step) to End step Step by Volume = Instance\n",
+              "size": 1,
+              "title": "Free space per volume (%)",
+              "noDataMessage": "No per-volume free-space samples for this machine in the time range.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100
+                }
+              }
+            },
+            "name": "detail-disk",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nlet Win = Event\n| where TimeGenerated between (Start .. End) and EventLevel in (1, 2, 3) and tolower(Computer) == tolower('{SelectedMachine}')\n| project TimeGenerated, Level = case(EventLevel == 1, 'Critical', EventLevel == 2, 'Error', 'Warning'), Source = strcat(EventLog, ' / ', Source), Detail = strcat('Event ', EventID, ': ', substring(tostring(RenderedDescription), 0, 160));\nlet Lin = Syslog\n| where TimeGenerated between (Start .. End) and tolower(Computer) == tolower('{SelectedMachine}') and SeverityLevel in ('emerg', 'alert', 'crit', 'err', 'error', 'warning')\n| project TimeGenerated, Level = iff(SeverityLevel == 'warning', 'Warning', 'Error'), Source = strcat('syslog / ', Facility, ' / ', ProcessName), Detail = substring(SyslogMessage, 0, 160);\nunion Win, Lin\n| order by TimeGenerated desc\n| take 20\n",
+              "size": 0,
+              "title": "Recent errors and warnings (Windows events or Linux syslog)",
+              "noDataMessage": "No errors or warnings for this machine in the time range.",
+              "noDataMessageStyle": 3,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Level",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Error",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Warning",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ],
+                      "customColumnWidthSetting": "12ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Source",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "34ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Detail",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "90ch"
+                    }
+                  }
+                ],
+                "filter": false
+              }
+            },
+            "name": "detail-events",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let OsF = dynamic([{OsFilter}]);\nlet EnvF = dynamic([{EnvironmentFilter}]);\nlet RoleF = dynamic([{RoleFilter}]);\nlet OsAll = array_length(OsF) == 0 or set_has_element(OsF, 'value::all') or set_has_element(OsF, '*');\nlet EnvAll = array_length(EnvF) == 0 or set_has_element(EnvF, 'value::all') or set_has_element(EnvF, '*');\nlet RoleAll = array_length(RoleF) == 0 or set_has_element(RoleF, 'value::all') or set_has_element(RoleF, '*');\nlet Start = todatetime('{TimeRange:startISO}');\nlet End = todatetime('{TimeRange:endISO}');\nlet Step = case(End - Start <= 6h, 5m, End - Start <= 2d, 15m, End - Start <= 8d, 1h, End - Start <= 16d, 2h, 6h);\nlet ArcInv = arg(\"\").Resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project Machine = tolower(name), ArcName = name, ArcOs = iff(tostring(properties.osType) =~ 'windows', 'Windows', 'Linux'), ArcStatus = tostring(properties.status),\n    Tier = tostring(tags.osTier), Role = tostring(tags.role), Env = tostring(tags.env), MonitorTier = tostring(tags.monitorTier), Owner = tostring(tags.owner), CostCentre = tostring(tags.costcenter);\nlet Beat = Heartbeat\n| where TimeGenerated > ago(14d)\n| summarize LastBeat = max(TimeGenerated), BeatOs = take_any(OSType) by Machine = tolower(Computer);\nlet AllMachines = union ArcInv, Beat\n| summarize ArcName = take_any(ArcName), ArcOs = take_any(ArcOs), ArcStatus = take_any(ArcStatus), Tier = take_any(Tier), Role = take_any(Role), Env = take_any(Env),\n    MonitorTier = take_any(MonitorTier), Owner = take_any(Owner), CostCentre = take_any(CostCentre), LastBeat = max(LastBeat), BeatOs = take_any(BeatOs) by Machine\n| extend InArc = isnotempty(ArcStatus), Name = iff(isnotempty(ArcName), ArcName, Machine),\n    Os = iff(isnotempty(ArcOs), ArcOs, iff(BeatOs =~ 'windows', 'Windows', 'Linux')),\n    Env = iff(isempty(Env), '(untagged)', Env), Role = iff(isempty(Role), '(untagged)', Role);\nlet Machines = AllMachines\n| where (OsAll or Os in (OsF)) and (EnvAll or Env in (EnvF)) and (RoleAll or Role in (RoleF));\nlet MachineList = toscalar(Machines | summarize make_set(Machine));\nConfigurationChange\n| where TimeGenerated between (Start .. End) and isnotempty(ConfigChangeType) and tolower(Computer) == tolower('{SelectedMachine}')\n| extend Item = coalesce(tostring(SoftwareName), tostring(SvcDisplayName), tostring(SvcName), tostring(FileSystemPath), tostring(RegistryKey))\n| order by TimeGenerated desc\n| take 20\n| project TimeGenerated, Type = ConfigChangeType, Category = ChangeCategory, Item\n",
+              "size": 0,
+              "title": "Recent configuration changes",
+              "noDataMessage": "No configuration changes recorded for this machine in the time range.",
+              "noDataMessageStyle": 4,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Type",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "16ch"
+                    }
+                  },
+                  {
+                    "columnMatch": "Item",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "60ch"
+                    }
+                  }
+                ],
+                "filter": false
+              }
+            },
+            "name": "detail-changes",
+            "conditionalVisibility": {
+              "parameterName": "SelectedMachine",
+              "comparison": "isNotEqualTo",
+              "value": "(none)"
+            }
+          }
+        ]
+      },
+      "name": "tab-detail",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "detail"
+      }
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "### How to read this page\n- **Arc machines** are the Azure Arc inventory (Azure Resource Graph). **Reporting now** counts machines with a heartbeat in the last 15 minutes. A machine with no Azure Monitor Agent, such as the nested SQL guest, is in the inventory but sends no telemetry; it is counted once and never as extra capacity.\n- **Last heartbeat** looks back 14 days regardless of the time range. A parked machine is *Silent*, not failed: its last observed values stay visible.\n- **Load** is CPU, memory and free disk for the time range, from the same counters as the *Capacity and headroom* workbook. A blank is missing data, never zero. No thresholds are applied here: classification and sustained pressure are in *Capacity and headroom*.\n- **Updates pending** is the latest Azure Update Manager assessment, so it reflects the last assessment time, not live state.\n- **Alerts fired** counts alert instances that started in the time range for every alert rule in the subscription; it does not follow the machine filters.\n- Filters: *All* means no filtering. Environment and Role come from each machine's current tags; an empty tag reads *(untagged)*.\n- Nothing on this page starts, stops, changes or repairs anything."
+            },
+            "name": "method-text"
+          }
+        ]
+      },
+      "name": "tab-method",
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "method"
       }
     }
   ],
-  "styleSettings": {},
+  "isLocked": false,
+  "fallbackResourceIds": [],
   "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
 }

@@ -4,7 +4,8 @@ Optional, read-only engineer views built only from telemetry the lab already col
 and from Arc inventory. They are scenes 4 and 5 of the 25-30 minute presenter path
 and they never act on a machine. The operator procedure (preview, draft, publish,
 remove) is in the [runbook](runbook.md#optional-capacity-and-optimisation-workbooks);
-this page says what each view shows and the rules behind it.
+this page says what each view shows and the rules behind it. The first-scene
+[Estate Overview](#estate-overview-scene-1) is a static template, described after the two.
 
 | Workbook | Story |
 |---|---|
@@ -163,9 +164,35 @@ opportunities* from the header and the resource-detail tab of *Capacity and head
 hyperlinks that open the sibling with its own default scope, and a draft links to the draft while a published
 workbook links to the published one, so publish both for the links to resolve.
 
+## Estate Overview (scene 1)
+
+The first impression: which Arc machines exist, whether they are connected and sending telemetry, how busy they are,
+what changed and what needs attention. Unlike the two workbooks above it is a **static, self-contained template**
+(`workbooks/arc-demo-overview.workbook.json`, no deploy-time tokens), so `Deploy-ArcDemo.ps1` Phase 11 publishes it as
+is, apart from pinning its Log Analytics items to the deployment workspace, and no roster or rendering step is involved.
+
+- **Story, top to bottom.** Eight *Estate* tiles (Arc machines, Reporting now, Windows, Linux, SQL instances, Tagged,
+  Updates pending, Alerts fired); *Hosts reporting over time*, which reads zero when parked and draws the Arc inventory as
+  a baseline; *CPU average by machine*; the *Arc machines* grid (select a row); then tabs for memory, disk and CPU peaks,
+  events and logs, changes and software, posture, and the selected machine's detail.
+- **Filters.** Time range (default 24 hours), operating system, environment and role. Environment and role options are read
+  live from the Arc machines' tags (an empty tag reads *(untagged)*). Every filter defaults to *All*, which means no
+  filtering, and the queries also accept an empty value, `value::all` and `*`.
+- **Data.** The Arc inventory, Update Manager assessments (`patchassessmentresources`), Arc SQL instances and alerts come
+  from Azure Resource Graph and are read inside the Log Analytics queries with `arg("")`, so one query can combine them
+  with Heartbeat, Perf, InsightsMetrics, Event, Syslog and Change Tracking.
+- **Honest numbers.** *Arc machines* counts the inventory once. *Reporting now* needs a heartbeat in the last 15 minutes,
+  so a machine with no Azure Monitor Agent (the nested SQL guest) is present but not reporting, and the grid says so; last
+  heartbeat looks back 14 days. Load uses the same canonical CPU, memory and disk counters as *Capacity and headroom*, and
+  a blank is missing data, never zero. *Updates pending* is the latest Update Manager assessment: a failed or never-run
+  assessment is shown as such and is never counted as patched. *Alerts fired* counts every alert rule in the subscription
+  for the time range. There are no thresholds here; classification lives in *Capacity and headroom*.
+- **Empty states.** Every query item has a specific no-data message. No Log Analytics item sets a time context, because
+  that would cut the 14-day heartbeat look-back to the time range.
+
 ## Look and feel
 
-Both follow the Estate Overview header convention (title, then an italic story line). Expected empty states, such as
+Both operational workbooks follow the Estate Overview header convention (title, then an italic story line). Expected empty states, such as
 a filter with no match, a missing selection or a parked gap, are calm informational bars; amber appears only where an
 absent result is itself a finding (no CPU samples, no Arc machines for the roster), and green where emptiness is good
 news. Status icons and colours use only the documented grid icon names and the colour and palette names of the
@@ -192,5 +219,9 @@ tag changes or a newly onboarded nested guest.
   deterministic literal tables (spike versus sustained, missing counters, thin history, parked gaps, invalid samples, Linux
   names and pseudo mounts, parent/guest, tags, scenario arithmetic) with the telemetry sources swapped inside the query text.
   Pass the workspace, subscription and tenant through `New-PesterContainer -Data`. It ingests nothing.
+- `tests/EstateOverviewWorkbook.Tests.ps1` covers the static Estate Overview offline: no tokens or identifiers, defaults and
+  All handling, a flat option list, no-data messages, the honest tile logic, colour meaning and the names scene 1 of the
+  presenter template uses. It is explicit opt-in for the live part: pass the workspace, subscription and tenant through
+  `New-PesterContainer -Data` to run its Log Analytics items read-only under every form of All.
 - Query execution against the real workspace and portal rendering are separate evidence. A passing mock or query run does
   not prove the portal draws a tile or chart the way it should; review the draft in the portal first.
