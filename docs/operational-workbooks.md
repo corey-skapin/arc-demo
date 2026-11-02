@@ -176,9 +176,10 @@ is, apart from pinning its Log Analytics items to the deployment workspace, and 
   a baseline; *CPU average by machine*; the *Arc machines* grid (select a row); then tabs for memory, disk and CPU peaks,
   events and logs, changes and software, posture, and the selected machine's detail.
 - **Reading aids.** Chart legends list series names and colours only, never summed totals. The *Arc machines* grid prints
-  CPU, memory and disk as percentages with one decimal, and the alert time is shown in the viewer's local time. Selecting
-  a machine with no Azure Monitor Agent (the nested guest) shows one warning in *Machine detail* instead of five empty
-  charts and tables; the grid passes that state on through a second exported parameter, `DetailMode`.
+  CPU, memory and disk as percentages with one decimal, and the alert time is shown in the viewer's local time. Every table
+  uses the Full size, because a Small or Medium table reserves a fixed height and leaves a blank band under a short table.
+  Selecting a machine with no Azure Monitor Agent (the nested guest) shows one warning in *Machine detail* instead of five
+  empty charts and tables; the grid passes that state on through a second exported parameter, `DetailMode`.
 - **Filters.** Time range (default 24 hours), operating system, environment and role. Environment and role options are read
   live from the Arc machines' tags (an empty tag reads *(untagged)*). Every filter defaults to *All*, which means no
   filtering, and the queries also accept an empty value, `value::all` and `*`.
