@@ -32,10 +32,20 @@ function Write-Fail {
     Write-Host "  ❌ $Message" -ForegroundColor Red
 }
 
+function Get-DemoMissingCliExtension {
+    [CmdletBinding()]
+    param([AllowNull()]$VersionInfo, [AllowEmptyCollection()][string[]]$Required = @())
+    $installed = @(if ($VersionInfo.extensions) { $VersionInfo.extensions.PSObject.Properties.Name })
+    @($Required | Where-Object { $_ -notin $installed })
+}
+
 function Test-Prerequisites {
     <#
     .SYNOPSIS
         Verifies tooling, login state, and target subscription/tenant.
+    .DESCRIPTION
+        Read-only: it never registers providers or installs CLI extensions. Missing extensions and
+        unregistered providers are reported together so one pass is enough to fix them.
     .OUTPUTS
         Throws if any required check fails.
     #>
@@ -47,7 +57,8 @@ function Test-Prerequisites {
         [string[]]$Providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
             'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement', 'Microsoft.Insights', 'Microsoft.Security',
             'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab',
-            'Microsoft.Consumption')
+            'Microsoft.Consumption'),
+        [string[]]$RequiredExtensions = @('connectedmachine')
     )
 
     Write-Header 'Pre-flight checks'
@@ -69,6 +80,8 @@ function Test-Prerequisites {
         }
         Write-Ok "Azure CLI $azVer"
     } catch { throw "Azure CLI not found or unreadable. Install from https://aka.ms/installazurecliwindows. Error: $($_.Exception.Message)" }
+    $missingExtensions = @(Get-DemoMissingCliExtension -VersionInfo $azVerJson -Required $RequiredExtensions)
+    if (-not $missingExtensions) { Write-Ok "Azure CLI extensions present: $($RequiredExtensions -join ', ')" }
 
     # Bicep CLI
     try {
@@ -101,12 +114,20 @@ function Test-Prerequisites {
     }
     Write-Ok 'Required subscription permissions verified'
 
-    foreach ($rp in $Providers) {
+    $unregistered = @(foreach ($rp in $Providers) {
         $state = Invoke-DemoAz -Arguments @('provider', 'show', '--namespace', $rp, '--query', 'registrationState', '-o', 'tsv')
-        if ($state -ne 'Registered') {
-            throw "Provider $rp is $state. An authorized operator must run: az provider register --subscription $SubscriptionId --namespace $rp --wait. Preflight never registers providers."
-        }
+        if ($state -ne 'Registered') { [pscustomobject]@{ Namespace = $rp; State = $state } }
+    })
+    $problems = @()
+    if ($missingExtensions) {
+        $install = ($missingExtensions | ForEach-Object { "az extension add --name $_ --yes" }) -join '; '
+        $problems += "Azure CLI extension(s) not installed: $($missingExtensions -join ', '). Run: $install. Preflight never installs them: a lazy install inside parallel jobs can race."
     }
+    if ($unregistered) {
+        $listed = ($unregistered | ForEach-Object { "$($_.Namespace) ($($_.State))" }) -join ', '
+        $problems += "Resource provider(s) not registered: $listed. An authorized operator must run, for each: az provider register --subscription $SubscriptionId --namespace <provider> --wait. Preflight never registers providers."
+    }
+    if ($problems) { throw ($problems -join ' ') }
     Write-Ok 'Required resource providers already registered (read-only check)'
 
     return $principalId
@@ -287,12 +308,58 @@ function New-KeyVaultName {
     return "$Prefix-$rand"
 }
 
+function Set-DemoKeyVaultSecret {
+    <#
+    .SYNOPSIS
+        Writes a Key Vault secret, retrying only errors that clear by themselves.
+    .DESCRIPTION
+        A role assignment created by the same deployment can take minutes to reach the Key Vault data
+        plane, so a first write may return Forbidden. Other errors fail immediately. The value is never
+        written to output or error text.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$VaultName,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Value,
+        [int[]]$RetryDelaySeconds = @(10, 20, 30, 60, 60, 60, 120, 120, 120)
+    )
+    $transient = 'Forbidden|Unauthorized|not authorized|propagat|AccessDenied|TooManyRequests|Too Many Requests|ServiceUnavailable|timed out|Connection (reset|aborted)'
+    for ($attempt = 0; ; $attempt++) {
+        try {
+            Invoke-DemoAz -Arguments @('keyvault', 'secret', 'set', '--vault-name', $VaultName, '-n', $Name, '--value', $Value, '-o', 'none', '--only-show-errors') | Out-Null
+            return
+        } catch {
+            if ($_.Exception.Message -notmatch $transient) { throw }
+            if ($attempt -ge $RetryDelaySeconds.Count) {
+                throw "Key Vault secret $Name could not be written to $VaultName after $($attempt + 1) attempts: $($_.Exception.Message)"
+            }
+            Write-Warn "Key Vault secret write attempt $($attempt + 1) was refused; role assignments can take several minutes to propagate. Retrying in $($RetryDelaySeconds[$attempt]) seconds."
+            Start-Sleep -Seconds $RetryDelaySeconds[$attempt]
+        }
+    }
+}
+
 function Assert-DemoName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$NamePrefix)
     if ($NamePrefix -cnotmatch '^[a-z][a-z0-9-]{1,18}[a-z0-9]$') {
         throw 'NamePrefix must be 3-20 lowercase letters/digits/hyphens, start with a letter and end with a letter or digit.'
     }
+}
+
+function Test-DemoNotFoundText {
+    <#
+    .SYNOPSIS
+        True when Azure CLI error text says the requested object does not exist.
+    .DESCRIPTION
+        CLI 2.91 reports absence as (ResourceGroupNotFound), (PolicyAssignmentNotFound), (ResourceNotFound) and
+        so on, but a missing budget as '(404) No budget found matching budgetName'. Denials such as
+        (AuthorizationFailed) or (Forbidden) never match.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+    [bool]($Text -match '\(\w*NotFound\)|\(404\) No budget found matching budgetName')
 }
 
 function Invoke-DemoAz {
@@ -322,7 +389,7 @@ function Invoke-DemoAz {
         $exitCode = $LASTEXITCODE
         $detail = [System.IO.File]::ReadAllText($stderr).Trim()
         if ($exitCode -ne 0) {
-            if ($AllowNotFound -and $detail -match '\((ResourceNotFound|ResourceGroupNotFound|NotFound|SecretNotFound|BudgetNotFound)\)') { return $null }
+            if ($AllowNotFound -and (Test-DemoNotFoundText $detail)) { return $null }
             # Do not echo arguments: run-command and identity commands can carry credentials.
             throw "Azure CLI $($Arguments[0]) $($Arguments[1]) failed (exit $exitCode): $detail"
         }
@@ -467,7 +534,8 @@ function Invoke-DemoNestedSqlGuest {
         [Parameter(Mandatory)]$ParentMachine,
         [Parameter(Mandatory)][string]$GuestVmName,
         [Parameter(Mandatory)][ValidateSet('Start', 'Stop')][string]$Action,
-        [switch]$AsJob
+        [switch]$AsJob,
+        [ValidateRange(30, 3600)][int]$TimeoutSeconds = 900
     )
     if ($ParentMachine.OsType -ne 'Windows') { throw 'Nested SQL lifecycle requires the configured Windows parent VM.' }
     if ($GuestVmName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') { throw 'Nested SQL guest VM name is invalid.' }
@@ -502,7 +570,7 @@ do {
 'ARC_DEMO_OK'
 '@
     $guestScript = $guestScript.Replace('__GUEST_NAME__', $GuestVmName).Replace('__ACTION__', $Action)
-    Invoke-DemoGuestCommand -Machine $ParentMachine -Script $guestScript -AsJob:$AsJob
+    Invoke-DemoGuestCommand -Machine $ParentMachine -Script $guestScript -AsJob:$AsJob -TimeoutSeconds $TimeoutSeconds
 }
 
 function Wait-DemoNestedSqlArcConnected {
@@ -567,6 +635,24 @@ function Get-DemoRemovalChecks {
     New-DemoCheck 'exception/shared-services' $scope 'preserved unless explicitly approved' $null 'skipped' $false 'Subscription Defender and shared resources are excluded. Soft-deleted vaults and retained applications can persist; no purge or zero-bill claim.'
 }
 
+function Get-DemoStaleManifestDeployments {
+    <#
+    .SYNOPSIS
+        Selects this demo's own Deploy-ArcDemo subscription deployment records for one Arc resource group.
+    .DESCRIPTION
+        Only finished records named arc-demo-<yyyyMMdd-HHmmss> whose outputs (or, for failed/canceled runs,
+        parameters) name the Arc resource group qualify. Policy, SRE, nested module and foreign records
+        are never returned.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyCollection()][object[]]$Deployments, [Parameter(Mandatory)][string]$ArcResourceGroup)
+    @($Deployments | Where-Object {
+        $_.name -cmatch '^arc-demo-\d{8}-\d{6}$' -and
+        $_.properties.provisioningState -in @('Succeeded', 'Failed', 'Canceled') -and
+        ($_.properties.outputs.arcResourceGroup.value -eq $ArcResourceGroup -or $_.properties.parameters.arcResourceGroup.value -eq $ArcResourceGroup)
+    })
+}
+
 function Assert-DemoOsDiskStorageAccountType {
     [CmdletBinding()]
     param(
@@ -592,7 +678,8 @@ function Invoke-DemoGuestCommand {
         [Parameter(Mandatory, ParameterSetName = 'Receive')]$Job,
         [Parameter(ParameterSetName = 'Submit')][switch]$AsJob,
         [switch]$PassThru,
-        [switch]$AllowPending
+        [switch]$AllowPending,
+        [ValidateRange(30, 3600)][int]$TimeoutSeconds = 900
     )
     $cmd = if ($Machine.OsType -eq 'Windows') { 'RunPowerShellScript' } else { 'RunShellScript' }
     $scriptPath = if ($Job) { $Job.DemoScriptPath } else { $null }
@@ -613,7 +700,7 @@ function Invoke-DemoGuestCommand {
             $Job | Add-Member -NotePropertyName DemoScriptPath -NotePropertyValue $scriptPath
         }
         if ($AsJob) { return $Job }
-        $result = Receive-DemoJobs -Jobs @($Job) -TimeoutSeconds 900 -PassThru | ConvertFrom-Json
+        $result = Receive-DemoJobs -Jobs @($Job) -TimeoutSeconds $TimeoutSeconds -PassThru | ConvertFrom-Json
     } finally {
         if ($scriptPath -and (-not $AsJob -or -not $Job)) { [System.IO.File]::Delete($scriptPath) }
     }
@@ -701,24 +788,92 @@ function Test-DemoFleet {
     }
 }
 
-function Test-DemoComputeCapacity {
+function ConvertTo-DemoQuotaNumber {
     [CmdletBinding()]
-    param([string]$Location, [string]$VmSize, [int]$AdditionalVmCount)
-    $sku = @(Invoke-DemoAz -Arguments @('vm', 'list-skus', '-l', $Location, '--size', $VmSize, '--resource-type', 'virtualMachines', '--all', '-o', 'json') | ConvertFrom-Json |
-        Where-Object name -eq $VmSize)
-    if ($sku.Count -ne 1) { throw "SKU $VmSize is not uniquely available in $Location." }
-    if (@($sku[0].restrictions | Where-Object type -eq 'Location').Count) { throw "SKU $VmSize has subscription/location restrictions in $Location." }
-    $cores = [int]($sku[0].capabilities | Where-Object name -eq 'vCPUs' | Select-Object -First 1).value
-    if ($cores -lt 1) { throw "Unable to determine vCPU requirements for $VmSize." }
-    $usage = @(Invoke-DemoAz -Arguments @('vm', 'list-usage', '-l', $Location, '-o', 'json') | ConvertFrom-Json)
-    foreach ($name in 'cores', $sku[0].family) {
-        $quota = $usage | Where-Object { $_.name.value -eq $name } | Select-Object -First 1
-        if (-not $quota) { throw "Quota $name could not be checked in $Location." }
-        if (($quota.currentValue + [Math]::Max(0, $AdditionalVmCount) * $cores) -gt $quota.limit) {
-            throw "Insufficient $name vCPU quota in $Location. Request quota or reduce the fleet before deployment."
+    param([Parameter(Mandatory)][string]$QuotaName, [Parameter(Mandatory)][string]$Field, [AllowNull()][object]$Value)
+    # Azure CLI 2.91 returns vCPU usage as strings; '22' + 16 concatenates to '2216' instead of adding.
+    $number = 0
+    if ($null -eq $Value -or -not [int]::TryParse(([string]$Value).Trim(), [ref]$number)) {
+        throw "Quota $QuotaName $Field '$Value' is not a whole number; the capacity check cannot continue."
+    }
+    $number
+}
+
+function Test-DemoComputeCapacity {
+    <#
+    .SYNOPSIS
+        Read-only SKU restriction and regional/family vCPU quota check for every distinct VM size.
+    .DESCRIPTION
+        Use -VmSize/-AdditionalVmCount for one size, or -Requirements with objects that have VmSize and VmCount
+        so sizes in the same family are added together before they are compared with that family's quota.
+        This never changes a size or region and does not prove physical capacity.
+    #>
+    [CmdletBinding(DefaultParameterSetName = 'Single')]
+    param(
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory, ParameterSetName = 'Single')][string]$VmSize,
+        [Parameter(ParameterSetName = 'Single')][int]$AdditionalVmCount = 0,
+        [Parameter(Mandatory, ParameterSetName = 'Multiple')][object[]]$Requirements
+    )
+    if ($PSCmdlet.ParameterSetName -eq 'Single') { $Requirements = @([pscustomobject]@{ VmSize = $VmSize; VmCount = $AdditionalVmCount }) }
+    # One listing covers every size: the CLI downloads the whole regional SKU list however the result is filtered.
+    $skuList = @(Invoke-DemoAz -Arguments @('vm', 'list-skus', '-l', $Location, '--resource-type', 'virtualMachines', '--all', '-o', 'json') | ConvertFrom-Json)
+    $demand = foreach ($size in $Requirements | Group-Object { ([string]$_.VmSize).Trim() }) {
+        if (-not $size.Name) { throw 'Every capacity requirement needs a VM size.' }
+        $sku = @($skuList | Where-Object name -eq $size.Name)
+        if ($sku.Count -ne 1) { throw "SKU $($size.Name) is not uniquely available in $Location." }
+        if (@($sku[0].restrictions | Where-Object type -eq 'Location').Count) {
+            throw "SKU $($size.Name) has subscription/location restrictions in $Location. Choose another size or region explicitly; deployment never switches either on its own."
         }
+        $cores = [int]($sku[0].capabilities | Where-Object name -eq 'vCPUs' | Select-Object -First 1).value
+        if ($cores -lt 1) { throw "Unable to determine vCPU requirements for $($size.Name)." }
+        if (-not $sku[0].family) { throw "Unable to determine the VM family for $($size.Name)." }
+        $vmCount = [Math]::Max(0, [int](($size.Group | ForEach-Object { [int]$_.VmCount } | Measure-Object -Sum).Sum))
+        [pscustomobject]@{ VmSize = $size.Name; Family = [string]$sku[0].family; VmCount = $vmCount; VCpus = $vmCount * $cores }
+    }
+    $usage = @(Invoke-DemoAz -Arguments @('vm', 'list-usage', '-l', $Location, '-o', 'json') | ConvertFrom-Json)
+    $checks = @([pscustomobject]@{ Name = 'cores'; Sizes = @($demand) })
+    $checks += foreach ($family in $demand | Group-Object Family) { [pscustomobject]@{ Name = $family.Name; Sizes = @($family.Group) } }
+    foreach ($check in $checks) {
+        $quota = @($usage | Where-Object { $_.name.value -eq $check.Name })
+        if ($quota.Count -ne 1) { throw "Quota $($check.Name) could not be checked in $Location." }
+        $used = ConvertTo-DemoQuotaNumber -QuotaName $check.Name -Field currentValue -Value $quota[0].currentValue
+        $limit = ConvertTo-DemoQuotaNumber -QuotaName $check.Name -Field limit -Value $quota[0].limit
+        $needed = [int](($check.Sizes | Measure-Object VCpus -Sum).Sum)
+        $detail = (@($check.Sizes | Where-Object VmCount | ForEach-Object { "$($_.VmSize) x $($_.VmCount)" }) -join ', ')
+        if ($used + $needed -gt $limit) {
+            throw "Insufficient $($check.Name) vCPU quota in $Location`: $used in use + $needed needed ($detail) exceeds the limit of $limit. Request quota or reduce the fleet before deployment; deployment never switches VM size or region on its own."
+        }
+        Write-Ok "$($check.Name) vCPU quota: $used in use + $needed needed of $limit"
     }
     Write-Warn 'SKU restrictions and vCPU quota passed. This does not prove physical capacity; ARM what-if/validation is not an allocation guarantee.'
+}
+
+function Get-DemoAllocationGuidance {
+    <#
+    .SYNOPSIS
+        Explains a capacity/allocation deployment failure; returns $null for any other error.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ErrorText,
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory)][string]$VmSize,
+        [string]$SubscriptionId = '<SUB>'
+    )
+    $code = if ($ErrorText -match '(SkuNotAvailable|ZonalAllocationFailed|AllocationFailed|OverconstrainedZonalAllocationRequest|OverconstrainedAllocationRequest|NotAvailableForSubscription|QuotaExceeded)') { $Matches[1] }
+    elseif ($ErrorText -match 'Capacity Restrictions|currently not available in location|exceeding approved .* quota') { 'capacity restriction' }
+    else { return $null }
+    @(
+        "Azure could not provide the requested compute capacity ($code; size $VmSize, region $Location). Deploy never switches VM size or region on its own, and nothing was changed to work around this."
+        'Choose explicitly:'
+        '  1. Retry later with the same command. Capacity varies through the day and a re-run resumes where it stopped.'
+        "  2. New lab only: another size via -VmSize (or compute.vmSize in the skin). Check it first: az vm list-skus --subscription $SubscriptionId -l $Location --size <size> --all -o table"
+        '  3. New lab only: another region via -Location (or azure.location in the skin). An existing estate cannot move region.'
+        "  4. Quota errors: request more vCPU quota. Current usage: az vm list-usage --subscription $SubscriptionId -l $Location -o table"
+        'SKU listings, what-if and validation never guarantee physical allocation.'
+        "Original error: $ErrorText"
+    ) -join [Environment]::NewLine
 }
 
 function Assert-DemoSkinInventory {

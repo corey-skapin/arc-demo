@@ -207,10 +207,19 @@ Describe 'Nested SQL wiring in the normal entry points' {
         $fixture.events | Should -Be @('guest-Stop')
     }
 
-    It 'fails removal before deletion if guest shutdown fails' {
+    It 'bounds the guest stop and warns, then continues removal, if it fails' {
         Mock Invoke-DemoNestedSqlGuest { throw 'shutdown failed' }
-        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false } | Should -Throw '*shutdown failed*'
-        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'delete' -in $Arguments }
+        Mock Write-Warn {}
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $Action -eq 'Stop' -and $TimeoutSeconds -eq 600 }
+        Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*did not stop gracefully (shutdown failed)*deleted with rg-fixture-infra anyway*' }
+        Should -Invoke Get-DemoRemovalChecks -Times 1
+    }
+
+    It 'still refuses removal when the parent is in a transitional power state' {
+        $fixture.parent.Actual.powerState = 'VM starting'
+        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false } | Should -Throw '*retry removal after the transition settles*'
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 0
     }
 
     It 'checks nested Arc readiness without a guest command' -ForEach @(

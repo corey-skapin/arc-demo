@@ -511,6 +511,7 @@ Describe 'Retained vault deployment selection' {
         Mock Test-DemoComputeCapacity {}
         Mock Invoke-DemoAz {
             param($Arguments)
+            if ($Arguments[0] -eq 'group' -and $Arguments[1] -eq 'exists') { return 'true' }
             if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'list') { return '[{"name":"kv-fixture-old"},{"name":"kv-fixture-current"}]' }
             if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'show') {
                 return '{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.KeyVault/vaults/kv-fixture-current","properties":{"publicNetworkAccess":"Disabled"}}'

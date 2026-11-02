@@ -528,7 +528,9 @@ $providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Micro
     'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab', 'Microsoft.Consumption')
 if ($DeployContainerApps) { $providers += 'Microsoft.App' }
 if ($DeployAks) { $providers += @('Microsoft.ContainerService', 'Microsoft.ManagedIdentity', 'Microsoft.Resources', 'Microsoft.Storage', 'Microsoft.ContainerInstance') }
-$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $providers
+$cliExtensions = @('connectedmachine')
+if ($DeployContainerApps) { $cliExtensions += 'containerapp' }
+$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $providers -RequiredExtensions $cliExtensions
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"
@@ -538,6 +540,10 @@ $vaultRecords = @(if ($null -ne $vaultOutput) { $vaultOutput | ConvertFrom-Json 
 $vaultManifests = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '-o', 'json') | ConvertFrom-Json |
     Where-Object { $_.properties.provisioningState -eq 'Succeeded' -and $_.properties.outputs.arcResourceGroup.value -eq $arcRg -and $_.properties.outputs.keyVaultName.value } |
     Sort-Object { $_.properties.timestamp } -Descending)
+if ($vaultManifests.Count -and -not (Invoke-DemoAz -Arguments @('group', 'exists', '-n', $infraRg, '-o', 'json') | ConvertFrom-Json)) {
+    Write-Step "Ignoring $($vaultManifests.Count) retained deployment manifest(s) for ${arcRg}: $infraRg no longer exists, so this is a fresh build with a new Key Vault. Remove-ArcDemo -PruneDeploymentHistory deletes such stale records."
+    $vaultManifests = @()
+}
 $kvName = if ($vaultManifests.Count) { $vaultManifests[0].properties.outputs.keyVaultName.value } else { '' }
 $freshVault = -not $kvName -and -not $vaultRecords.Count
 $vaultPublicAccess = 'Enabled'
@@ -557,7 +563,8 @@ if ($kvName) {
 
 # Phase 2: generate password, deploy Bicep
 Write-Header 'Generating admin password + deploying Bicep'
-$existingVms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound | ConvertFrom-Json)
+$vmOutput = Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
+$existingVms = @(if ($null -ne $vmOutput) { $vmOutput | ConvertFrom-Json })
 if (-not $freshVault -and -not $existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
     throw 'Retained vault without current compute: supply the retained CURRENT AdminPassword; do not generate or overwrite a retained administrator credential.'
 }
@@ -636,7 +643,8 @@ if ($DeployAzureVMs -and -not @($existingVms | Where-Object { $_.tags.workload -
 Test-DemoComputeCapacity -Location $Location -VmSize $VmSize -AdditionalVmCount $additionalVmCount
 $initializeAksWorkload = $true
 if ($DeployAks) {
-    $existingCluster = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', "$NamePrefix-aks", '-o', 'json') -AllowNotFound | ConvertFrom-Json
+    $clusterOutput = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', "$NamePrefix-aks", '-o', 'json') -AllowNotFound
+    $existingCluster = if ($null -ne $clusterOutput) { $clusterOutput | ConvertFrom-Json }
     if ($existingCluster) {
         if ($existingCluster.powerState.code -ne 'Running' -or $existingCluster.provisioningState -ne 'Succeeded') { throw 'Existing AKS must be Running/Succeeded before deployment. Use approved activation first; deploy never starts a parked cluster incidentally.' }
         $initializeAksWorkload = $false
@@ -645,7 +653,8 @@ if ($DeployAks) {
 }
 $containerAppSimulateCrash = $false
 if ($DeployContainerApps) {
-    $existingApp = Invoke-DemoAz -Arguments @('containerapp', 'show', '-g', $infraRg, '-n', "ca-$NamePrefix-fault", '-o', 'json') -AllowNotFound | ConvertFrom-Json
+    $appOutput = Invoke-DemoAz -Arguments @('containerapp', 'show', '-g', $infraRg, '-n', "ca-$NamePrefix-fault", '-o', 'json') -AllowNotFound
+    $existingApp = if ($null -ne $appOutput) { $appOutput | ConvertFrom-Json }
     if ($existingApp) {
         $flag = @($existingApp.properties.template.containers.env | Where-Object name -eq 'SIMULATE_CRASH')
         if ($flag.Count -ne 1 -or $flag[0].value -notin @('true', 'false')) { throw 'Cannot preserve existing Container App SIMULATE_CRASH flag; inspect configuration before redeployment.' }
@@ -712,15 +721,21 @@ if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Deploy infras
     return
 }
 Write-Step "Deploying main.bicep (deployment: $deploymentName)..."
-az deployment sub create --name $deploymentName --location $Location `
-    --template-file $bicepFile --parameters @$paramFile --only-show-errors -o none
+try {
+    az deployment sub create --name $deploymentName --location $Location `
+        --template-file $bicepFile --parameters @$paramFile --only-show-errors -o none
+} catch {
+    $allocationGuidance = Get-DemoAllocationGuidance -ErrorText $_.Exception.Message -Location $Location -VmSize $VmSize -SubscriptionId $SubscriptionId
+    if ($allocationGuidance) { throw $allocationGuidance }
+    throw
+}
 $outputs = az deployment sub show --name $deploymentName --query properties.outputs -o json | ConvertFrom-Json
 } finally {
     [System.IO.File]::Delete($paramFile)
 }
 Write-Ok 'Bicep deployment complete'
 if ($freshVault -and -not $existingVms.Count) {
-    az keyvault secret set --vault-name $kvName -n vm-admin-password --value $adminPwd -o none --only-show-errors
+    Set-DemoKeyVaultSecret -VaultName $kvName -Name 'vm-admin-password' -Value $adminPwd
 }
 
 $workspaceId = $outputs.workspaceId.value
@@ -1082,8 +1097,9 @@ foreach ($wb in $nseilazSet) {
 
 # Phase 12: validation
 Write-Header 'Phase 12 — Validation'
-& (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 600
-if ($LASTEXITCODE -ne 0) { throw 'Deployment finished, but required infrastructure/monitor readiness failed or remains pending. Inspect the checks above; no faults were reset.' }
+# Windows Heartbeats can arrive about 8 minutes after Arc connects, so poll (read-only) for up to 20 minutes.
+& (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 1200
+if ($LASTEXITCODE -ne 0) { throw 'Deployment finished, but required infrastructure/monitor readiness failed or remains pending. Inspect the checks above, then re-run Test-ArcDemoReadiness.ps1 (read-only) rather than redeploying; no faults were reset.' }
 
 Write-Header '🎉 Deploy complete'
 $wbUrl = "https://portal.azure.com/#@$TenantId/resource$wbId"

@@ -332,8 +332,12 @@ snapshot or enum mismatch is not grounds to reset a workload fault.
 ## Preflight or redeployment now refuses a previously tolerated state
 
 Preflight no longer registers providers or skips RBAC for a supplied principal.
-Missing providers, insufficient effective permissions, malformed skins,
-SKU restrictions and insufficient quota terminate with instructions.
+Missing providers, missing CLI extensions (`connectedmachine`, plus `containerapp`
+for Container Apps), insufficient effective permissions, malformed skins,
+SKU restrictions and insufficient quota terminate with instructions. Missing
+providers and extensions are reported together, for example
+`az extension add --name connectedmachine --yes`; preflight itself installs and
+registers nothing.
 Quota/listing checks are not capacity guarantees.
 `Deploy-ArcDemo.ps1` does not reset SP credentials or generate a new password for
 existing VMs. Old labs without the saved Key Vault secret need their **current**
@@ -362,7 +366,11 @@ SkuNotAvailable: The requested VM size for resource 'Following SKUs have failed 
 
 **Cause** — Azure capacity restrictions on burstable B-series in AU regions, especially in MCAPS-style subscriptions.
 
-**Fix** — Inspect restrictions and quota in the confirmed target:
+**Fix** — Deploy now catches this (and `AllocationFailed`, `ZonalAllocationFailed`,
+`OverconstrainedAllocationRequest` and quota errors) and prints the options with
+the exact commands. It never switches VM size or region on its own: retry later
+with the same command (it resumes), or choose another size/region explicitly for
+a new lab. Inspect restrictions and quota in the confirmed target:
 
 ```powershell
 az vm list-skus --subscription <SUB> -l australiaeast --size Standard_B2as_v2 --all -o table
@@ -372,6 +380,48 @@ az vm list-usage --subscription <SUB> -l australiaeast -o table
 Choose a permitted SKU/region and review the matching Bicep preview. Neither an
 unrestricted SKU listing nor `--validate` guarantees physical allocation. Do not
 create/delete arbitrary probe resource groups in an in-use lab.
+
+## Capacity preflight says "Insufficient ... vCPU quota" with plenty of headroom
+
+Azure CLI 2.91 returns vCPU usage as strings, so older checks computed
+`'22' + 16 = '2216'` and failed as soon as any vCPU was in use (an empty
+subscription passed by luck). The check now reads numbers, can add several VM sizes
+of one family together (`Test-DemoComputeCapacity -Requirements`) and names the quota
+it exceeded, for
+example `standardBasv2Family vCPU quota ...: 90 in use + 16 needed ... limit of 100`.
+Trust that message: request quota or reduce the fleet. A regional `cores` overflow
+means the total across all VM families would exceed the regional limit.
+
+## A fresh Deploy after Remove complains about the canonical Key Vault
+
+**Symptom** — `Canonical deployment-output vault is absent/ambiguous` right after
+a full `Remove-ArcDemo.ps1`.
+
+**Cause** — Old versions treated the retained subscription deployment record of the
+removed estate as proof that its vault must exist. Current Deploy ignores a
+manifest whose infra group no longer exists, prints a notice and builds a fresh
+vault. If the message still appears, the infra group exists and does not contain
+the vault the newest manifest names: review that group rather than deleting records.
+`Remove-ArcDemo.ps1 -PruneDeploymentHistory` removes the stale records after a verified removal.
+
+## Remove stops at the nested guest shutdown or the workspace comes back with old data
+
+A blocked guest-stop Run Command no longer aborts removal: Remove waits at most ten
+minutes, warns and continues, because the parent and guest are deleted with the
+group. Separately, a deleted Log Analytics workspace is only soft-deleted for 14
+days and re-creating the same name recovers it with its data. Use
+`Remove-ArcDemo.ps1 -ForceDeleteWorkspace` (irreversible) before the group delete
+when a clean workspace is wanted.
+
+## The Key Vault secret write is Forbidden right after deployment
+
+A role assignment created by the same deployment can take minutes to reach the Key
+Vault data plane. The write of `vm-admin-password` retries `Forbidden` and
+transient errors for up to ten minutes and stops immediately on anything else.
+If it finally fails, the VMs already exist with a generated password that was not
+saved: do not redeploy over them. Fix the vault access, then either remove and
+rebuild the lab or, with approval, reset the VM administrator password and rerun
+Deploy with that value as `-AdminPassword`.
 
 ## Clean deploy fails while creating DCRs with missing Log Analytics tables
 
