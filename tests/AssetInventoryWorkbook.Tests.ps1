@@ -100,6 +100,20 @@ Describe 'Arc asset inventory workbook (rebuilt, repo-native)' {
         foreach ($column in 'Added', 'Updated', 'Removed', 'LastChange') { $changes | Should -Match "\b$column\b" }
     }
 
+    It 'shows the server inventory in six columns that fit one row, with short operating system names' {
+        $inventory = $queries | Where-Object { $_.content.title -eq 'Server inventory' }
+        @($inventory.content.gridSettings.formatters | ForEach-Object { $_.columnMatch }) | Should -Be @('Server', 'OS', 'Status', 'AgentVersion', 'LastStatusChange', 'Environment')
+        $inventory.content.query | Should -Match 'replace_regex'
+        ($queries | Where-Object { $_.content.title -eq 'Operating system' }).content.query | Should -Match 'replace_regex'
+    }
+
+    It 'gives the product names in the software tables most of the width' {
+        $top = $queries | Where-Object { $_.content.title -eq 'Most widely installed software' }
+        $widths = @{}
+        foreach ($formatter in $top.content.gridSettings.formatters) { $widths[$formatter.columnMatch] = [int]($formatter.formatOptions.customColumnWidthSetting -replace 'fr$', '') }
+        $widths['Software'] | Should -BeGreaterThan (($widths.Values | Measure-Object -Sum).Sum / 2)
+    }
+
     It 'carries no real subscription path, no replacement character and keeps the upstream attribution' {
         $raw | Should -Not -Match '/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
         $raw.Contains([string][char]0xFFFD) | Should -BeFalse

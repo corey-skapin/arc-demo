@@ -110,19 +110,39 @@ Describe 'Arc compliance, security and governance workbook (rebuilt, repo-native
         }
     }
 
-    It 'plots configuration changes by server on a categorical axis, one series per type of change' {
+    It 'plots configuration changes by server on a categorical axis, one series per type of change, full width with no aggregate legend' {
         $chart = $queries | Where-Object { $_.content.title -eq 'Configuration changes by server' }
         $chart.content.visualization | Should -Be 'barchart'
         $chart.content.chartSettings.xAxis | Should -Be 'Server'
         @($chart.content.chartSettings.yAxis) | Should -Be @('Changes')
         $chart.content.chartSettings.group | Should -Be 'ChangeType'
+        $chart.content.chartSettings.showMetrics | Should -Be $false
+        $chart.PSObject.Properties.Name | Should -Not -Contain 'customWidth'
         $chart.content.query | Should -Match 'summarize Changes = count\(\) by Server = Computer, ChangeType'
     }
 
-    It 'shows no update counts or reboot state for a server whose assessment failed or has not run' {
-        $table = ($queries | Where-Object { $_.content.title -eq 'Arc servers with pending critical or security updates' }).content.query
-        foreach ($column in 'Critical', 'Security', 'UpdateRollup', 'Definition') { $table | Should -Match "$column = iff\(AssessmentStatus =~ 'Succeeded', $column, int\(null\)\)" }
-        $table | Should -Match "RebootPending = iff\(AssessmentStatus =~ 'Succeeded'"
+    It 'shows no update counts for a server whose assessment failed or has not run, in a table that fits one row' {
+        $item = $queries | Where-Object { $_.content.title -eq 'Arc servers with pending critical or security updates' }
+        foreach ($column in 'Critical', 'Security', 'UpdateRollup') { $item.content.query | Should -Match "$column = iff\(AssessmentStatus =~ 'Succeeded', $column, int\(null\)\)" }
+        @($item.content.gridSettings.formatters | ForEach-Object { $_.columnMatch }) | Should -Be @('Server', 'State', 'Critical', 'Security', 'UpdateRollup', 'LastAssessed')
+    }
+
+    It 'orders unhealthy checks by severity High, Medium, Low in a categorical chart coloured red, orange and blue' {
+        $chart = $queries | Where-Object { $_.content.title -eq 'Unhealthy checks by severity' }
+        $chart.content.visualization | Should -Be 'categoricalbar'
+        $chart.content.query | Should -Match "Rank = case\(Severity == 'High', 1, Severity == 'Medium', 2, 3\)"
+        $chart.content.query | Should -Match 'order by Rank asc'
+        $colours = @{}
+        foreach ($series in $chart.content.chartSettings.seriesLabelSettings) { $colours[$series.seriesName] = $series.color }
+        $colours['High'] | Should -Be 'redBright'
+        $colours['Medium'] | Should -Be 'orange'
+        $colours['Low'] | Should -Be 'blue'
+    }
+
+    It 'gives each chart and wide grid its own full-width row, so no neighbour leaves a blank band' {
+        foreach ($title in 'Unhealthy checks by severity', 'Defender agent coverage', 'Configuration changes by server', 'Privileged activity by server') {
+            ($queries | Where-Object { $_.content.title -eq $title }).PSObject.Properties.Name | Should -Not -Contain 'customWidth' -Because $title
+        }
     }
 
     It 'shows policy assignments in a full-width table so the names are not cut off' {

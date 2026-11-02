@@ -150,7 +150,7 @@
     {
       "type": 1,
       "content": {
-        "json": "## Server scorecard\nOne row per Arc server, worst policy compliance first. Compliance is the share of that server's policy checks that pass; failing checks are the ones that do not; findings are unhealthy Defender for Cloud recommendations by severity."
+        "json": "## Server scorecard\nOne row per Arc server, worst policy compliance first. Compliance is the share of that server's policy checks that pass; Failing counts the checks that do not; High, Medium and Low count unhealthy Defender for Cloud recommendations by severity."
       },
       "name": "scorecard-header"
     },
@@ -175,7 +175,7 @@
               "columnMatch": "Server",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
@@ -185,7 +185,7 @@
                 "palette": "redGreen",
                 "min": 0,
                 "max": 100,
-                "customColumnWidthSetting": "24ch"
+                "customColumnWidthSetting": "20fr"
               },
               "numberFormat": {
                 "unit": 1,
@@ -201,7 +201,7 @@
               "formatOptions": {
                 "palette": "orange",
                 "min": 0,
-                "customColumnWidthSetting": "20ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
@@ -223,21 +223,21 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "19ch"
+                "customColumnWidthSetting": "10fr"
               }
             },
             {
               "columnMatch": "MediumFindings",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "21ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "LowFindings",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "10fr"
               }
             }
           ],
@@ -250,19 +250,19 @@
             },
             {
               "columnId": "FailingChecks",
-              "label": "Failing checks"
+              "label": "Failing"
             },
             {
               "columnId": "HighFindings",
-              "label": "High findings"
+              "label": "High"
             },
             {
               "columnId": "MediumFindings",
-              "label": "Medium findings"
+              "label": "Medium"
             },
             {
               "columnId": "LowFindings",
-              "label": "Low findings"
+              "label": "Low"
             }
           ]
         }
@@ -300,7 +300,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -316,7 +316,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Checks = count(), Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), AppliedAt = iff(scope startswith '/providers/microsoft.management', 'Management group', 'Subscription')\n| project Assignment, AppliedAt, Checks, Passing, Failing, CompliancePct = round(100.0 * Passing / Checks, 1)\n| order by Checks desc, Assignment asc",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceType) =~ 'microsoft.hybridcompute/machines'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Checks = count(), Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\((subscription: [^)]*|Arc Demo)\\)', ''), AppliedAt = iff(scope startswith '/providers/microsoft.management', 'Management group', 'Subscription'), CompliancePct = round(100.0 * Passing / Checks, 1)\n| order by Checks desc, Assignment asc\n| project Assignment, AppliedAt, Passing, Failing, CompliancePct",
         "size": 3,
         "title": "Compliance by policy assignment",
         "noDataMessage": "Azure Policy has not evaluated any Arc server yet. Results appear within about half an hour of a policy assignment and refresh daily.",
@@ -333,35 +333,28 @@
               "columnMatch": "Assignment",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "50ch"
+                "customColumnWidthSetting": "42fr"
               }
             },
             {
               "columnMatch": "AppliedAt",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "22ch"
-              }
-            },
-            {
-              "columnMatch": "Checks",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "17fr"
               }
             },
             {
               "columnMatch": "Passing",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "Failing",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
@@ -371,7 +364,7 @@
                 "palette": "redGreen",
                 "min": 0,
                 "max": 100,
-                "customColumnWidthSetting": "24ch"
+                "customColumnWidthSetting": "20fr"
               },
               "numberFormat": {
                 "unit": 1,
@@ -413,7 +406,7 @@
         "size": 3,
         "title": "Defender results",
         "noDataMessage": "Good news: Defender for Cloud reports no unhealthy security recommendations for the Arc servers.",
-        "noDataMessageStyle": 4,
+        "noDataMessageStyle": 3,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
@@ -429,7 +422,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -449,16 +442,41 @@
         "size": 1,
         "title": "Unhealthy checks by severity",
         "noDataMessage": "Good news: Defender for Cloud reports no unhealthy security recommendations for the Arc servers.",
-        "noDataMessageStyle": 4,
+        "noDataMessageStyle": 3,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "barchart"
+        "visualization": "categoricalbar",
+        "chartSettings": {
+          "xAxis": "Severity",
+          "yAxis": [
+            "Checks"
+          ],
+          "group": "Severity",
+          "showLegend": false,
+          "showMetrics": false,
+          "seriesLabelSettings": [
+            {
+              "seriesName": "High",
+              "color": "redBright"
+            },
+            {
+              "seriesName": "Medium",
+              "color": "orange"
+            },
+            {
+              "seriesName": "Low",
+              "color": "blue"
+            }
+          ],
+          "ySettings": {
+            "min": 0
+          }
+        }
       },
-      "name": "defender-severity",
-      "customWidth": "50"
+      "name": "defender-severity"
     },
     {
       "type": 3,
@@ -481,14 +499,14 @@
               "columnMatch": "Server",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
               "columnMatch": "Platform",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "13fr"
               }
             },
             {
@@ -528,7 +546,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "24ch"
+                "customColumnWidthSetting": "22fr"
               }
             },
             {
@@ -562,7 +580,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "24ch"
+                "customColumnWidthSetting": "20fr"
               }
             }
           ],
@@ -580,18 +598,17 @@
           ]
         }
       },
-      "name": "defender-coverage",
-      "customWidth": "50"
+      "name": "defender-coverage"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "securityresources\n| where type == 'microsoft.security/assessments' and id has 'microsoft.hybridcompute/machines'\n| where tostring(properties.status.code) == 'Unhealthy'\n| extend Recommendation = tostring(properties.displayName), Severity = tostring(properties.metadata.severity), Server = tolower(tostring(split(id, '/')[8]))\n| summarize Servers = dcount(Server), AffectedServers = strcat_array(make_set(Server, 4), ', ') by Recommendation, Severity\n| extend Rank = case(Severity == 'High', 1, Severity == 'Medium', 2, 3)\n| order by Rank asc, Servers desc, Recommendation asc\n| take 15\n| project Recommendation, Severity, Servers, AffectedServers",
+        "query": "securityresources\n| where type == 'microsoft.security/assessments' and id has 'microsoft.hybridcompute/machines'\n| where tostring(properties.status.code) == 'Unhealthy'\n| extend Recommendation = tostring(properties.displayName), Severity = tostring(properties.metadata.severity), Server = tolower(tostring(split(id, '/')[8]))\n| summarize Servers = dcount(Server) by Recommendation, Severity\n| extend Rank = case(Severity == 'High', 1, Severity == 'Medium', 2, 3)\n| order by Rank asc, Servers desc, Recommendation asc\n| take 15\n| project Recommendation, Severity, Servers",
         "size": 3,
         "title": "Top findings to fix",
         "noDataMessage": "Good news: Defender for Cloud reports no unhealthy security recommendations for the Arc servers.",
-        "noDataMessageStyle": 4,
+        "noDataMessageStyle": 3,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
@@ -604,7 +621,7 @@
               "columnMatch": "Recommendation",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "70ch"
+                "customColumnWidthSetting": "70fr"
               }
             },
             {
@@ -638,7 +655,7 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
@@ -647,24 +664,11 @@
               "formatOptions": {
                 "palette": "blue",
                 "min": 0,
-                "customColumnWidthSetting": "14ch"
-              }
-            },
-            {
-              "columnMatch": "AffectedServers",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "40ch"
+                "customColumnWidthSetting": "12fr"
               }
             }
           ],
-          "filter": true,
-          "labelSettings": [
-            {
-              "columnId": "AffectedServers",
-              "label": "Affected servers"
-            }
-          ]
+          "filter": true
         }
       },
       "name": "defender-findings"
@@ -673,11 +677,11 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "securityresources\n| where type == 'microsoft.security/locations/alerts'\n| project Alert = tostring(properties.AlertDisplayName), Severity = tostring(properties.Severity), Status = tostring(properties.Status), Detected = todatetime(properties.TimeGeneratedUtc), Intent = tostring(properties.Intent)\n| order by Detected desc\n| take 20",
+        "query": "securityresources\n| where type == 'microsoft.security/locations/alerts'\n| project Alert = tostring(properties.AlertDisplayName), Severity = tostring(properties.Severity), Status = tostring(properties.Status), Detected = todatetime(properties.TimeGeneratedUtc)\n| order by Detected desc\n| take 20",
         "size": 3,
         "title": "Defender for Cloud alerts",
         "noDataMessage": "Good news: Defender for Cloud has raised no security alerts for this subscription.",
-        "noDataMessageStyle": 4,
+        "noDataMessageStyle": 3,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
@@ -690,7 +694,7 @@
               "columnMatch": "Alert",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "70ch"
+                "customColumnWidthSetting": "52fr"
               }
             },
             {
@@ -730,14 +734,21 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "18fr"
+              }
+            },
+            {
+              "columnMatch": "Status",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "Detected",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
@@ -781,7 +792,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -797,11 +808,11 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id), machineName = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), resourceGroup\n| join kind=leftouter (\n    patchassessmentresources\n    | where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n    | project machineId = tolower(tostring(split(tolower(id), '/patchassessmentresults/')[0])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical), Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup), Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime), RebootPending = tobool(properties.rebootPending)\n) on machineId\n| extend PatchState = case(\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed'\n)\n| where PatchState != 'Fully patched'\n| extend SortRank = case(Critical > 0 or Security > 0, 0, 1), OsName = replace_regex(OS, @' (Datacenter|Standard)( Azure Edition| Evaluation)?$', '')\n| order by SortRank asc, Critical desc, Security desc, machineName asc\n| project Server = machineName, State = PatchState, OS = OsName, Critical = iff(AssessmentStatus =~ 'Succeeded', Critical, int(null)), Security = iff(AssessmentStatus =~ 'Succeeded', Security, int(null)), UpdateRollup = iff(AssessmentStatus =~ 'Succeeded', UpdateRollup, int(null)), Definition = iff(AssessmentStatus =~ 'Succeeded', Definition, int(null)), LastAssessed, AssessmentStatus = iff(isempty(AssessmentStatus), 'Not assessed', AssessmentStatus), RebootPending = iff(AssessmentStatus =~ 'Succeeded' and isnotnull(RebootPending), iff(RebootPending, 'Yes', 'No'), '')",
+        "query": "resources\n| where type =~ 'microsoft.hybridcompute/machines'\n| project machineId = tolower(id), machineName = name, OS = coalesce(tostring(properties.osSku), tostring(properties.osName)), resourceGroup\n| join kind=leftouter (\n    patchassessmentresources\n    | where type =~ 'microsoft.hybridcompute/machines/patchassessmentresults'\n    | project machineId = tolower(tostring(split(tolower(id), '/patchassessmentresults/')[0])), AssessmentStatus = tostring(properties.status), Critical = toint(properties.availablePatchCountByClassification.critical), Security = toint(properties.availablePatchCountByClassification.security), UpdateRollup = toint(properties.availablePatchCountByClassification.updateRollup), Definition = toint(properties.availablePatchCountByClassification.definition), LastAssessed = todatetime(properties.lastModifiedDateTime), RebootPending = tobool(properties.rebootPending)\n) on machineId\n| extend PatchState = case(\n    isempty(AssessmentStatus), 'Not assessed',\n    AssessmentStatus =~ 'Succeeded' and Critical > 0, 'Critical updates pending',\n    AssessmentStatus =~ 'Succeeded' and Security > 0, 'Security updates pending',\n    AssessmentStatus =~ 'Succeeded', 'Fully patched',\n    AssessmentStatus =~ 'InProgress', 'Assessment in progress',\n    'Assessment failed'\n)\n| where PatchState != 'Fully patched'\n| extend SortRank = case(Critical > 0 or Security > 0, 0, 1)\n| order by SortRank asc, Critical desc, Security desc, machineName asc\n| project Server = machineName, State = PatchState, Critical = iff(AssessmentStatus =~ 'Succeeded', Critical, int(null)), Security = iff(AssessmentStatus =~ 'Succeeded', Security, int(null)), UpdateRollup = iff(AssessmentStatus =~ 'Succeeded', UpdateRollup, int(null)), LastAssessed",
         "size": 3,
         "title": "Arc servers with pending critical or security updates",
         "noDataMessage": "Good news: every Arc server has been assessed and has no pending critical or security updates.",
-        "noDataMessageStyle": 4,
+        "noDataMessageStyle": 3,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
         "crossComponentResources": [
@@ -814,7 +825,7 @@
               "columnMatch": "Server",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
@@ -860,35 +871,35 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "30ch"
-              }
-            },
-            {
-              "columnMatch": "OS",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "24ch"
+                "customColumnWidthSetting": "27fr"
               }
             },
             {
               "columnMatch": "Critical",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "13ch"
+                "customColumnWidthSetting": "13fr"
               }
             },
             {
               "columnMatch": "Security",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "13ch"
+                "customColumnWidthSetting": "13fr"
+              }
+            },
+            {
+              "columnMatch": "UpdateRollup",
+              "formatter": 1,
+              "formatOptions": {
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "LastAssessed",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
@@ -901,19 +912,11 @@
           "labelSettings": [
             {
               "columnId": "UpdateRollup",
-              "label": "Update rollup"
+              "label": "Rollups"
             },
             {
               "columnId": "LastAssessed",
               "label": "Last assessed"
-            },
-            {
-              "columnId": "AssessmentStatus",
-              "label": "Assessment status"
-            },
-            {
-              "columnId": "RebootPending",
-              "label": "Reboot pending"
             }
           ]
         }
@@ -950,7 +953,7 @@
             "columnMatch": "Value",
             "formatter": 12,
             "formatOptions": {
-              "palette": "auto"
+              "palette": "none"
             }
           },
           "secondaryContent": {
@@ -983,6 +986,10 @@
           ],
           "group": "ChangeType",
           "showLegend": true,
+          "showMetrics": false,
+          "simpleLegendSettings": {
+            "position": "bottom"
+          },
           "seriesLabelSettings": [
             {
               "seriesName": "Software",
@@ -996,11 +1003,13 @@
               "seriesName": "Other changes",
               "color": "gray"
             }
-          ]
+          ],
+          "ySettings": {
+            "min": 0
+          }
         }
       },
-      "name": "config-changes",
-      "customWidth": "50"
+      "name": "config-changes"
     },
     {
       "type": 3,
@@ -1022,14 +1031,14 @@
               "columnMatch": "Server",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
               "columnMatch": "Source",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "26ch"
+                "customColumnWidthSetting": "26fr"
               }
             },
             {
@@ -1038,14 +1047,14 @@
               "formatOptions": {
                 "palette": "blue",
                 "min": 0,
-                "customColumnWidthSetting": "14ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "LastActivity",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,
@@ -1063,8 +1072,7 @@
           ]
         }
       },
-      "name": "privileged-activity",
-      "customWidth": "50"
+      "name": "privileged-activity"
     },
     {
       "type": 1,

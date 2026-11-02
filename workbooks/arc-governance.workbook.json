@@ -65,7 +65,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend state = tostring(properties.complianceState), rid = tostring(properties.resourceId)\n| extend rg = iff(tolower(tostring(split(rid, '/')[3])) == 'resourcegroups', tostring(split(rid, '/')[4]), '')\n| summarize Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown'), Assignments = dcount(tostring(properties.policyAssignmentName)), Groups = dcountif(rg, isnotempty(rg))\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Checks failing', 'Value', Failing, 'Note', 'non-compliant policy checks'),\n    pack('Order', 2, 'Label', 'No result yet', 'Value', Unknown, 'Note', 'checks reported as Unknown'),\n    pack('Order', 3, 'Label', 'Assignments', 'Value', Assignments, 'Note', 'policy assignments evaluated'),\n    pack('Order', 4, 'Label', 'Resource groups', 'Value', Groups, 'Note', 'with policy results'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend state = tostring(properties.complianceState)\n| summarize Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Checks failing', 'Value', Failing, 'Note', 'non-compliant policy checks'),\n    pack('Order', 2, 'Label', 'No result yet', 'Value', Unknown, 'Note', 'checks reported as Unknown'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
         "size": 3,
         "title": "Policy results",
         "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
@@ -102,7 +102,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\(subscription: [^)]*\\)', ''), AppliedAt = iff(scope startswith '/providers/microsoft.management', 'Management group', 'Subscription'), Evaluated = Passing + Failing\n| project Assignment, AppliedAt, Evaluated, Passing, Failing, Unknown, CompliancePercent = iff(Evaluated == 0, 0.0, round(100.0 * Passing / Evaluated, 1))\n| order by Evaluated desc, Assignment asc",
+        "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend assignmentName = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope), state = tostring(properties.complianceState)\n| summarize Passing = countif(state == 'Compliant'), Failing = countif(state == 'NonCompliant'), Unknown = countif(state == 'Unknown') by assignmentName, scope\n| join kind=leftouter (\n    policyresources\n    | where type =~ 'microsoft.authorization/policyassignments'\n    | project assignmentName = tostring(name), displayName = tostring(properties.displayName)\n) on assignmentName\n| extend Assignment = replace_regex(coalesce(displayName, replace_string(assignmentName, '_', ' ')), @'\\s*\\((subscription: [^)]*|Arc Demo)\\)', ''), AppliedAt = iff(scope startswith '/providers/microsoft.management', 'Management group', 'Subscription'), Evaluated = Passing + Failing\n| extend CompliancePercent = iff(Evaluated == 0, 0.0, round(100.0 * Passing / Evaluated, 1))\n| order by Evaluated desc, Assignment asc\n| project Assignment, AppliedAt, Passing, Failing, Unknown, CompliancePercent",
         "size": 3,
         "title": "Compliance by policy assignment",
         "noDataMessage": "Azure Policy has not evaluated any resource in the subscriptions you can see yet. Results appear within about half an hour of a policy assignment and refresh daily.",
@@ -119,42 +119,35 @@
               "columnMatch": "Assignment",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "50ch"
+                "customColumnWidthSetting": "42fr"
               }
             },
             {
               "columnMatch": "AppliedAt",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "22ch"
-              }
-            },
-            {
-              "columnMatch": "Evaluated",
-              "formatter": 1,
-              "formatOptions": {
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "17fr"
               }
             },
             {
               "columnMatch": "Passing",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "Failing",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
               "columnMatch": "Unknown",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "12ch"
+                "customColumnWidthSetting": "12fr"
               }
             },
             {
@@ -164,7 +157,7 @@
                 "palette": "redGreen",
                 "min": 0,
                 "max": 100,
-                "customColumnWidthSetting": "24ch"
+                "customColumnWidthSetting": "20fr"
               },
               "numberFormat": {
                 "unit": 1,
@@ -205,13 +198,14 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "barchart",
+        "visualization": "categoricalbar",
         "chartSettings": {
           "xAxis": "ResourceGroup",
           "yAxis": [
             "CompliancePercent"
           ],
           "showLegend": false,
+          "showMetrics": false,
           "seriesLabelSettings": [
             {
               "seriesName": "CompliancePercent",
@@ -233,8 +227,7 @@
           }
         }
       },
-      "name": "rg-compliance",
-      "customWidth": "50"
+      "name": "rg-compliance"
     },
     {
       "type": 3,
@@ -250,13 +243,14 @@
         "crossComponentResources": [
           "value::all"
         ],
-        "visualization": "barchart",
+        "visualization": "categoricalbar",
         "chartSettings": {
           "xAxis": "ResourceType",
           "yAxis": [
             "FailingChecks"
           ],
           "showLegend": false,
+          "showMetrics": false,
           "seriesLabelSettings": [
             {
               "seriesName": "FailingChecks",
@@ -269,8 +263,7 @@
           }
         }
       },
-      "name": "failing-types",
-      "customWidth": "50"
+      "name": "failing-types"
     },
     {
       "type": 1,
@@ -329,7 +322,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "guestconfigurationresources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend status = tostring(properties.complianceStatus), machine = tolower(tostring(split(tostring(properties.targetResourceId), '/')[8]))\n| summarize Total = count(), Compliant = countif(status == 'Compliant'), NonCompliant = countif(status == 'NonCompliant'), Machines = dcount(machine)\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Assignments', 'Value', Total, 'Note', 'guest configuration assignments'),\n    pack('Order', 2, 'Label', 'Compliant', 'Value', Compliant, 'Note', 'assignments passing'),\n    pack('Order', 3, 'Label', 'Non-compliant', 'Value', NonCompliant, 'Note', 'assignments failing'),\n    pack('Order', 4, 'Label', 'Machines', 'Value', Machines, 'Note', 'machines with an assignment'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
+        "query": "guestconfigurationresources\n| where type =~ 'microsoft.guestconfiguration/guestconfigurationassignments'\n| extend status = tostring(properties.complianceStatus), machine = tolower(tostring(split(tostring(properties.targetResourceId), '/')[8]))\n| summarize Compliant = countif(status == 'Compliant'), NonCompliant = countif(status == 'NonCompliant')\n| project data = pack_array(\n    pack('Order', 1, 'Label', 'Compliant', 'Value', Compliant, 'Note', 'assignments passing'),\n    pack('Order', 2, 'Label', 'Non-compliant', 'Value', NonCompliant, 'Note', 'assignments failing'))\n| mv-expand data\n| extend Order = toint(data.Order)\n| order by Order asc\n| project Label = tostring(data.Label), Value = toint(data.Value), Note = tostring(data.Note)",
         "size": 3,
         "title": "Guest configuration status",
         "noDataMessage": "No machine has a guest configuration assignment yet. Guest configuration audits settings inside the operating system and only machines with an assignment appear here.",
@@ -383,14 +376,14 @@
               "columnMatch": "Machine",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "18ch"
+                "customColumnWidthSetting": "14fr"
               }
             },
             {
               "columnMatch": "Configuration",
               "formatter": 1,
               "formatOptions": {
-                "customColumnWidthSetting": "34ch"
+                "customColumnWidthSetting": "34fr"
               }
             },
             {
@@ -424,14 +417,14 @@
                     "text": "{0}{1}"
                   }
                 ],
-                "customColumnWidthSetting": "16ch"
+                "customColumnWidthSetting": "16fr"
               }
             },
             {
               "columnMatch": "LastChecked",
               "formatter": 6,
               "formatOptions": {
-                "customColumnWidthSetting": "23ch"
+                "customColumnWidthSetting": "26fr"
               },
               "dateFormat": {
                 "showUtcTime": null,

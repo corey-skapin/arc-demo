@@ -43,7 +43,7 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
             foreach ($setting in @($query.content.gridSettings.labelSettings)) { if ($setting) { $labels[$setting.columnId] = $setting.label } }
             foreach ($formatter in Get-Formatter $query) {
                 $width = $formatter.formatOptions.customColumnWidthSetting
-                if ($width -and $width -match '^(\d+)ch$') {
+                if ($width -and $width -match '^(\d+)(ch|fr)$') {
                     $label = if ($labels.ContainsKey($formatter.columnMatch)) { $labels[$formatter.columnMatch] } else { $formatter.columnMatch }
                     ($label.Length + 5) | Should -BeLessOrEqual ([int]$Matches[1]) -Because "$($query.content.title): header '$label' is cut off at $width"
                 }
@@ -75,7 +75,7 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
                 $formatter.dateFormat.PSObject.Properties.Name | Should -Contain 'showUtcTime' -Because $query.content.title
                 $formatter.dateFormat.showUtcTime | Should -BeNullOrEmpty -Because "$($query.content.title): null means local time"
                 $formatter.dateFormat.formatName | Should -Be 'shortDateTimeNoMsPattern'
-                [int]($formatter.formatOptions.customColumnWidthSetting -replace 'ch$', '') | Should -BeGreaterOrEqual 23 -Because $query.content.title
+                [int]($formatter.formatOptions.customColumnWidthSetting -replace '(ch|fr)$', '') | Should -BeGreaterOrEqual 26 -Because "$($query.content.title): 26 characters keep the AM/PM of a 12-hour clock from being clipped"
             }
         }
     }
@@ -117,6 +117,43 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
             $axis.numberFormatSettings.unit | Should -Be 1 -Because "$($query.content.title): a percentage axis without a unit shows bare numbers such as 55.6"
             $axis.min | Should -Be 0 -Because $query.content.title
             $axis.max | Should -Be 100 -Because $query.content.title
+        }
+    }
+
+    It '<Name>: sizes every grid column in proportional fr units that fit any container' -ForEach $books {
+        foreach ($query in Read-Queries $Path | Where-Object { $_.content.visualization -eq 'table' }) {
+            $budget = if ($query.customWidth -and [int]$query.customWidth -le 50) { 58 } else { 115 }
+            $sum = 0
+            foreach ($formatter in Get-Formatter $query) {
+                $width = $formatter.formatOptions.customColumnWidthSetting
+                $width | Should -Match '^\d+fr$' -Because "$($query.content.title): $($formatter.columnMatch) needs an fr width, because fixed ch widths overflow a narrow container and push columns off screen"
+                $sum += [int]($width -replace 'fr$', '')
+            }
+            $sum | Should -BeLessOrEqual $budget -Because "$($query.content.title): the column widths add up to $sum characters"
+        }
+    }
+
+    It '<Name>: hides the aggregate legend of every chart so its (Sum) totals do not page through the categories' -ForEach $books {
+        foreach ($query in Read-Queries $Path | Where-Object { $_.content.visualization -in 'barchart', 'categoricalbar', 'piechart' }) {
+            $query.content.chartSettings.showMetrics | Should -Be $false -Because $query.content.title
+        }
+    }
+
+    It '<Name>: colours percentage tiles red to green and leaves count tiles without a palette colour' -ForEach $books {
+        foreach ($tile in Read-Queries $Path | Where-Object { $_.content.visualization -eq 'tiles' }) {
+            $palette = $tile.content.tileSettings.leftContent.formatOptions.palette
+            if ($tile.content.query -match 'Value = todouble\(') {
+                $palette | Should -Be 'redGreen' -Because $tile.content.title
+            }
+            else {
+                $palette | Should -Be 'none' -Because "$($tile.content.title): the auto palette paints a failing count teal and a passing count purple"
+            }
+        }
+    }
+
+    It '<Name>: shows a positive empty state in the info style, never the amber warning box' -ForEach $books {
+        foreach ($query in Read-Queries $Path | Where-Object { $_.content.noDataMessage -match '^Good news' }) {
+            $query.content.noDataMessageStyle | Should -Be 3 -Because $query.content.title
         }
     }
 }
