@@ -229,10 +229,10 @@ function Invoke-VolumePhase {
     Start-ParentIfNeeded
     if (Test-VolumeReady (Get-GuestState)) { return New-PhaseResult 'Volume' 'satisfied' 'D: NestedSQL with VMs and Media' }
     if (-not (Confirm-Step 'Initialise the blank Azure data disk as D: (NTFS, label NestedSQL) and create the VMs and Media folders')) { return New-PhaseResult 'Volume' 'skipped' 'preview' }
-    Invoke-HostAction -Action Volume | Out-Null
+    $initialised = Invoke-HostAction -Action Volume
     $state.Inspect = $null
     if (-not (Test-VolumeReady (Get-GuestState))) { throw 'The data volume is not ready after initialisation; inspect the VM before continuing.' }
-    New-PhaseResult 'Volume' 'changed' 'D: initialised'
+    New-PhaseResult 'Volume' 'changed' $(if ($initialised.opticalDriveMovedTo) { "D: initialised; the empty virtual DVD-ROM moved to $($initialised.opticalDriveMovedTo):" } else { 'D: initialised' })
 }
 
 function Invoke-HyperVPhase {
@@ -385,7 +385,7 @@ if ($mutating.Count) {
     if (-not $labActive) { throw 'The lab is not Active (no NAT gateway on snet-vms). Run the approved Activate first: Prepare never starts compute without explicit outbound networking.' }
 }
 Write-Step "Preparing $parentName ($($vm.hardwareProfile.vmSize), $($vm.powerState)) for the nested SQL guest; phases: $($requested -join ', ')"
-$phaseResults.Add((New-PhaseResult 'Preflight' 'satisfied' "$parentName $($vm.hardwareProfile.vmSize), $($vm.powerState), lab Active: $labActive"))
+$phaseResults.Add((New-PhaseResult 'Preflight' 'satisfied' "$parentName $($vm.hardwareProfile.vmSize), $($vm.powerState), lab Active: $(if ($mutating.Count) { $labActive } else { 'not checked (no phase changes anything)' })"))
 
 $verification = $null
 foreach ($name in $requested | Where-Object { $_ -ne 'Preflight' }) {

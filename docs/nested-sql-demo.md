@@ -9,8 +9,9 @@ inventory with four Online system databases. These are observed timings, not SLA
 This is an Azure-hosted nested **demo**, not a production support claim. The
 timings below rebuilt the guest on a parent that was prepared by hand. The
 parent's size, data disk, Hyper-V role, network and media are now code
-([Prepare the parent](#prepare-the-parent)); a live run of that script on a fresh
-parent is not yet recorded here. Use approved Windows/SQL
+([Prepare the parent](#prepare-the-parent)), rehearsed end to end on a scratch
+`Standard_D4s_v5`; a full from-zero rebuild through Deploy is not yet recorded
+here. Use approved Windows/SQL
 media and terms; Developer/Evaluation editions are not production licences.
 The normal fleet's `MSFT_ARC_TEST=true` simulation is a separate path.
 
@@ -19,7 +20,7 @@ The normal fleet's `MSFT_ARC_TEST=true` simulation is a separate path.
 The guest runs under Hyper-V inside one Azure VM, the **parent**. The fleet's
 B-series sizes cannot run Hyper-V guests, so the parent needs a nested-capable
 size (default `Standard_D4s_v5`), a data disk for the guest and installer media
-(it becomes `D:`; this size has no temp disk), the Hyper-V role, an internal
+(it becomes `D:`; this size has no temp disk, so the empty virtual DVD-ROM that holds `D:` is moved to `Z:`), the Hyper-V role, an internal
 switch with a NAT, and the Windows Server 2022 Evaluation and SQL Server 2022
 Developer ISOs. All of it is code:
 
@@ -71,7 +72,7 @@ Preflight always runs.
 | Preflight | Read-only: exact context and inventory, VM state, lab Active | A parked lab (run the approved Activate first: it never starts compute without explicit outbound networking) or a VM that is mid-transition |
 | Size | Deallocate, resize to the declared size, start again | Skips when already that size (Deploy declared it); refuses while a nested guest runs |
 | Disk | Create and attach the declared data disk at LUN 0 | Skips when attached as declared; refuses when LUN 0 or the disk name belongs to something else, and never resizes, converts or moves a disk |
-| Volume | Initialise the blank LUN 0 disk as `D:` (NTFS, `NestedSQL`) with `VMs` and `Media` folders | Skips when already so; refuses a `D:` that is something else |
+| Volume | Initialise the blank LUN 0 disk as `D:` (NTFS, `NestedSQL`) with `VMs` and `Media` folders; a size without a temp disk leaves `D:` to the empty virtual DVD-ROM, which moves to `Z:` first | Skips when already so; refuses a `D:` that is another volume, including a DVD-ROM that holds a disc |
 | HyperV | Install the role with management tools; the restart is issued from Azure (`az vm restart`), never from inside the guest | Skips when the role and hypervisor run; refuses while a nested guest runs, with Trusted Launch, or on an untested size (`-AllowUntestedSize`) |
 | Network | Internal switch, host address `172.31.240.1`, NAT for `172.31.240.0/24` | Skips when matching; refuses a range that overlaps the Azure address space or a route, or conflicts with an existing switch or NAT |
 | Media | Runs `Stage-DemoMedia.ps1` for both ISOs into `D:\NestedSQL\Media` | Skips both when present with the pinned size and SHA-256 |
@@ -90,9 +91,15 @@ Preflight always runs.
 - The result object has `status` (`pass`, `pending` or `fail`), each phase as
   `satisfied`, `changed` or `skipped` with seconds, and the checks; `-ResultPath`
   saves it outside git.
-- By hand this took about 31 minutes wall clock (about 16 minutes of productive
-  steps: resize, disk, role and restart, network, two ISO downloads). The
-  scripted end-to-end time on a fresh parent is not yet recorded.
+- Observed on a scratch `Standard_D4s_v5` (Windows Server 2019 Gen2, Australia East,
+  2 November 2026; timings, not SLAs). Creating and attaching the data disk took
+  about 45 s; then Volume 2m11s, HyperV 5m56s (role install, restart from Azure,
+  hypervisor check), Network 2m02s, Media 2m11s for both ISOs (5.78 GiB) and
+  Verify 1m11s: about 14 minutes in all. A rerun on the prepared VM changed
+  nothing and restarted nothing (5m26s, mostly Run Command round trips and
+  hashing both ISOs). After a deallocate and start, Verify still passed 10 of 10
+  but took 4m45s because both ISOs are read cold for the hash. By hand the same
+  steps took about 31 minutes wall clock.
 
 A parent prepared by hand needs no change: declare its actual size and disk in the
 skin ([Deploy refuses a retained VM's size or data
