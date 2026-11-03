@@ -83,12 +83,46 @@ Describe 'SQL Estate Dashboard tells one story and opens populated' {
         }
     }
 
-    It 'matches the alert rule by its naming pattern, never by a lab prefix' {
+    It 'matches the whole alert rule family by its naming pattern, never by a lab prefix, so the temporary copies a live-fault rehearsal creates are included' {
         foreach ($name in 'glance-alert', 'glance-alerts', 'workload-alerts') {
             $query = ($arg | Where-Object name -eq $name).content.query
-            $query | Should -Match "-sql-lock-timeout'"
-            $query | Should -Not -Match 'arc-demo'
+            $query | Should -Match "(name|RuleName) startswith 'al-' and \1 contains '-sql-lock-timeout'" -Because $name
+            $query | Should -Not -Match "endswith '-sql-lock-timeout'" -Because "${name}: a copy is named al-<prefix>-sql-lock-timeout-fresh-<timestamp>-<hex>, so its name does not end with the family name"
+            $query | Should -Not -Match 'arc-demo' -Because $name
         }
+    }
+
+    It 'accepts the canonical rule and each of its temporary copies and nothing else, by the literals in the queries' {
+        $accepted = 'al-arc-demo-sql-lock-timeout', 'al-arc-demo-sql-lock-timeout-fresh-20260101000000-a1b2c3', 'al-arc-demo-sql-lock-timeout-representative-20260101', 'al-arc-demo-sql-lock-timeout-rerun-20260101', 'AL-ARC-DEMO-SQL-LOCK-TIMEOUT-FRESH-1'
+        $rejected = 'al-arc-demo-missing-heartbeat', 'alert-arc-demo-containerapp-restarts', 'alert-arc-demo-lob-arc-app-fault-fresh-20260101000000-d4e5f6', 'sql-lock-timeout-test', 'al-arc-demo-sql-lock'
+        foreach ($name in 'glance-alert', 'glance-alerts', 'workload-alerts') {
+            $query = ($arg | Where-Object name -eq $name).content.query
+            $family = [regex]::Match($query, "(\w+) startswith '([^']+)' and \1 contains '([^']+)'")
+            $family.Success | Should -BeTrue -Because $name
+            # Kusto startswith and contains both ignore case.
+            $inFamily = { param($rule) $rule.StartsWith($family.Groups[2].Value, [StringComparison]::OrdinalIgnoreCase) -and $rule.IndexOf($family.Groups[3].Value, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+            foreach ($rule in $accepted) { (& $inFamily $rule) | Should -BeTrue -Because "$name must include $rule" }
+            foreach ($rule in $rejected) { (& $inFamily $rule) | Should -BeFalse -Because "$name must not include $rule" }
+        }
+    }
+
+    It 'shows the canonical rule name, dropping anything after the family name, in the alert grid and on the rule tile' {
+        ($arg | Where-Object name -eq 'workload-alerts').content.query | Should -Match "Rule = substring\(RuleName, 0, indexof\(RuleName, '-sql-lock-timeout'\) \+ strlen\('-sql-lock-timeout'\)\)"
+        ($arg | Where-Object name -eq 'workload-alerts').content.query | Should -Not -Match 'Rule = tostring\(split'
+        ($arg | Where-Object name -eq 'glance-alert').content.query | Should -Match "'Note', substring\(name, 0, indexof\(tolower\(name\), '-sql-lock-timeout'\) \+ strlen\('-sql-lock-timeout'\)\)"
+        $copy = 'al-arc-demo-sql-lock-timeout-fresh-20260101000000-a1b2c3'
+        $copy.Substring(0, $copy.ToLowerInvariant().IndexOf('-sql-lock-timeout') + '-sql-lock-timeout'.Length) | Should -Be 'al-arc-demo-sql-lock-timeout'
+    }
+
+    It 'reads the alert rule as Enabled when any rule in the family is enabled, takes severity and frequency from that rule, and keeps one row per label' {
+        $query = ($arg | Where-Object name -eq 'glance-alert').content.query
+        $query | Should -Match "extend IsEnabled = tostring\(properties\.enabled\) =~ 'true'"
+        $query | Should -Match "extend SortKey = strcat\(iff\(IsEnabled, '0', '1'\), name\)"
+        $query | Should -Match '\| top 1 by SortKey asc'
+        $query | Should -Match "'Value', iff\(IsEnabled, 'Enabled', 'Disabled'\)"
+        $query | Should -Match "'Value', strcat\('Sev', tostring\(properties\.severity\)\)"
+        foreach ($label in 'Alert rule', 'Severity') { @([regex]::Matches($query, "pack\('Label', '$label'")).Count | Should -Be 1 -Because $label }
+        (Get-ProjectedColumn $query) | Should -Be @('Label', 'Value', 'Note')
     }
 
     It 'lists only databases that belong to a registered instance, never orphans of a deleted one' {

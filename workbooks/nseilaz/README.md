@@ -75,7 +75,11 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
 - SQL Estate Dashboard is reworked for the lab, not a snapshot: the Arc inventory (instance, version,
   edition, licence and the databases of registered instances only) sits beside the monitored SQL
   workload (`ArcSqlEngineDemo` events 6000, 6201 and 6001 from the Azure Monitor Agent) and the
-  lock-timeout alert rule. The nested Arc SQL instance is labelled experimental and unsupported,
+  lock-timeout alert rule. The rule tile, the Alerts tile and the alert grid follow the whole rule family
+  (a name starting `al-` and containing `-sql-lock-timeout`), not only the canonical rule: the live-fault
+  rehearsal creates temporary copies named `al-<prefix>-sql-lock-timeout-fresh-<timestamp>-<hex>` and
+  disables the original while a copy exists, so the tile reads Enabled when any rule in the family is
+  enabled, and alerts from a copy are counted and listed under the canonical rule name. The nested Arc SQL instance is labelled experimental and unsupported,
   Defender is shown as Arc reports it with no claim, the edition, version and licence mixes are tiles that
   understand Arc SQL text values such as `SQL Server 2022` and `Free`, the three workload charts are
   column charts with short titles and legends (the lock chart is unstacked, so a timeout and its recovery
