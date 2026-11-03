@@ -67,8 +67,10 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   Volumes grid shows the last sample as a relative age like the other grids), and
   the non-compliant policy grid names the built-in policies and initiatives that Arc machines evaluate here
   (an unknown definition falls back to its reference ID). An expected or good-news empty result, such as no
-  Arc SQL instance on this machine, uses the blue info style (`noDataMessageStyle` 3); the amber warning box
-  (4) is kept for an absence that is itself a finding. `tests/MachineIntelligenceWorkbook.Tests.ps1`
+  Arc SQL instance on this machine, uses the explicit blue info style (`noDataMessageStyle` 1); the amber
+  warning triangle (4) is kept for an absence that is itself a finding. The portal draws the numbers as follows
+  (read from a probe workbook): omitted or 1 a blue info box, 2 lilac (upsell), 3 green (success), 4 amber
+  (warning), 5 red (error). `tests/MachineIntelligenceWorkbook.Tests.ps1`
   guards it.
 - SQL Estate Dashboard is reworked for the lab, not a snapshot: the Arc inventory (instance, version,
   edition, licence and the databases of registered instances only) sits beside the monitored SQL

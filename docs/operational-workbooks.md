@@ -215,9 +215,11 @@ is, apart from pinning its Log Analytics items to the deployment workspace, and 
 ## Look and feel
 
 Both operational workbooks follow the Estate Overview header convention (title, then an italic story line). Expected empty states, such as
-a filter with no match, a missing selection or a parked gap, are calm informational bars; amber appears only where an
-absent result is itself a finding (no CPU samples, no Arc machines for the roster), and green where emptiness is good
-news. Status icons and colours use only the documented grid icon names and the colour and palette names of the
+a filter with no match, a missing selection or a parked gap, currently use `noDataMessageStyle` 4, which the portal draws as an
+amber box with a warning triangle, not a calm bar; the red error box (5) is used only where an absent result is itself a finding
+(no CPU samples, no Arc machines for the roster), and the green success box (3) where emptiness is good news. The portal draws
+the numbers as follows (read from a probe workbook): omitted or 1 a blue info box, 2 lilac (upsell), 3 green (success), 4 amber
+(warning), 5 red (error). Status icons and colours use only the documented grid icon names and the colour and palette names of the
 official sample workbooks; an offline test enforces that, because an unknown name renders as nothing.
 
 ### Portal layout
