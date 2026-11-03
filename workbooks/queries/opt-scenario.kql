@@ -1,35 +1,6 @@
-// include: schedule
-// Labelled optional cost scenario. Only the eligible share of a user-supplied baseline scales with running hours; the rest stays fixed.
-// The week is a 168-hour cycle, not a calendar month. No price lookup, no billing data, no realised savings, no guest scenario.
-let Baseline = todouble('{ScenarioBaseline}');
-let SharePct = todouble('{ScenarioSharePct}');
-let SelectedLayer = toscalar(AllMachines | where Machine == '{SelectedHost}' | project Layer);
-let Offered = isnotempty(SelectedLayer) and SelectedLayer != "guest";
-let Configured = Offered and isnotnull(Baseline) and Baseline > 0 and isnotnull(SharePct) and SharePct between (0.0 .. 100.0) and WeeklyOffHours > 0;
-let Eligible = iff(Configured, Baseline * SharePct / 100.0, real(null));
-let Reduction = iff(Configured, Eligible * WeeklyOffHours / 168.0, real(null));
-datatable(SortKey:long, Label:string)[
-    1, "Workload",
-    2, "Baseline (your figure)",
-    3, "Eligible share",
-    4, "Proposed hours off per week",
-    5, "Illustrative reduction",
-    6, "Unchanged by the scenario"]
-| project SortKey, Label,
-    Value = case(
-        SortKey == 1, iff(isempty(SelectedLayer), "none selected", '{SelectedHost}'),
-        SortKey == 2, iff(isnull(Baseline) or Baseline <= 0, "not set", Num(Baseline, 2)),
-        SortKey == 3, iff(isnull(SharePct), "not set", strcat(Num(SharePct, 1), "%")),
-        SortKey == 4, iff(WeeklyOffHours > 0, strcat(tostring(WeeklyOffHours), " of 168"), "not set"),
-        SortKey == 5, iff(Configured, Num(Reduction, 2), "not configured"),
-        iff(Configured, Num(Baseline - Eligible, 2), "not configured")),
-    Note = case(
-        SortKey == 1, case(isempty(SelectedLayer), "Select a machine in the candidate table; the scenario applies to one workload.",
-            SelectedLayer == "guest", "A guest's cost is part of its parent: no scenario is offered for a guest.", "One workload only; never summed across machines."),
-        SortKey == 2, "User-supplied; any currency or unit. Not an Azure price or a bill.",
-        SortKey == 3, "Share of the baseline that scales with running hours (compute or power).",
-        SortKey == 4, "From the proposed schedule; evidence for a decision, not a decision.",
-        SortKey == 5, "Eligible baseline x hours off / 168. Illustrative: not billing, not realised or guaranteed savings.",
-        "Fixed, licensed, retained-storage, monitoring and security costs are outside the reduction.")
+// include: scenario
+// Scenario, first row: the workload and the two figures typed in. One workload only, never summed across machines.
+ScenarioTiles
+| where SortKey <= 3
 | sort by SortKey asc
 | project Label, Value, Note

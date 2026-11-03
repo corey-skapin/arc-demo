@@ -404,8 +404,10 @@ Describe 'Illustrative cost scenario arithmetic' {
         ($params | Where-Object name -eq 'SchedStartHour').value | Should -Be 'none'
         $query = (Get-WorkbookItems $book.items | Where-Object name -eq 'scenario-tiles').content.query
         $query | Should -Match 'SelectedLayer != "guest"'
-        $query | Should -Match 'not billing, not realised or guaranteed savings'
         $query | Should -Match 'Eligible \* WeeklyOffHours / 168\.0'
+        $result = (Get-WorkbookItems $book.items | Where-Object name -eq 'scenario-result-tiles').content.query
+        $result | Should -Match 'not billing, not realised or guaranteed savings'
+        $result | Should -Match 'not billing, not realised savings'
     }
 }
 

@@ -2,13 +2,16 @@
 // Scope and evidence quality: can this view be relied on? Four tiles: how many machines are in scope, what is reporting, how fresh the newest
 // sample is, and how much of the evidence is adequate (with the share of the window that was observed).
 // The lab runs on demand, so low coverage is parked time: unknown, never idle. Missing is never zero. Tile text stays short; names live in the tables.
+// Every value is a number so the tiles read as big numerals like the assessment tiles; the unit of the latest-sample age is in its caption.
 let Counts = Hosts
 | summarize Total = count(), Guests = countif(Layer == "guest"),
     Reporting = countif(ReportingState == "Reporting"), Silent = countif(ReportingState == "Not reporting"), Absent = countif(ReportingState == "No telemetry"),
     Newest = max(HostLastSeen), Adequate = countif(EvidenceState == "Adequate"),
     MedianCoverage = percentile(iff(HasCpu, CoveragePercent, real(null)), 50)
 | extend K = 1, NewestAge = datetime_diff("minute", WindowEnd, Newest), AtNow = abs(datetime_diff("minute", now(), WindowEnd)) <= 5;
-let Span = (m:long) { case(m < 180, strcat(tostring(max_of(m, long(0))), " min"), m < 2880, strcat(tostring(tolong(round(m / 60.0, 0))), " h"), strcat(tostring(tolong(round(m / 1440.0, 0))), " d")) };
+// The age reads in minutes under three hours, hours under two days and days after that.
+let AgeValue = (m:long) { case(m < 180, max_of(m, long(0)), m < 2880, tolong(round(m / 60.0, 0)), tolong(round(m / 1440.0, 0))) };
+let AgeUnit = (m:long) { case(m < 180, "min", m < 2880, "h", "days") };
 datatable(SortKey:long)[0, 1, 2, 3]
 | extend K = 1
 | join kind=inner Counts on K
@@ -19,10 +22,10 @@ datatable(SortKey:long)[0, 1, 2, 3]
         SortKey == 2, "🕒 Latest sample",
         "✅ Adequate evidence"),
     Value = case(
-        SortKey == 0, tostring(Total),
-        SortKey == 1, tostring(Reporting),
-        SortKey == 2, iff(isnull(Newest), "none", Span(NewestAge)),
-        tostring(Adequate)),
+        SortKey == 0, tolong(Total),
+        SortKey == 1, tolong(Reporting),
+        SortKey == 2, iff(isnull(Newest), long(null), AgeValue(NewestAge)),
+        tolong(Adequate)),
     Note = case(
         SortKey == 0, iff(Guests > 0, strcat(tostring(Guests), iff(Guests == 1, " guest", " guests"), ", counted once"), "all independent"),
         SortKey == 1, case(
@@ -31,7 +34,7 @@ datatable(SortKey:long)[0, 1, 2, 3]
             Reporting == 0 and Absent == 0, "parked or silent",
             Reporting == Total, "all reporting",
             strcat(tostring(Total - Reporting), " not reporting")),
-        SortKey == 2, iff(isnull(Newest), "no sample: unknown", iff(AtNow, "since newest sample", "before window end")),
+        SortKey == 2, iff(isnull(Newest), "no sample: unknown", strcat(AgeUnit(NewestAge), iff(AtNow, " since newest sample", " before window end"))),
         iff(isnull(MedianCoverage), "no CPU samples", strcat("median coverage ", tostring(tolong(round(MedianCoverage, 0))), "%")))
 | sort by SortKey asc
 | project Label, Value, Note
