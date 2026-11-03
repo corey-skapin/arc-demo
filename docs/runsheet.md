@@ -1,8 +1,9 @@
 # Arc: from servers to an operational view
 
-**Presenter:** open the generated `.local/presenter-runsheet.md` and follow this
-page from top to bottom. Its links and queries are already filled in. This tracked
-file is the source template, not a second presentation.
+**Presenter:** open the generated `.local/presenter-runsheet.md` (Arc only) or, to run the
+whole demo from one page, `.local/full-demo-runsheet.md` (this guide, then the SRE half,
+then one close), and follow it from top to bottom. Its links and queries are already
+filled in. This tracked file is the source template, not a second presentation.
 
 Context recorded **{{RecordedAtUtc}}**; document generated **{{GeneratedAtUtc}}**.
 Generation is offline, not a fresh readiness or application-health check.
@@ -843,6 +844,12 @@ not presenter patter, and nothing here is run during the presentation.
   approval and any separate approval to send an investigation or trigger an
   incident. The handover and closing lines in this page are the ones the SRE guide
   echoes, so change them in both places together.
+- **Whole-demo page:** generating with `-SreGuidePath` also writes
+  `.local/full-demo-runsheet.md`: a whole-demo table, this guide, the SRE guide's own
+  text under "The night shift (SRE half)" (steps headed "SRE step N", its close
+  replaced by a pointer to the close here) and then the single close. The SRE guide is
+  read, never edited, and generation stops if its headings change shape. Regenerate
+  after either guide changes.
 - **Editing this guide:** keep each spoken block under about 120 words, keep numbers
   out of this file (they live on the stage card, dated), and keep every bold tile,
   section or tab name exactly as the workbook shows it. Tests check all three. The

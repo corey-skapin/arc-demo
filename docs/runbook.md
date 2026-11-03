@@ -66,6 +66,34 @@ The operator owns that check, not the presenter. Use the same convention in the
 companion repo; a missing companion guide produces a plain handoff note, not a
 broken or guessed relative path.
 
+### One page for the whole demo (optional)
+
+To run the Arc half and the SRE half from one page, add the companion's actual generated
+guide as `-SreGuidePath` (an absolute local path; the SRE guide is read, never changed):
+
+```powershell
+.\scripts\New-PresenterRunsheet.ps1 -AbsoluteLocalLinks -SreGuidePath <absolute path to the generated SRE guide>
+```
+
+It still writes `.local/presenter-runsheet.md` as before and also
+`.local/full-demo-runsheet.md`, which is untracked like everything under `.local/`:
+
+1. A **Whole demo in order** table: the Arc clock times from the chapter headings, then the SRE
+   steps, with the live-fault points (say GO after chapter 7 has shown the alert rules and the
+   assistant runs Prepare; fire SQL, then LOB; fire T09 with the user's Review click; Restore).
+2. The Arc guide as generated, up to and including **Hand over to the SRE half**.
+3. **The night shift (SRE half)**: the SRE guide's own text from *This afternoon: verified
+   existing investigations* through step 6, byte for byte, with only its numbered steps headed
+   **SRE step N**. Its step 7 (the close) becomes a one-line pointer.
+4. The single close, **The close: the Monday answers**, then the prepared answers, fallback
+   queries and operator notes.
+
+The generator stops without writing either page when the SRE guide has no *This afternoon*,
+*Live faults* or steps 1 to 7 once each, in order, so a changed SRE guide is noticed rather than
+spliced blindly. Regenerate whenever either guide changes. The Arc template stays the single
+source: the combined page adds no presentation text of its own beyond the table and the
+part titles.
+
 ## Optional capacity and optimisation workbooks
 
 These are optional read-only engineer surfaces after setup, chapters 5 and 6 of the
