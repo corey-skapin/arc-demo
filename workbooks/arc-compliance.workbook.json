@@ -204,6 +204,14 @@
                   }
                 ],
                 "customColumnWidthSetting": "20fr"
+              },
+              "numberFormat": {
+                "unit": 0,
+                "options": {
+                  "style": "decimal",
+                  "useGrouping": false,
+                  "maximumFractionDigits": 1
+                }
               }
             },
             {
@@ -394,6 +402,14 @@
                   }
                 ],
                 "customColumnWidthSetting": "20fr"
+              },
+              "numberFormat": {
+                "unit": 0,
+                "options": {
+                  "style": "decimal",
+                  "useGrouping": false,
+                  "maximumFractionDigits": 1
+                }
               }
             }
           ],
