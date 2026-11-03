@@ -5,7 +5,10 @@
 Open **`.local/presenter-runsheet.md`** from the repo root and follow it top to
 bottom. [runsheet.md](runsheet.md) is the single source template; the operator
 [generates the guide](runbook.md#prepare-the-local-presenter-guide) from saved
-local context. Generation is offline, not a current-health check.
+local context. Generation is offline, not a current-health check. To run the Arc
+and SRE halves from one page, the operator also passes the SRE guide
+([one page for the whole demo](runbook.md#one-page-for-the-whole-demo-optional))
+and you open **`.local/full-demo-runsheet.md`** instead.
 
 The guide is one story, the Monday-morning questions, in seven chapters (25-28 minutes
 for the Arc path, with 20 and 15 minute cut lists) that follows one SQL database from

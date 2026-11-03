@@ -38,7 +38,9 @@ optional Container App/AKS/SQL scenarios a prerequisite for the Arc story.
    The guide is generated offline and does not itself verify current health.
 6. If a prepared SRE companion guide exists, record its actual absolute path as
    companionSreRunsheetPath; generation computes a relative link. Otherwise omit
-   it. Keep SRE instructions in the SRE repo.
+   it. Keep SRE instructions in the SRE repo. To give the presenter one page for
+   the whole demo, also run the generator with -SreGuidePath set to that guide and
+   hand over .local/full-demo-runsheet.md (runbook: one page for the whole demo).
 7. Refresh the local context/guide after later successful preparation changes its
    resources. Report actual gaps plainly. Leave the lab active unless the user
    separately asks to park or remove it.

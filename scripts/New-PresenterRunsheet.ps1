@@ -4,11 +4,18 @@
 .DESCRIPTION
     Offline only: does not sign in, query Azure or change the lab. Context and
     output stay together under .local; the tracked runsheet is the only template.
+
+    With -SreGuidePath it also writes .local/full-demo-runsheet.md: one page to run the whole demo from.
+    That page is a whole-demo table, the Arc guide as generated, the SRE half taken from the generated SRE
+    guide (its own text, byte for byte, under "The night shift (SRE half)", with its steps headed
+    "SRE step N" and its close replaced by a pointer) and then the single close, prepared answers and
+    reference pages. The SRE guide is read, never changed.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$ContextPath = (Join-Path $PSScriptRoot '..\.local\demo-context.json'),
-    [switch]$AbsoluteLocalLinks
+    [switch]$AbsoluteLocalLinks,
+    [string]$SreGuidePath
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot
@@ -20,6 +27,36 @@ function ConvertTo-LocalFileLink {
         })
     $joined = $segments -join '/'
     if ($joined.StartsWith('/')) { "file://$joined" } else { "file:///$joined" }
+}
+function Expand-RunsheetToken {
+    param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][hashtable]$Map)
+    foreach ($token in @([regex]::Matches($Text, '\{\{([A-Za-z][A-Za-z0-9]*)\}\}'))) {
+        $key = $token.Groups[1].Value
+        if (-not $Map.ContainsKey($key)) { throw "Unknown presenter template token '$key'." }
+        $Text = $Text.Replace($token.Value, [string]$Map[$key])
+    }
+    if ($Text -match '\{\{|\}\}') { throw 'Unresolved presenter template placeholders remain; output was not written.' }
+    $Text
+}
+function Split-MarkdownLine {
+    # Lines keep their own terminators, so text put back together is byte for byte what was read.
+    param([Parameter(Mandatory)][string]$Text)
+    @([regex]::Split($Text, '(?<=\n)') | Where-Object { $_ -ne '' })
+}
+function Get-MarkdownHeading {
+    # Headings inside fenced code blocks are code, not headings.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Line)
+    $fenced = $false
+    for ($i = 0; $i -lt $Line.Count; $i++) {
+        if ($Line[$i] -match '^\s*(```|~~~)') { $fenced = -not $fenced; continue }
+        if (-not $fenced -and $Line[$i] -match '^(#{1,6})\s+(.+?)\s*$') {
+            [pscustomobject]@{ Index = $i; Level = $Matches[1].Length; Text = $Matches[2] }
+        }
+    }
+}
+function ConvertTo-HeadingAnchor {
+    param([Parameter(Mandatory)][string]$Heading)
+    '#' + (($Heading.ToLowerInvariant() -replace '[^\p{L}\p{N}\s_-]', '') -replace '\s', '-')
 }
 $contextFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ContextPath)
 $directory = Split-Path $contextFile
@@ -232,16 +269,132 @@ if ($context.Contains('companionSreRunsheetPath')) {
         $values.CompanionSection = "Continue with the [SRE presenter guide]($link). Arc identity and monitoring are already covered; the SRE repo owns investigation and human Review approval."
     }
 }
-$template = Get-Content -LiteralPath (Join-Path $repo 'docs\runsheet.md') -Raw
-$tokens = @([regex]::Matches($template, '\{\{([A-Za-z][A-Za-z0-9]*)\}\}'))
-foreach ($token in $tokens) {
-    $key = $token.Groups[1].Value
-    if (-not $values.ContainsKey($key)) { throw "Unknown presenter template token '$key'." }
-    $template = $template.Replace($token.Value, [string]$values[$key])
-}
-if ($template -match '\{\{|\}\}') { throw 'Unresolved presenter template placeholders remain; output was not written.' }
+$templateText = Get-Content -LiteralPath (Join-Path $repo 'docs\runsheet.md') -Raw
+$template = Expand-RunsheetToken -Text $templateText -Map $values
 $output = Join-Path $directory 'presenter-runsheet.md'
+$fullOutput = Join-Path $directory 'full-demo-runsheet.md'
+$combined = $null
+if ($SreGuidePath) {
+    if (-not [IO.Path]::IsPathFullyQualified($SreGuidePath)) { throw 'SreGuidePath must be an explicit absolute local path to the generated SRE presenter guide.' }
+    if (-not (Test-Path -LiteralPath $SreGuidePath -PathType Leaf)) { throw "The SRE presenter guide was not found at SreGuidePath: $SreGuidePath" }
+    $nl = if ($templateText.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $sreFile = Split-Path $SreGuidePath -Leaf
+
+    # The SRE guide: its shape is checked first, so a changed guide stops generation instead of being spliced blindly.
+    $sreLines = @(Split-MarkdownLine (Get-Content -LiteralPath $SreGuidePath -Raw))
+    $sreHeadings = @(Get-MarkdownHeading $sreLines)
+    $sreSections = @($sreHeadings | Where-Object Level -eq 2)
+    $afternoon = @($sreSections | Where-Object Text -eq 'This afternoon: verified existing investigations')
+    $faults = @($sreSections | Where-Object Text -eq 'Live faults')
+    $steps = @($sreSections | Where-Object { $_.Text -match '^\d+\. ' })
+    $problems = [System.Collections.Generic.List[string]]::new()
+    if ($afternoon.Count -ne 1) { $problems.Add("one 'This afternoon: verified existing investigations' heading (found $($afternoon.Count))") }
+    if ($faults.Count -ne 1) { $problems.Add("one 'Live faults' heading (found $($faults.Count))") }
+    $stepNumbers = @($steps | ForEach-Object { [int](($_.Text -split '\.')[0]) }) -join ','
+    if ($stepNumbers -ne '1,2,3,4,5,6,7') { $problems.Add("steps 1 to 7 once each, in order (found '$stepNumbers')") }
+    elseif ($steps[6].Text -ne '7. Close') { $problems.Add("step 7 headed 'Close' (found '$($steps[6].Text)')") }
+    if (-not $problems.Count -and -not ($afternoon[0].Index -lt $faults[0].Index -and $faults[0].Index -lt $steps[0].Index)) {
+        $problems.Add("'This afternoon', 'Live faults' and then the steps, in that order")
+    }
+    if ($problems.Count) { throw "The SRE guide does not have the expected shape; it needs $($problems -join '; '). The whole-demo run-through was not written." }
+
+    $closeAnchor = ConvertTo-HeadingAnchor 'The close: the Monday answers (2 minutes)'
+    $nightHeading = 'The night shift (SRE half)'
+    $combinedValues = $values.Clone()
+    $combinedValues.CompanionSection = "Continue with [$nightHeading]($(ConvertTo-HeadingAnchor $nightHeading)) below. It is part of this same document, so there is no second guide to open. Arc identity and monitoring are already covered; the SRE half owns investigation and human Review approval."
+    $arcText = Expand-RunsheetToken -Text $templateText -Map $combinedValues
+    $arcLines = @(Split-MarkdownLine $arcText)
+    $arcHeadings = @(Get-MarkdownHeading $arcLines)
+    $closeHeading = @($arcHeadings | Where-Object { $_.Level -eq 2 -and $_.Text -eq 'The close: the Monday answers (2 minutes)' })
+    $handOver = @($arcHeadings | Where-Object { $_.Level -eq 2 -and $_.Text -eq 'Hand over to the SRE half' })
+    if ($closeHeading.Count -ne 1 -or $handOver.Count -ne 1 -or $handOver[0].Index -ge $closeHeading[0].Index) {
+        throw "The runsheet template needs one 'Hand over to the SRE half' heading followed by one 'The close: the Monday answers (2 minutes)' heading to splice the SRE half between them."
+    }
+    $timedPattern = '^(?<title>Opening: .+?|Chapter \d+\. .+?) \((?<minutes>\d+) minutes?, clock (?<from>\d+:\d+) to (?<to>\d+:\d+)\)$'
+    $timed = @($arcHeadings | Where-Object { $_.Level -eq 2 -and $_.Text -match $timedPattern } | ForEach-Object {
+            $null = $_.Text -match $timedPattern
+            [pscustomobject]@{ Heading = $_.Text; Title = $Matches.title; From = $Matches.from; To = $Matches.to }
+        })
+    $expectedTitles = @('Opening') + @(1..7 | ForEach-Object { "Chapter $_" })
+    $actualTitles = @($timed | ForEach-Object { ($_.Title -split '[:.]')[0] })
+    if (($actualTitles -join ',') -ne ($expectedTitles -join ',')) { throw 'The runsheet template needs an Opening and Chapters 1 to 7, each with a clock time in its heading, to build the whole-demo table.' }
+
+    # SRE half: its own lines, with only the numbered step headings renamed and step 7 (the close) pointed at the one close below.
+    $sreBody = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in @(for ($i = 0; $i -lt $afternoon[0].Index; $i++) { $sreLines[$i] })) {
+        if ($line.Trim() -and $line -notmatch '^#\s') { $sreBody.Add($line) }
+    }
+    $stepStarts = @($steps | ForEach-Object { $_.Index })
+    for ($i = $afternoon[0].Index; $i -lt $steps[6].Index; $i++) {
+        $line = $sreLines[$i]
+        if ($i -in $stepStarts) { $line = $line -replace '^## (\d+)\. ', '## SRE step $1. ' }
+        $sreBody.Add($line)
+    }
+    $sreBody.Add("## SRE step 7. Close$nl$nl")
+    $sreBody.Add("Close with [The close: the Monday answers]($closeAnchor) below. It is the one close for the whole demo, whether you used live incidents or dated threads.$nl$nl")
+    $afterClose = @($sreSections | Where-Object { $_.Index -gt $steps[6].Index } | Select-Object -First 1)
+    if ($afterClose.Count) { for ($i = $afterClose[0].Index; $i -lt $sreLines.Count; $i++) { $sreBody.Add($sreLines[$i]) } }
+
+    # The whole-demo table: Arc clock times come from the chapter headings; the SRE half is paced by the alerts.
+    $link = { param([string]$Text, [string]$Heading) "[$Text]($(ConvertTo-HeadingAnchor $Heading))" }
+    $table = [System.Collections.Generic.List[string]]::new()
+    $table.Add('| Clock | Chapter or step | Live-fault point |')
+    $table.Add('| --- | --- | --- |')
+    foreach ($row in $timed) {
+        $fault = ''
+        if ($row.Title -match '^Chapter 7\.') {
+            $fault = '**Say GO** once the alert rules are shown, ideally on the audience question. The SRE assistant then runs **Prepare**: the originals are disabled while the fresh copies exist.'
+        }
+        $table.Add("| $($row.From) to $($row.To) | $(& $link $row.Title $row.Heading) | $fault |")
+    }
+    $table.Add("| $($timed[-1].To) | $(& $link 'Hand over to the SRE half' 'Hand over to the SRE half') | |")
+    foreach ($step in $steps[0..5]) {
+        $number = [int](($step.Text -split '\.')[0])
+        $heading = "SRE step $($step.Text)"
+        $clock = if ($number -eq 1) { 'then, paced by the alerts' } else { 'then' }
+        $fault = switch ($number) {
+            1 { 'Navigation only until GO.' }
+            5 { '**Fire SQL**, wait for its alert and thread. Then **fire LOB**. One at a time, cleanup verified between.' }
+            6 { '**Fire T09.** The user''s **Review** click approves only the new investigation''s reset card.' }
+            default { '' }
+        }
+        $table.Add("| $clock | $(& $link $heading $heading) | $fault |")
+    }
+    $table.Add("| when the user says **done** | $(& $link 'Live faults' 'Live faults') | **Restore**: the SRE assistant runs `-Action Restore` for all three, after the investigations have finished. Originals enabled, copies absent. |")
+    $table.Add("| last | $(& $link 'The close: the Monday answers' 'The close: the Monday answers (2 minutes)') | SRE step 7 points here: one close for the whole demo. |")
+
+    $front = @(
+        '# Full demo run-through: from servers to the night shift'
+        ''
+        "**Presenter:** this is the one page to run the whole demo from. Follow it from top to bottom: the Arc half, then the night shift (the SRE half), then one close. Links and queries are already filled in. Generation is offline: it did not query Azure or check readiness, and nothing here changes the lab. Combined **$($values.GeneratedAtUtc)** from the Arc guide and ``$sreFile``."
+        ''
+        '## Whole demo in order'
+        ''
+    ) + $table + @(
+        ''
+        "Arc clock times come from the chapter headings. The SRE half has no fixed clock because the alerts set the pace: see $(& $link 'Live faults' 'Live faults'). Read **Live faults** before chapter 7, and keep $(& $link 'This afternoon: verified existing investigations' 'This afternoon: verified existing investigations') open for the dated threads. When asked: $(& $link 'Prepared answers' 'Prepared answers'), $(& $link 'Fallback queries' 'Fallback queries'), $(& $link 'Operator notes' 'Operator notes')."
+        ''
+    )
+    $night = @(
+        "# $nightHeading"
+        ''
+        "The text below is the SRE guide's own (``$sreFile``), unchanged: every command, name, number and thread reference is byte for byte as written there. Only its numbered steps are headed **SRE step N**, and its close is a pointer to the one close below. Where it says to complete the Arc section first, or refers to ``.local/presenter-runsheet.md``, you are already in the same document: the Arc part is above."
+        ''
+    )
+    $reference = @(
+        '# The close, prepared answers and reference'
+        ''
+    )
+    $arcBefore = -join $arcLines[0..($closeHeading[0].Index - 1)]
+    $arcAfter = -join $arcLines[$closeHeading[0].Index..($arcLines.Count - 1)]
+    $combined = (($front -join $nl) + $nl + $arcBefore.TrimEnd() + $nl + $nl + ($night -join $nl) + $nl + (-join $sreBody) + ($reference -join $nl) + $nl + $arcAfter)
+}
 if ($PSCmdlet.ShouldProcess($output, 'Generate private offline Arc presenter guide')) {
     Set-Content -LiteralPath $output -Value $template -Encoding utf8 -NoNewline
-    [pscustomobject]@{ Path = $output; ContextRecordedAtUtc = $values.RecordedAtUtc; AzureQueried = $false }
+    $result = [ordered]@{ Path = $output; ContextRecordedAtUtc = $values.RecordedAtUtc; AzureQueried = $false }
+    if ($null -ne $combined -and $PSCmdlet.ShouldProcess($fullOutput, 'Generate private combined Arc and SRE run-through')) {
+        Set-Content -LiteralPath $fullOutput -Value $combined -Encoding utf8 -NoNewline
+        $result.FullDemoPath = $fullOutput
+    }
+    [pscustomobject]$result
 }
