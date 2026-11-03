@@ -120,6 +120,15 @@ Describe 'Machine Intelligence Center never shows a silent blank' {
         }
     }
 
+    It 'shows an expected or good-news empty result in the blue info style and keeps the amber warning box for an absence that is itself a finding' {
+        $calm = 'security-open', 'software-chart', 'software-table', 'sql-instances', 'sql-databases', 'arc-policy-table', 'events-chart'
+        foreach ($name in $calm) { @($queries | Where-Object name -eq $name).Count | Should -Be 1 -Because "$name must exist" }
+        foreach ($item in $queries) {
+            $expected = if ($item.name -in $calm) { 3 } else { 4 }
+            $item.content.noDataMessageStyle | Should -Be $expected -Because "$($item.name): style 3 is the info style and 4 the amber warning box, which reads as a fault"
+        }
+    }
+
     It 'follows the time range on every Log Analytics tile and never on Resource Graph tiles' {
         foreach ($item in $la) { $item.content.timeContextFromParameter | Should -Be 'TimeRange' -Because $item.name }
         foreach ($item in $arg) { $item.content.PSObject.Properties.Name | Should -Not -Contain 'timeContextFromParameter' -Because $item.name }
@@ -249,7 +258,7 @@ Describe 'Machine Intelligence Center renders cleanly in the portal' {
                 $formatter.dateFormat.showUtcTime | Should -BeNullOrEmpty -Because "$($item.name): null means local time"
             }
         }
-        foreach ($pair in @(@('perf-volumes', 'LastSample'), @('security-open', 'Since'), @('software-table', 'TimeGenerated'), @('events-sources', 'Last'))) {
+        foreach ($pair in @(@('security-open', 'Since'), @('software-table', 'TimeGenerated'), @('events-sources', 'Last'))) {
             $item = $queries | Where-Object name -eq $pair[0]
             @($item.content.gridSettings.formatters | Where-Object { $_.columnMatch -eq $pair[1] -and $_.formatter -eq 6 }).Count | Should -Be 1 -Because "$($pair[0]) $($pair[1])"
         }
@@ -353,6 +362,21 @@ Describe 'Machine Intelligence Center renders cleanly in the portal' {
     It 'does not contradict itself on the SQL tab: the engine tiles say they describe the host, and the instance message allows for a running SQL Server' {
         ($arg | Where-Object name -eq 'sql-detect').content.query | Should -Match "'SQL Server on host'"
         ($arg | Where-Object name -eq 'sql-instances').content.noDataMessage | Should -Match 'even if SQL Server is running'
+    }
+
+    It 'shows how old the last volume sample is as a relative age like the other grids, not as an absolute date and time' {
+        $volumes = $la | Where-Object name -eq 'perf-volumes'
+        $volumes.content.query | Should -Match 'LastSampleAge = AgeText\(LastSample\)'
+        $formatter = $volumes.content.gridSettings.formatters | Where-Object columnMatch -eq 'LastSampleAge'
+        $formatter.formatter | Should -Be 1
+        ($volumes.content.gridSettings.labelSettings | Where-Object columnId -eq 'LastSampleAge').label | Should -Be 'Last sample'
+        @($volumes.content.gridSettings.formatters | Where-Object columnMatch -eq 'LastSample').Count | Should -Be 0
+    }
+
+    It 'words the policy compliance note as a count of compliant evaluations, so it cannot be read as the value or as how many were evaluated' {
+        $query = ($arg | Where-Object name -eq 'arc-policy-tiles').content.query
+        $query | Should -Match "strcat\(Compliant, ' of ', Total, ' compliant'\)"
+        $query | Should -Not -Match "' evaluated'"
     }
 }
 

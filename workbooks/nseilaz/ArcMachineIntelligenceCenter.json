@@ -583,7 +583,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nlet Pct = DiskVolumes | union DiskAggregate | where Metric == 'Pct' | summarize arg_max(TimeGenerated, Value), LowestPct = min(Value), LastSample = max(TimeGenerated) by Volume | project Volume, FreePct = round(Value, 1), LowestPct = round(LowestPct, 1), LastSample;\nlet Free = DiskVolumes | where Metric == 'FreeMB' | summarize arg_max(TimeGenerated, Value), SizeMB = take_any(SizeMB) by Volume | project Volume, FreeGb = round(Value / 1024.0, 1), SizeMB;\nPct\n| join kind=leftouter Free on Volume\n| extend FreePctSafe = iff(FreePct > 0, FreePct, double(null))\n| extend SizeGb = round(iff(isnotnull(SizeMB), SizeMB / 1024.0, FreeGb / (FreePctSafe / 100.0)), 1)\n| extend FreeGb = iff(isnull(FreeGb) or FreeGb > 1000000, double(null), FreeGb)\n| extend SizeGb = iff(isnull(FreeGb), double(null), SizeGb)\n| extend Level = case(FreePct < 15, 'Low free space', FreePct < 30, 'Watch', 'Healthy')\n| project Volume, Level, FreePct, LowestPct, FreeGb, SizeGb, LastSample\n| order by FreePct asc",
+              "query": "let M = tolower(tostring(split('{Machine}', '/')[-1]));\nlet WindowStart = todatetime('{TimeRange:startISO}');\nlet WindowEnd = todatetime('{TimeRange:endISO}');\nlet WindowSpan = WindowEnd - WindowStart;\nlet Step = case(WindowSpan <= 6h, 10m, WindowSpan <= 2d, 1h, WindowSpan <= 8d, 2h, WindowSpan <= 16d, 6h, 12h);\nlet Num = (v:real, digits:int) { replace_regex(tostring(round(v, digits)), @\"\\.0+$\", \"\") };\nlet AgeText = (ts:datetime) {\n    let mins = datetime_diff('minute', now(), ts);\n    case(isnull(ts), 'none', mins < 2, 'just now', mins < 120, strcat(mins, ' min ago'), mins < 2880, strcat(Num(mins / 60.0, 1), ' h ago'), strcat(Num(mins / 1440.0, 1), ' d ago'))\n};\nlet DiskInsights = InsightsMetrics\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and Origin == 'vm.azm.ms' and Namespace == 'LogicalDisk' and Name in ('FreeSpacePercentage', 'FreeSpaceMB')\n| extend Volume = tostring(todynamic(Tags)['vm.azm.ms/mountId']), SizeMB = todouble(todynamic(Tags)['vm.azm.ms/diskSizeMB'])\n| where isnotempty(Volume)\n| project TimeGenerated, Volume, Metric = iff(Name == 'FreeSpacePercentage', 'Pct', 'FreeMB'), Value = todouble(Val), SizeMB;\nlet DiskPerfVolumes = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName in ('% Free Space', 'Free Megabytes')\n| where InstanceName !in ('_Total', 'total')\n| where not(InstanceName startswith '/snap/' or InstanceName startswith '/run' or InstanceName startswith '/dev' or InstanceName startswith '/sys' or InstanceName startswith '/proc' or InstanceName startswith '/var/lib/snapd' or InstanceName startswith '/var/snap')\n| project TimeGenerated, Volume = InstanceName, Metric = iff(CounterName == '% Free Space', 'Pct', 'FreeMB'), Value = todouble(CounterValue), SizeMB = double(null);\nlet DiskVolumes = union DiskInsights, DiskPerfVolumes;\nlet DiskAggregate = Perf\n| where TimeGenerated between (WindowStart .. WindowEnd) and Computer =~ M and ObjectName in ('Logical Disk', 'LogicalDisk') and CounterName == '% Free Space' and InstanceName in ('_Total', 'total')\n| where toscalar(DiskVolumes | take 1 | count) == 0\n| project TimeGenerated, Volume = 'All volumes (aggregate)', Metric = 'Pct', Value = todouble(CounterValue), SizeMB = double(null);\nlet Disk = union DiskVolumes, DiskAggregate;\nlet Pct = DiskVolumes | union DiskAggregate | where Metric == 'Pct' | summarize arg_max(TimeGenerated, Value), LowestPct = min(Value), LastSample = max(TimeGenerated) by Volume | project Volume, FreePct = round(Value, 1), LowestPct = round(LowestPct, 1), LastSample;\nlet Free = DiskVolumes | where Metric == 'FreeMB' | summarize arg_max(TimeGenerated, Value), SizeMB = take_any(SizeMB) by Volume | project Volume, FreeGb = round(Value / 1024.0, 1), SizeMB;\nPct\n| join kind=leftouter Free on Volume\n| extend FreePctSafe = iff(FreePct > 0, FreePct, double(null))\n| extend SizeGb = round(iff(isnotnull(SizeMB), SizeMB / 1024.0, FreeGb / (FreePctSafe / 100.0)), 1)\n| extend FreeGb = iff(isnull(FreeGb) or FreeGb > 1000000, double(null), FreeGb)\n| extend SizeGb = iff(isnull(FreeGb), double(null), SizeGb)\n| extend Level = case(FreePct < 15, 'Low free space', FreePct < 30, 'Watch', 'Healthy')\n| project Volume, Level, FreePct, LowestPct, FreeGb, SizeGb, LastSampleAge = AgeText(LastSample)\n| order by FreePct asc",
               "size": 3,
               "title": "Volumes",
               "description": "Colours: green is 30% free or more, yellow is 15 to 30%, red is under 15%.",
@@ -703,14 +703,10 @@
                     }
                   },
                   {
-                    "columnMatch": "LastSample",
-                    "formatter": 6,
+                    "columnMatch": "LastSampleAge",
+                    "formatter": 1,
                     "formatOptions": {
-                      "customColumnWidthSetting": "26fr"
-                    },
-                    "dateFormat": {
-                      "showUtcTime": null,
-                      "formatName": "shortDateTimeNoMsPattern"
+                      "customColumnWidthSetting": "16fr"
                     }
                   }
                 ],
@@ -734,7 +730,7 @@
                     "label": "Size GB"
                   },
                   {
-                    "columnId": "LastSample",
+                    "columnId": "LastSampleAge",
                     "label": "Last sample"
                   }
                 ]
@@ -810,7 +806,7 @@
               "size": 3,
               "title": "Open recommendations (top 20, highest severity first)",
               "noDataMessage": "No open recommendations for this machine. Either every assessed check is healthy, or Defender for Cloud has no assessments for it.",
-              "noDataMessageStyle": 4,
+              "noDataMessageStyle": 3,
               "queryType": 1,
               "resourceType": "microsoft.resourcegraph/resources",
               "crossComponentResources": [
@@ -938,7 +934,7 @@
               "size": 1,
               "title": "Changes over time",
               "noDataMessage": "No configuration changes recorded for this machine in the selected time range. Change Tracking needs the Azure Monitor Agent and the ChangeTracking extension.",
-              "noDataMessageStyle": 4,
+              "noDataMessageStyle": 3,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -977,7 +973,7 @@
               "size": 3,
               "title": "Recent changes (latest 20)",
               "noDataMessage": "No configuration changes recorded for this machine in the selected time range. Change Tracking needs the Azure Monitor Agent and the ChangeTracking extension.",
-              "noDataMessageStyle": 4,
+              "noDataMessageStyle": 3,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -1103,7 +1099,7 @@
               "size": 3,
               "title": "Arc-enabled SQL Server instances",
               "noDataMessage": "No Arc-enabled SQL Server instance is registered for this machine, even if SQL Server is running on it (the tiles above show what the Arc agent saw). One appears here once the Arc SQL extension (WindowsAgent.SqlServer) is installed and the instance registers.",
-              "noDataMessageStyle": 4,
+              "noDataMessageStyle": 3,
               "queryType": 1,
               "resourceType": "microsoft.resourcegraph/resources",
               "crossComponentResources": [
@@ -1218,7 +1214,7 @@
               "size": 3,
               "title": "Databases in those instances",
               "noDataMessage": "No databases to list because no Arc-enabled SQL Server instance is registered for this machine.",
-              "noDataMessageStyle": 4,
+              "noDataMessageStyle": 3,
               "queryType": 1,
               "resourceType": "microsoft.resourcegraph/resources",
               "crossComponentResources": [
@@ -1560,7 +1556,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend ResourceId = tolower(tostring(properties.resourceId)), Compliance = tostring(properties.complianceState)\n| where ResourceId contains '/microsoft.hybridcompute/machines/'\n| extend ResourceName = tostring(split(ResourceId, '/')[8])\n| where ResourceName == tolower(tostring(split('{Machine}', '/')[-1])) and Compliance in ('Compliant', 'NonCompliant', 'Conflict')\n| summarize Total = count(), Compliant = countif(Compliance == 'Compliant'), NonCompliant = countif(Compliance == 'NonCompliant')\n| project data = pack_array(\n    pack('Label', 'Policy compliance', 'Value', strcat(toint(round(100.0 * Compliant / Total, 0)), '%'), 'Note', strcat(Compliant, ' of ', Total, ' evaluated'), 'Order', 1),\n    pack('Label', 'Non-compliant', 'Value', tostring(NonCompliant), 'Note', 'policy evaluations failing', 'Order', 2),\n    pack('Label', 'Evaluations', 'Value', tostring(Total), 'Note', 'policy checks on this machine', 'Order', 3))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
+              "query": "policyresources\n| where type =~ 'microsoft.policyinsights/policystates'\n| extend ResourceId = tolower(tostring(properties.resourceId)), Compliance = tostring(properties.complianceState)\n| where ResourceId contains '/microsoft.hybridcompute/machines/'\n| extend ResourceName = tostring(split(ResourceId, '/')[8])\n| where ResourceName == tolower(tostring(split('{Machine}', '/')[-1])) and Compliance in ('Compliant', 'NonCompliant', 'Conflict')\n| summarize Total = count(), Compliant = countif(Compliance == 'Compliant'), NonCompliant = countif(Compliance == 'NonCompliant')\n| project data = pack_array(\n    pack('Label', 'Policy compliance', 'Value', strcat(toint(round(100.0 * Compliant / Total, 0)), '%'), 'Note', strcat(Compliant, ' of ', Total, ' compliant'), 'Order', 1),\n    pack('Label', 'Non-compliant', 'Value', tostring(NonCompliant), 'Note', 'policy evaluations failing', 'Order', 2),\n    pack('Label', 'Evaluations', 'Value', tostring(Total), 'Note', 'policy checks on this machine', 'Order', 3))\n| mv-expand data\n| project Label = tostring(data.Label), Value = tostring(data.Value), Note = tostring(data.Note), Order = toint(data.Order)\n| order by Order asc\n| project Label, Value, Note",
               "size": 3,
               "title": "Azure Policy",
               "noDataMessage": "Azure Policy has no evaluation results for this machine yet. Policy states appear after the first compliance scan (up to a day after assignment).",
@@ -1597,7 +1593,7 @@
               "size": 3,
               "title": "Non-compliant policies",
               "noDataMessage": "No non-compliant policies for this machine: every evaluated policy passes, or none has been evaluated yet (see the Azure Policy tile above).",
-              "noDataMessageStyle": 4,
+              "noDataMessageStyle": 3,
               "queryType": 1,
               "resourceType": "microsoft.resourcegraph/resources",
               "crossComponentResources": [
@@ -1748,7 +1744,7 @@
               "size": 1,
               "title": "Errors and warnings over time",
               "noDataMessage": "No error or warning events from this machine in the selected time range. Either it is healthy, or it sends no Event or Syslog data (no Azure Monitor Agent).",
-              "noDataMessageStyle": 4,
+              "noDataMessageStyle": 3,
               "timeContextFromParameter": "TimeRange",
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
