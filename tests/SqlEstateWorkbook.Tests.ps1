@@ -138,6 +138,15 @@ Describe 'SQL Estate Dashboard is honest about what it can and cannot show' {
         }
     }
 
+    It 'shows an expected or good-news empty result in the blue info style and keeps the amber warning box for an absence that is itself a finding' {
+        $calm = 'workload-locks', 'workload-incidents', 'workload-alerts'
+        foreach ($name in $calm) { @($queries | Where-Object name -eq $name).Count | Should -Be 1 -Because "$name must exist" }
+        foreach ($item in $queries) {
+            $expected = if ($item.name -in $calm) { 3 } else { 4 }
+            $item.content.noDataMessageStyle | Should -Be $expected -Because "$($item.name): style 3 is the info style and 4 the amber warning box, which reads as a fault"
+        }
+    }
+
     It 'follows the time range on every Log Analytics tile and never on Resource Graph tiles' {
         foreach ($item in $la) { $item.content.timeContextFromParameter | Should -Be 'TimeRange' -Because $item.name }
         foreach ($item in $arg) { $item.content.PSObject.Properties.Name | Should -Not -Contain 'timeContextFromParameter' -Because $item.name }
@@ -184,10 +193,18 @@ Describe 'SQL Estate Dashboard renders cleanly in the portal' {
         $charts = @($la | Where-Object { $_.name -like 'workload-*' -and $_.content.visualization -ne 'table' })
         $charts.Count | Should -Be 3
         foreach ($item in $charts) {
-            $item.content.visualization | Should -Be 'barchart' -Because $item.name
+            $item.content.visualization | Should -BeIn 'barchart', 'unstackedbar' -Because $item.name
             $item.content.chartSettings.showMetrics | Should -BeFalse -Because "$($item.name) must not show (Sum) totals"
         }
         $raw | Should -Not -Match '"visualization":\s*"timechart"'
+    }
+
+    It 'draws lock timeouts and recoveries side by side, not stacked, because a stacked total of the two matches no tile' {
+        ($la | Where-Object name -eq 'workload-locks').content.visualization | Should -Be 'unstackedbar'
+        foreach ($name in 'workload-commits', 'workload-latency') {
+            ($la | Where-Object name -eq $name).content.visualization | Should -Be 'barchart' -Because "$name has one series, so nothing can stack"
+        }
+        @(($la | Where-Object name -eq 'workload-locks').content.chartSettings.seriesLabelSettings).Count | Should -Be 2
     }
 
     It 'plots latency as one series so columns can never be misread as a stack of an average on a maximum' {

@@ -63,9 +63,12 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   silent interval is a blank gap, never a zero or a straight line; threshold lines are named in the chart
   title. Grids size every column in `fr` units (short columns fixed at the header plus a few characters,
   one long column flexible) so they fit any tile width without a horizontal scrollbar, tables use the Full
-  size (a Small table reserves a block of blank space under it), datetimes show as local date and time, and
+  size (a Small table reserves a block of blank space under it), datetimes show as local date and time (the
+  Volumes grid shows the last sample as a relative age like the other grids), and
   the non-compliant policy grid names the built-in policies and initiatives that Arc machines evaluate here
-  (an unknown definition falls back to its reference ID). `tests/MachineIntelligenceWorkbook.Tests.ps1`
+  (an unknown definition falls back to its reference ID). An expected or good-news empty result, such as no
+  Arc SQL instance on this machine, uses the blue info style (`noDataMessageStyle` 3); the amber warning box
+  (4) is kept for an absence that is itself a finding. `tests/MachineIntelligenceWorkbook.Tests.ps1`
   guards it.
 - SQL Estate Dashboard is reworked for the lab, not a snapshot: the Arc inventory (instance, version,
   edition, licence and the databases of registered instances only) sits beside the monitored SQL
@@ -73,7 +76,9 @@ refresh silently reverts them (`tests/OriginalWorkbooks.Tests.ps1` guards them):
   lock-timeout alert rule. The nested Arc SQL instance is labelled experimental and unsupported,
   Defender is shown as Arc reports it with no claim, the edition, version and licence mixes are tiles that
   understand Arc SQL text values such as `SQL Server 2022` and `Free`, the three workload charts are
-  column charts with short titles and legends, grids use `fr` column widths so none scrolls sideways, and
+  column charts with short titles and legends (the lock chart is unstacked, so a timeout and its recovery
+  sit side by side instead of adding up to a number that matches no tile), grids use `fr` column widths so
+  none scrolls sideways, and
   its Log Analytics tiles carry no workspace picker (Phase 11 pins them at publish). The BPA tiles read
   `SqlAssessment_CL` only through a guarded union: a hidden `BpaMode` dropdown shows them when assessment
   data exists and otherwise shows one "not enabled in this lab" note, so there are no empty tiles and no
