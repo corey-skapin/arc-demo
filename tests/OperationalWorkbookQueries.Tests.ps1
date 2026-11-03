@@ -115,6 +115,9 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             emptyScenario = New-FixtureRequest 'opt-scenario'
             emptyScenarioResult = New-FixtureRequest 'opt-scenario-result'
             methodMatrix = New-FixtureRequest 'cap-method-matrix'
+            # The activity heat map and the independent per-hour counts it is checked against.
+            heatmap = New-FixtureRequest 'opt-sched-heatmap'
+            hourly = New-FixtureRequest 'test-hourly' -QueryRoot $wideRoot
         }
         # Read-only queries run a few at a time: the service allows only a handful of concurrent queries per user.
         $uri = "https://api.loganalytics.io/v1/workspaces/$($workspace.properties.customerId)/query"
@@ -166,6 +169,8 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $guestScenario = @($results.guestScenario) + @($results.guestScenarioResult)
         $emptyScenario = @($results.emptyScenario) + @($results.emptyScenarioResult)
         $methodMatrix = $results.methodMatrix
+        $heatmap = $results.heatmap
+        $hourly = $results.hourly
     }
 
     AfterAll {
@@ -503,6 +508,52 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             foreach ($name in 'invalid', 'pressure', 'spike') { (Get-Fixture $candidates $name).NotReporting | Should -Be 'Not flagged' }
             (Get-Fixture $candidates 'parked').Why | Should -Match 'stale does not mean safe to delete'
             (Get-Fixture $candidates 'missing').Why | Should -Match 'does not mean safe to delete'
+        }
+    }
+
+    Context 'Activity heat map' {
+        It 'shows twelve two-hour blocks and no hourly column' {
+            $heatmap.Count | Should -BeGreaterThan 0
+            @($heatmap[0].PSObject.Properties.Name) | Should -Be (@('Machine', 'IdleSharePct') + @(0..11 | ForEach-Object { 'B{0:00}' -f $_ }))
+        }
+
+        It 'fills each block with the average of every sample in its two local hours, blank only when neither hour has any' {
+            $hourly.Count | Should -BeGreaterThan 0
+            foreach ($row in $heatmap) {
+                foreach ($block in 0..11) {
+                    $cell = $row.('B{0:00}' -f $block)
+                    $reporting = @($hourly | Where-Object { $_.Machine -eq $row.Machine -and $_.Hr -in @((2 * $block), (2 * $block + 1)) -and $_.N -gt 0 })
+                    $because = "$($row.Machine) block $block covers hours $(2 * $block) and $(2 * $block + 1)"
+                    if (-not $reporting.Count) {
+                        $cell | Should -BeNullOrEmpty -Because "$because has no samples: unknown, never zero"
+                        continue
+                    }
+                    $samples = ($reporting | Measure-Object -Property N -Sum).Sum
+                    $expected = (($reporting | ForEach-Object { $_.N * $_.Avg } | Measure-Object -Sum).Sum) / $samples
+                    $cell | Should -Not -BeNullOrEmpty -Because "$because has samples"
+                    [math]::Abs([double]$cell - $expected) | Should -BeLessOrEqual 0.5000001 -Because "$because averages to $expected and the cell is rounded to a whole percent"
+                }
+            }
+        }
+
+        It 'shows a block with one reporting hour as that hour and leaves every other block of a short history blank' {
+            # short has about an hour of samples: one or two local hours, so one or two blocks, whatever time the test runs.
+            $blocks = @($hourly | Where-Object { $_.Machine -eq 'short' -and $_.N -gt 0 } | ForEach-Object { [math]::Floor($_.Hr / 2) } | Sort-Object -Unique)
+            $blocks.Count | Should -BeIn 1, 2
+            $row = Get-Fixture $heatmap 'short'
+            foreach ($block in 0..11) {
+                $cell = $row.('B{0:00}' -f $block)
+                if ($block -in $blocks) { $cell | Should -Be 1 -Because "short reports a constant 1% in block $block" } else { $cell | Should -BeNullOrEmpty }
+            }
+        }
+
+        It 'leaves a machine with no telemetry blank in every block and lets a busy hour show in its block' {
+            $row = Get-Fixture $heatmap 'missing'
+            foreach ($block in 0..11) { $row.('B{0:00}' -f $block) | Should -BeNullOrEmpty }
+            $pressure = Get-Fixture $heatmap 'pressure'
+            $cells = @(0..11 | ForEach-Object { $pressure.('B{0:00}' -f $_) })
+            @($cells | Where-Object { $null -eq $_ }).Count | Should -Be 0 -Because 'pressure reports all day for a week'
+            @($cells | Select-Object -Unique).Count | Should -BeGreaterThan 1 -Because 'one hour of sustained CPU raises its block above the rest'
         }
     }
 

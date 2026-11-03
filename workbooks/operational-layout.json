@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Portal layout for the Capacity and Optimisation workbooks, applied by the generator after the query tokens are resolved. Grids: every column is a proportional fr width (the fr widths add up to 115 or less) and a header never needs more than its width; the one exception is the 24 narrow cells of the activity heat map, which are fixed characters (ch) because a flexible column cannot shrink below the portal's minimum; each is eight characters, the least that shows a two-digit hour header with its sort arrow. Tables of up to 50 rows use the Full size so a short table leaves no blank band. Plain whole numbers carry no number format (the Count unit abbreviates 3,000 to 3 K). Charts: column charts with null gaps (parked time is blank, never zero) and no legend totals. Tiles: no palette colour, at most four per row, big numerals for counts. status columns reuse the colour rules of the template.",
+  "description": "Portal layout for the Capacity and Optimisation workbooks, applied by the generator after the query tokens are resolved. Grids: every column is a proportional fr width (the fr widths add up to 115 or less) and a header never needs more than its width; the one exception is the 12 two-hour cells of the activity heat map, which are fixed characters (ch) because a flexible column cannot shrink below the portal's minimum; each is eleven characters, its five-character header (00-01) plus six for the sort arrow and padding, so the fixed columns total 147 and the heat map fits anything wider than about 1,300 px. Tables of up to 50 rows use the Full size so a short table leaves no blank band. Plain whole numbers carry no number format (the Count unit abbreviates 3,000 to 3 K). Charts: column charts with null gaps (parked time is blank, never zero) and no legend totals. Tiles: no palette colour, at most four per row, big numerals for counts. status columns reuse the colour rules of the template.",
   "capacity": {
     "scope-tiles": { "tiles": { "value": "number" } },
     "overview-tiles": { "tiles": { "value": "number" } },
@@ -216,7 +216,7 @@
         "columns": [
           { "name": "Machine", "kind": "text", "width": 1 },
           { "name": "IdleSharePct", "kind": "pct", "palette": "blueDark", "label": "Idle share", "width": 15, "unit": "ch" },
-          { "repeat": { "from": 0, "to": 23, "name": "H{0:00}", "label": "{0:00}" }, "kind": "heat", "palette": "blue", "width": 8, "unit": "ch" }
+          { "repeat": { "from": 0, "to": 11, "span": 2, "name": "B{0:00}", "label": "{1:00}-{2:00}" }, "kind": "heat", "palette": "blue", "width": 11, "unit": "ch" }
         ]
       }
     },

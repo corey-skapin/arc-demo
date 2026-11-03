@@ -1,21 +1,19 @@
 // include: candidates, schedule
-// Observed activity by local hour of day (average CPU, shared 0-100 scale). Blank cells are hours with no samples: unknown, not idle.
+// Observed activity by local two-hour block of day (average CPU, shared 0-100 scale). A block is the average of every sample in its two local hours, so a block with only
+// one reporting hour still shows that hour. Blank cells are blocks with no samples in either hour: unknown, not idle. Idle share is counted per hour by the candidates fragment.
 let Clean = (v:real) { iff(isnan(v), real(null), v) };
-let Hourly = Samples
+let Blocks = Samples
 | where Metric == "CPU percent" and isnotnull(Value)
 | extend Hr = hourofday(TimeGenerated + UtcOffset)
-| summarize H00 = round(avgif(Value, Hr == 0), 0), H01 = round(avgif(Value, Hr == 1), 0), H02 = round(avgif(Value, Hr == 2), 0), H03 = round(avgif(Value, Hr == 3), 0),
-    H04 = round(avgif(Value, Hr == 4), 0), H05 = round(avgif(Value, Hr == 5), 0), H06 = round(avgif(Value, Hr == 6), 0), H07 = round(avgif(Value, Hr == 7), 0),
-    H08 = round(avgif(Value, Hr == 8), 0), H09 = round(avgif(Value, Hr == 9), 0), H10 = round(avgif(Value, Hr == 10), 0), H11 = round(avgif(Value, Hr == 11), 0),
-    H12 = round(avgif(Value, Hr == 12), 0), H13 = round(avgif(Value, Hr == 13), 0), H14 = round(avgif(Value, Hr == 14), 0), H15 = round(avgif(Value, Hr == 15), 0),
-    H16 = round(avgif(Value, Hr == 16), 0), H17 = round(avgif(Value, Hr == 17), 0), H18 = round(avgif(Value, Hr == 18), 0), H19 = round(avgif(Value, Hr == 19), 0),
-    H20 = round(avgif(Value, Hr == 20), 0), H21 = round(avgif(Value, Hr == 21), 0), H22 = round(avgif(Value, Hr == 22), 0), H23 = round(avgif(Value, Hr == 23), 0)
+| summarize B00 = round(avgif(Value, Hr in (0, 1)), 0), B01 = round(avgif(Value, Hr in (2, 3)), 0), B02 = round(avgif(Value, Hr in (4, 5)), 0),
+    B03 = round(avgif(Value, Hr in (6, 7)), 0), B04 = round(avgif(Value, Hr in (8, 9)), 0), B05 = round(avgif(Value, Hr in (10, 11)), 0),
+    B06 = round(avgif(Value, Hr in (12, 13)), 0), B07 = round(avgif(Value, Hr in (14, 15)), 0), B08 = round(avgif(Value, Hr in (16, 17)), 0),
+    B09 = round(avgif(Value, Hr in (18, 19)), 0), B10 = round(avgif(Value, Hr in (20, 21)), 0), B11 = round(avgif(Value, Hr in (22, 23)), 0)
     by ResourceId;
 Candidates
-| lookup kind=leftouter Hourly on ResourceId
+| lookup kind=leftouter Blocks on ResourceId
 | sort by (EnvironmentClass == "Non-production (tag)") desc, Machine asc
-// avgif over an hour with no samples is NaN: turn it into a null so the cell is blank, not the text NaN.
+// avgif over a block with no samples is NaN: turn it into a null so the cell is blank, not the text NaN.
 | project Machine, IdleSharePct,
-    H00 = Clean(H00), H01 = Clean(H01), H02 = Clean(H02), H03 = Clean(H03), H04 = Clean(H04), H05 = Clean(H05), H06 = Clean(H06), H07 = Clean(H07),
-    H08 = Clean(H08), H09 = Clean(H09), H10 = Clean(H10), H11 = Clean(H11), H12 = Clean(H12), H13 = Clean(H13), H14 = Clean(H14), H15 = Clean(H15),
-    H16 = Clean(H16), H17 = Clean(H17), H18 = Clean(H18), H19 = Clean(H19), H20 = Clean(H20), H21 = Clean(H21), H22 = Clean(H22), H23 = Clean(H23)
+    B00 = Clean(B00), B01 = Clean(B01), B02 = Clean(B02), B03 = Clean(B03), B04 = Clean(B04), B05 = Clean(B05),
+    B06 = Clean(B06), B07 = Clean(B07), B08 = Clean(B08), B09 = Clean(B09), B10 = Clean(B10), B11 = Clean(B11)
