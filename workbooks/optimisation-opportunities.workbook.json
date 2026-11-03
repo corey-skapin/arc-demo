@@ -1267,8 +1267,8 @@
               "version": "KqlItem/1.0",
               "query": "__QUERY:opt-sched-heatmap__",
               "size": 0,
-              "title": "Observed activity by local hour of day (average CPU %, shared 0-100 scale)",
-              "description": "Darker = busier. A blank cell is an hour with no samples: unknown, not idle. Idle hours = full hours with average CPU below 5%.",
+              "title": "Observed activity by local two-hour block (average CPU %, shared 0-100 scale)",
+              "description": "Darker = busier. Each column is a two-hour block of the local day (00-01 is midnight to 02:00) and a cell is the average CPU of every sample in its two hours. A blank cell is a block with no samples in either hour: unknown, not idle. Idle share counts full hours, not blocks, with average CPU below 5%.",
               "noDataMessage": "No machines match the current filters.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
@@ -1329,7 +1329,7 @@
                     }
                   },
                   {
-                    "columnMatch": "H00|H01|H02|H03|H04|H05|H06|H07|H08|H09|H10|H11|H12|H13|H14|H15|H16|H17|H18|H19|H20|H21|H22|H23",
+                    "columnMatch": "B00|B01|B02|B03|B04|B05|B06|B07|B08|B09|B10|B11",
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "blue",

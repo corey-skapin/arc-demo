@@ -402,7 +402,7 @@ function Set-DemoJsonProperty {
 
 function New-DemoGridColumn {
     # One grid column formatter. Widths are proportional fr units, so a grid fits any container instead of pushing columns off screen.
-    # A column may ask for fixed characters (ch) instead: the 24 narrow cells of a heat map cannot shrink below the portal's minimum for a flexible column.
+    # A column may ask for fixed characters (ch) instead: the narrow cells of a heat map cannot shrink below the portal's minimum for a flexible column.
     param([Parameter(Mandatory)]$Column, [Parameter(Mandatory)][string]$Name, $TemplateFormatter)
     $unit = if ($Column.PSObject.Properties.Name -contains 'unit') { [string]$Column.unit } else { 'fr' }
     if ($unit -notin 'fr', 'ch') { throw "Unknown width unit '$unit' for column $Name." }
@@ -473,7 +473,13 @@ function Set-DemoTableLayout {
     foreach ($column in $Table.columns) {
         $hasRepeat = $column.PSObject.Properties.Name -contains 'repeat'
         $expanded = if ($hasRepeat) {
-            @($column.repeat.from..$column.repeat.to | ForEach-Object { @{ Name = [string]::Format($column.repeat.name, $_); Label = [string]::Format($column.repeat.label, $_) } })
+            # A repeated column may cover several hours (span): {0} is the block number, {1} its first hour and {2} its last, so a two-hour block reads 00-01, 02-03 and so on.
+            $span = if ($column.repeat.PSObject.Properties.Name -contains 'span') { [int]$column.repeat.span } else { 1 }
+            if ($span -lt 1) { throw "Repeat span for $($column.repeat.name) must be at least 1." }
+            @($column.repeat.from..$column.repeat.to | ForEach-Object {
+                    $first = $_ * $span
+                    @{ Name = [string]::Format($column.repeat.name, $_); Label = [string]::Format($column.repeat.label, $_, $first, $first + $span - 1) }
+                })
         } else {
             @(@{ Name = [string]$column.name; Label = $(if ($column.PSObject.Properties.Name -contains 'label') { [string]$column.label } else { '' }) })
         }

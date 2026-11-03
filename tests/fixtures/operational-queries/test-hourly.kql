@@ -1,0 +1,10 @@
+// include: candidates, schedule
+// Test only, never shipped in a workbook: the per-hour sample counts and averages behind the two-hour blocks of the activity heat map.
+// The heat-map test recomputes every block from these rows, so the block logic is checked against the same samples without trusting its own aggregation.
+Samples
+| where Metric == "CPU percent" and isnotnull(Value)
+| extend Hr = hourofday(TimeGenerated + UtcOffset)
+| summarize N = count(), Avg = avg(Value) by ResourceId, Hr
+| lookup (Candidates | project ResourceId, Machine) on ResourceId
+| where isnotempty(Machine)
+| project Machine, Hr, N, Avg
