@@ -159,7 +159,7 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
         }
     }
 
-    It '<Name>: shows a positive empty state in the info style, never the amber warning box' -ForEach $books {
+    It '<Name>: shows a positive empty state in the green success style (3), never the amber warning triangle (4)' -ForEach $books {
         foreach ($query in Read-Queries $Path | Where-Object { $_.content.noDataMessage -match '^Good news' }) {
             $query.content.noDataMessageStyle | Should -Be 3 -Because $query.content.title
         }

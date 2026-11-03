@@ -16,6 +16,11 @@ BeforeAll {
     $la = @($queries | Where-Object { $_.content.queryType -eq 0 })
     $parameters = @($items | Where-Object { $_.type -eq 9 } | ForEach-Object { $_.content.parameters })
 
+    # noDataMessageStyle as the portal draws it (read from a probe workbook): omitted or 1 the blue info box, 2 lilac (upsell),
+    # 3 green (success), 4 amber with a warning triangle, 5 red (error).
+    $infoStyle = 1
+    $warnStyle = 4
+
     # Column names of a query's last top-level "| project" clause (null when the query does not end in a project).
     function Get-ProjectedColumn([string]$Query) {
         $index = $Query.LastIndexOf('| project ')
@@ -120,12 +125,12 @@ Describe 'Machine Intelligence Center never shows a silent blank' {
         }
     }
 
-    It 'shows an expected or good-news empty result in the blue info style and keeps the amber warning box for an absence that is itself a finding' {
+    It 'shows an expected or good-news empty result in the blue info style and keeps the amber warning triangle for an absence that is itself a finding' {
         $calm = 'security-open', 'software-chart', 'software-table', 'sql-instances', 'sql-databases', 'arc-policy-table', 'events-chart'
         foreach ($name in $calm) { @($queries | Where-Object name -eq $name).Count | Should -Be 1 -Because "$name must exist" }
         foreach ($item in $queries) {
-            $expected = if ($item.name -in $calm) { 3 } else { 4 }
-            $item.content.noDataMessageStyle | Should -Be $expected -Because "$($item.name): style 3 is the info style and 4 the amber warning box, which reads as a fault"
+            $expected = if ($item.name -in $calm) { $infoStyle } else { $warnStyle }
+            $item.content.noDataMessageStyle | Should -Be $expected -Because "$($item.name): the amber warning triangle (4) reads as a fault, so it is only for an absence that is itself a finding; the blue info box is 1"
         }
     }
 

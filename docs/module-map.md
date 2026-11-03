@@ -131,8 +131,8 @@ widths that add up to at most 115 characters, so a grid fits its container inste
 screen, with each header fitting its column; date/time columns in local time and wide enough for the AM/PM;
 percentage columns as solid red, amber and green cells printed with a % sign (a heat-map cell puts dark text on dark red); small grids that fit their rows instead of reserving a fixed 330 px
 band; grouped bar charts that name their category column; percentage charts on a 0 to 100 axis with a % unit;
-chart legends without the `(Sum)` totals that page through the categories; a positive empty state in the info
-style instead of the amber warning box). Count tiles in the three rebuilt workbooks carry no palette colour,
+chart legends without the `(Sum)` totals that page through the categories; a positive empty state in the green
+success style (3) instead of the amber warning triangle (4)). Count tiles in the three rebuilt workbooks carry no palette colour,
 because the auto palette colours by position and a failing count could read teal or a passing one purple;
 red-to-green colour comes only from the percentage tiles and the status icons.
 Resource Graph allows at most two tables per query and never the security and patch tables together, so the

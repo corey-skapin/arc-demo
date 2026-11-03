@@ -250,7 +250,7 @@ Describe 'Scoped operational workbook rendering' {
         @($problems) | Should -BeNullOrEmpty
     }
 
-    It 'gives every query item a clear empty state, amber only where absence is itself a finding, for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+    It 'gives every query item a clear empty state, the red error style (5) only where absence is itself a finding, for <Purpose>' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
         $book = (Get-DemoOperationalWorkbook -Purpose $Purpose -WorkspaceResourceId $workspaceId -Machines $machines).SerializedData | ConvertFrom-Json -Depth 100
         $warningAllowed = @('cpu-p95', 'cpu-peak', 'detail-cpu-p95', 'detail-cpu-peak', 'arc-status', 'own-grid')
         $items = @(Get-WorkbookItems $book.items | Where-Object { $_.type -eq 3 })
