@@ -234,9 +234,12 @@ rendered. The rules, each enforced by `tests/OperationalWorkbooksLayout.Tests.ps
   are bounded: one row per machine of the 50-machine roster, or an explicit `take`. Every column is a proportional `fr`
   width, so a grid fits any container instead of pushing columns off screen; the widths add up to at most 115, each header
   fits its column, and one long column takes the room. The one exception is the activity heat map: its 24 hour cells are
-  fixed at six characters each, because a flexible column cannot shrink below the portal's minimum and 24 of them overflow
-  even a very wide screen; the machine column takes the width that is left. Status columns keep the colour rules written in
-  the template.
+  fixed at eight characters each, because a flexible column cannot shrink below the portal's minimum and 24 of them overflow
+  even a very wide screen; the machine column takes the width that is left. Eight is the least that shows a two-digit hour
+  header with its sort arrow and padding (six showed only the first digit of every hour in the portal). The 24 cells and the
+  15-character *Idle share* column add up to 207 characters; the 24 cells measure about 1,700 px in the portal, so the heat
+  map should fit a 1,920 px wide screen and scrolls horizontally on a narrower one. Status columns keep the colour rules
+  written in the template.
 - **Numbers** are one format per column: percentages are bars on a fixed 0 to 100 scale that print one decimal. In
   *Capacity and headroom* load runs green to red and free space red to green; in *Optimisation opportunities* the bars are a
   neutral blue, because low utilisation is the flag there and not a health signal. Whole numbers carry no number format (the
@@ -276,7 +279,7 @@ tag changes or a newly onboarded nested guest.
 - Offline Pester (`tests/OperationalWorkbooks.Tests.ps1`) covers rendering, scoping, roster and topology rules, size bounds,
   draft handling, sibling links, the documented icon, colour and palette names, empty-state styles and scenario arithmetic.
 - `tests/OperationalWorkbooksLayout.Tests.ps1` guards the portal layout offline: fr widths and headers that fit (and the
-  heat map's fixed hour cells), Full-size bounded tables, percentage and number formats with the right colour direction,
+  heat map's fixed hour cells, at least eight characters so a two-digit header is not cut to its first digit), Full-size bounded tables, percentage and number formats with the right colour direction,
   local times, column charts with null gaps and no legend totals, colourless tiles with at most four per row, big-numeral scope
   tiles, the scenario's two rows and caption length, parameter label length, the coverage matrix colours, the layout pass's
   refusals and the display-offset label.

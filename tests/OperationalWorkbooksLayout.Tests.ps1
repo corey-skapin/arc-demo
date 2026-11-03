@@ -48,20 +48,23 @@ Describe 'Operational workbooks lay out cleanly in the portal' {
             }
             $sum | Should -BeLessOrEqual $budget -Because "${title}: the column widths add up to $sum"
             if ($fixed) {
-                $fixed | Should -BeLessOrEqual 175 -Because "${title}: the fixed columns add up to $fixed characters"
+                $fixed | Should -BeLessOrEqual 215 -Because "${title}: the fixed columns add up to $fixed characters, and a wider heat map scrolls even on a 1,920 px screen"
                 $sum | Should -BeGreaterThan 0 -Because "${title}: one flexible column must take the width that is left"
             }
         }
     }
 
-    It 'gives the activity heat map 24 narrow fixed hour cells and lets the machine column take the rest' {
+    It 'gives the activity heat map 24 fixed hour cells that hold a two-digit header and its sort arrow, and lets the machine column take the rest' {
         $item = Get-Table optimisation | Where-Object name -eq 'sched-heatmap'
         $hours = @(Get-Formatter $item | Where-Object { $_.columnMatch -match '^H\d\d$' })
         $hours.Count | Should -Be 24
-        foreach ($hour in $hours) {
-            $hour.formatOptions.customColumnWidthSetting | Should -Be '6ch'
-            (Get-Label $item $hour) | Should -Match '^\d\d$'
-        }
+        $widths = @($hours | ForEach-Object { $_.formatOptions.customColumnWidthSetting })
+        @($widths | Select-Object -Unique).Count | Should -Be 1 -Because 'the 24 hours read as one even scale'
+        $widths[0] | Should -Match '^\d+ch$'
+        $characters = [int]($widths[0] -replace 'ch$', '')
+        $characters | Should -BeGreaterOrEqual 8 -Because 'six characters showed only the first digit of every hour in the portal: a two-digit header, its sort arrow and the cell padding need header + 6'
+        $characters | Should -BeLessOrEqual 9 -Because '24 cells wider than nine characters scroll even on a 1,920 px screen'
+        foreach ($hour in $hours) { (Get-Label $item $hour) | Should -Match '^\d\d$' }
         $machine = Get-Formatter $item | Where-Object columnMatch -eq 'Machine'
         $machine.formatOptions.customColumnWidthSetting | Should -Be '1fr'
         $idle = Get-Formatter $item | Where-Object columnMatch -eq 'IdleSharePct'
@@ -76,8 +79,8 @@ Describe 'Operational workbooks lay out cleanly in the portal' {
                 # The flexible machine column of the heat map takes whatever width is left, which is far more than its header needs.
                 if ($item.name -eq 'sched-heatmap' -and $formatter.columnMatch -eq 'Machine') { continue }
                 $width = [int]($setting -replace '(fr|ch)$', '')
-                # The 24 hour cells of the activity heat map are a two-digit header over a narrow cell.
-                $needed = if ($formatter.columnMatch -match '^H\d\d$') { $label.Length + 4 } else { $label.Length + 5 }
+                # A two-digit hour header needs its sort arrow and the cell padding as well, so it gets header + 6 like the Estate grids (header + 4, six characters, showed only the first digit in the portal).
+                $needed = if ($formatter.columnMatch -match '^H\d\d$') { $label.Length + 6 } else { $label.Length + 5 }
                 $needed | Should -BeLessOrEqual $width -Because "$($item.content.title): header '$label' is cut off at $setting"
             }
         }
