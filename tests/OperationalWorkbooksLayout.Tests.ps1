@@ -13,6 +13,10 @@ BeforeAll {
         foreach ($item in @($Items)) { $item; if ($item.type -eq 12) { Get-WorkbookItem $item.content.items } }
     }
     function Get-QueryItem($Purpose) { @(Get-WorkbookItem $books[$Purpose].items | Where-Object { $_.type -eq 3 }) }
+    function Get-JsonNode($Node) {
+        if ($Node -is [System.Collections.IList]) { foreach ($child in $Node) { Get-JsonNode $child } }
+        elseif ($Node -is [pscustomobject]) { $Node; foreach ($property in $Node.PSObject.Properties) { Get-JsonNode $property.Value } }
+    }
     function Get-Table($Purpose) { @(Get-QueryItem $Purpose | Where-Object { $_.content.visualization -eq 'table' }) }
     function Get-Formatter($Item) { foreach ($formatter in @($Item.content.gridSettings.formatters)) { if ($formatter) { $formatter } } }
     function Get-Label($Item, $Formatter) {
@@ -34,23 +38,47 @@ Describe 'Operational workbooks lay out cleanly in the portal' {
             $title = $item.content.title
             $budget = if ($item.customWidth -and [int]$item.customWidth -le 50) { 58 } else { 115 }
             $sum = 0
+            $fixed = 0
             foreach ($formatter in Get-Formatter $item) {
                 $width = $formatter.formatOptions.customColumnWidthSetting
+                # The 24 narrow cells of the activity heat map are fixed characters: a flexible column cannot shrink below the portal's minimum, so 24 of them overflow even a very wide screen.
+                if ($item.name -eq 'sched-heatmap' -and $width -match '^\d+ch$') { $fixed += [int]($width -replace 'ch$', ''); continue }
                 $width | Should -Match '^\d+fr$' -Because "${title}: $($formatter.columnMatch) needs an fr width, because fixed ch widths overflow a narrow container and push columns off screen"
                 $sum += [int]($width -replace 'fr$', '')
             }
             $sum | Should -BeLessOrEqual $budget -Because "${title}: the column widths add up to $sum"
+            if ($fixed) {
+                $fixed | Should -BeLessOrEqual 175 -Because "${title}: the fixed columns add up to $fixed characters"
+                $sum | Should -BeGreaterThan 0 -Because "${title}: one flexible column must take the width that is left"
+            }
         }
+    }
+
+    It 'gives the activity heat map 24 narrow fixed hour cells and lets the machine column take the rest' {
+        $item = Get-Table optimisation | Where-Object name -eq 'sched-heatmap'
+        $hours = @(Get-Formatter $item | Where-Object { $_.columnMatch -match '^H\d\d$' })
+        $hours.Count | Should -Be 24
+        foreach ($hour in $hours) {
+            $hour.formatOptions.customColumnWidthSetting | Should -Be '6ch'
+            (Get-Label $item $hour) | Should -Match '^\d\d$'
+        }
+        $machine = Get-Formatter $item | Where-Object columnMatch -eq 'Machine'
+        $machine.formatOptions.customColumnWidthSetting | Should -Be '1fr'
+        $idle = Get-Formatter $item | Where-Object columnMatch -eq 'IdleSharePct'
+        (Get-Label $item $idle) | Should -Be 'Idle share' -Because 'the column holds a percentage of hours, so a label of Idle hours reads like a count'
     }
 
     It '<Purpose>: gives every column a header that is not cut off' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
         foreach ($item in Get-Table $Purpose) {
             foreach ($formatter in Get-Formatter $item) {
                 $label = Get-Label $item $formatter
-                $width = [int]($formatter.formatOptions.customColumnWidthSetting -replace 'fr$', '')
-                # The 24 hour columns of the activity heat map are two digits over a three-character cell.
-                $needed = if ($formatter.columnMatch -match '^H\d\d$') { $label.Length } else { $label.Length + 5 }
-                $needed | Should -BeLessOrEqual $width -Because "$($item.content.title): header '$label' is cut off at ${width}fr"
+                $setting = $formatter.formatOptions.customColumnWidthSetting
+                # The flexible machine column of the heat map takes whatever width is left, which is far more than its header needs.
+                if ($item.name -eq 'sched-heatmap' -and $formatter.columnMatch -eq 'Machine') { continue }
+                $width = [int]($setting -replace '(fr|ch)$', '')
+                # The 24 hour cells of the activity heat map are a two-digit header over a narrow cell.
+                $needed = if ($formatter.columnMatch -match '^H\d\d$') { $label.Length + 4 } else { $label.Length + 5 }
+                $needed | Should -BeLessOrEqual $width -Because "$($item.content.title): header '$label' is cut off at $setting"
             }
         }
     }
@@ -95,13 +123,24 @@ Describe 'Operational workbooks lay out cleanly in the portal' {
         }
     }
 
-    It '<Purpose>: prints plain numbers with one consistent decimal format' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+    It '<Purpose>: prints whole numbers plain and fractions to at most one decimal, never padded and never abbreviated' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        $formats = 0
         foreach ($item in Get-Table $Purpose) {
             foreach ($formatter in Get-Formatter $item | Where-Object { $_.PSObject.Properties['numberFormat'] -and $_.formatter -eq 1 }) {
+                $formats++
+                $formatter.numberFormat.unit | Should -Be 0 -Because "$($item.content.title): $($formatter.columnMatch) must not use the Count unit, which abbreviates 3,000 to 3 K beside a plain 747"
                 $options = $formatter.numberFormat.options
-                $options.minimumFractionDigits | Should -Be $options.maximumFractionDigits -Because "$($item.content.title): $($formatter.columnMatch) pads every value to the same decimals"
-                $options.maximumFractionDigits | Should -BeIn 0, 1
+                $options.minimumFractionDigits | Should -Be 0 -Because "$($item.content.title): $($formatter.columnMatch) must read 52 like the text beside it, not 52.0"
+                $options.maximumFractionDigits | Should -Be 1
+                $options.useGrouping | Should -Be $false -Because 'the text in the tiles never groups digits'
             }
+        }
+        $formats | Should -BeGreaterThan 0
+    }
+
+    It '<Purpose>: uses no abbreviating number unit anywhere' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        foreach ($node in Get-JsonNode $books[$Purpose].items | Where-Object { $_.PSObject.Properties['numberFormat'] }) {
+            $node.numberFormat.unit | Should -BeIn 0, 1 -Because "$($node.columnMatch): only plain numbers and percentages are used"
         }
     }
 
@@ -186,6 +225,53 @@ Describe 'Operational workbooks lay out cleanly in the portal' {
         $names.IndexOf('summary-tiles-hygiene') | Should -Be ($names.IndexOf('summary-tiles') + 1)
     }
 
+    It 'shows the scope and evidence tiles as big numerals like the assessment tiles, not small grey text' {
+        $scope = Get-QueryItem capacity | Where-Object name -eq 'scope-tiles'
+        $scope.content.tileSettings.leftContent.formatter | Should -Be 12
+        $scope.content.tileSettings.leftContent.formatOptions.palette | Should -Be 'none'
+        $scope.content.query | Should -Not -Match 'Value = case\([^)]*tostring\(' -Because 'a text value renders small and grey'
+    }
+
+    It 'splits the scenario into two rows of three tiles whose captions fit a tile' {
+        $names = @(Get-WorkbookItem $books['optimisation'].items | ForEach-Object name)
+        $names.IndexOf('scenario-result-tiles') | Should -Be ($names.IndexOf('scenario-tiles') + 1)
+        $items = Get-QueryItem optimisation
+        ($items | Where-Object name -eq 'scenario-tiles').content.query | Should -Match 'SortKey <= 3'
+        ($items | Where-Object name -eq 'scenario-result-tiles').content.query | Should -Match 'SortKey > 3'
+        $fragment = Get-Content (Join-Path $repo 'workbooks\queries\operational-scenario.kql') -Raw
+        $body = [regex]::Match($fragment, '(?s)Note = case\((?<body>.*)\);').Groups['body'].Value
+        $captions = @([regex]::Matches($body, '"(?<text>[^"]+)"') | ForEach-Object { $_.Groups['text'].Value })
+        $captions.Count | Should -BeGreaterOrEqual 6
+        foreach ($caption in $captions) { $caption.Length | Should -BeLessOrEqual 46 -Because "'$caption' is cut off at the edge of a tile" }
+        $labels = @([regex]::Matches($fragment, '(?m)^\s*\d,\s*"(?<l>[^"]+)"') | ForEach-Object { $_.Groups['l'].Value })
+        $labels.Count | Should -Be 6
+        foreach ($label in $labels) { $label.Length | Should -BeLessOrEqual 22 -Because "'$label' is cut off at the edge of a tile" }
+    }
+
+    It '<Purpose>: keeps parameter labels short enough not to be cut off' -ForEach @(@{ Purpose = 'capacity' }, @{ Purpose = 'optimisation' }) {
+        $parameters = @(Get-WorkbookItem $books[$Purpose].items | Where-Object { $_.type -eq 9 } | ForEach-Object { $_.content.parameters })
+        $parameters.Count | Should -BeGreaterThan 8
+        foreach ($parameter in $parameters) {
+            ([string]$parameter.label).Length | Should -BeLessOrEqual 20 -Because "the parameter bar cuts '$($parameter.label)' off"
+        }
+    }
+
+    It 'reads a machine with no telemetry grey in the coverage matrix, and one missing counter amber' {
+        $matrix = Get-Table capacity | Where-Object name -eq 'method-matrix'
+        foreach ($column in 'CPU', 'Memory', 'AvailableMemory', 'DiskFree') {
+            $rules = @{}
+            foreach ($rule in (Get-Formatter $matrix | Where-Object columnMatch -eq $column).formatOptions.thresholdsGrid) { $rules[[string]$rule.thresholdValue] = $rule.representation }
+            $rules['no telemetry'] | Should -Be 'gray' -Because "${column}: no telemetry is grey everywhere else"
+            $rules['missing'] | Should -Be 'orange' -Because "${column}: one counter missing on a machine that reports is an evidence gap, not a failure"
+        }
+    }
+
+    It 'wraps the review card by part, so no line starts or ends on a separator' {
+        $card = Get-QueryItem optimisation | Where-Object name -eq 'detail-card'
+        $card.content.query | Should -Not -Match '"  \|  "' -Because 'a wrapped line can end on the separator'
+        $card.content.query | Should -Match 'mv-expand with_itemindex=PartNo'
+    }
+
     It 'reads a status column with the colours defined for it, not an auto colour' {
         $candidates = Get-QueryItem optimisation | Where-Object name -eq 'candidates'
         $evidence = Get-Formatter $candidates | Where-Object columnMatch -eq 'Evidence'
@@ -254,6 +340,14 @@ Describe 'Operational workbooks lay out cleanly in the portal' {
             { Set-DemoOperationalLayout -Items $orphan -Layout ([pscustomobject]@{}) } | Should -Throw '*no entry for workbook item orphan*'
             $layout = [pscustomobject]@{ orphan = [pscustomobject]@{ customWidth = '50' }; ghost = [pscustomobject]@{ customWidth = '50' } }
             { Set-DemoOperationalLayout -Items $orphan -Layout $layout } | Should -Throw '*ghost*'
+        }
+    }
+
+    It 'refuses a column width unit other than fr or ch' {
+        InModuleScope OperationalWorkbooks {
+            $item = [pscustomobject]@{ type = 3; name = 'grid'; content = [pscustomobject]@{ query = 'x'; visualization = 'table' } }
+            $layout = [pscustomobject]@{ grid = [pscustomobject]@{ table = [pscustomobject]@{ size = 3; columns = @([pscustomobject]@{ name = 'A'; kind = 'text'; width = 5; unit = 'px' }) } } }
+            { Set-DemoOperationalLayout -Items @($item) -Layout $layout } | Should -Throw "*Unknown width unit 'px'*"
         }
     }
 

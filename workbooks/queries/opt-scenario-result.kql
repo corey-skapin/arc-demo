@@ -1,0 +1,7 @@
+// include: scenario
+// Scenario, second row: the proposed hours off, the illustrative reduction and what the scenario leaves unchanged.
+// Eligible baseline x hours off / 168. Illustrative arithmetic: not billing, not realised or guaranteed savings.
+ScenarioTiles
+| where SortKey > 3
+| sort by SortKey asc
+| project Label, Value, Note

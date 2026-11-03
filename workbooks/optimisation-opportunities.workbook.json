@@ -1195,7 +1195,7 @@
                   "id": "096d1a4f-e0b2-5b9f-a523-5e8bea19d156",
                   "version": "KqlParameterItem/1.0",
                   "name": "SchedStartHour",
-                  "label": "Proposed off from (hour)",
+                  "label": "Off from (hour)",
                   "type": 2,
                   "isRequired": false,
                   "value": "__DEFAULT:SchedStartHour__",
@@ -1208,7 +1208,7 @@
                   "id": "e76c94a4-bd3f-5d43-ae1c-305d1511bd2d",
                   "version": "KqlParameterItem/1.0",
                   "name": "SchedEndHour",
-                  "label": "Proposed off until (hour)",
+                  "label": "Off until (hour)",
                   "type": 2,
                   "isRequired": false,
                   "value": "__DEFAULT:SchedEndHour__",
@@ -1234,7 +1234,8 @@
                   "id": "80d2da6a-64d2-5742-bcdb-c0479428310b",
                   "version": "KqlParameterItem/1.0",
                   "name": "ScenarioBaseline",
-                  "label": "Baseline cost for the selected machine (your figure; 0 = not set)",
+                  "label": "Your baseline cost",
+                  "description": "The cost of the selected machine in any unit you choose: a figure you type, not an Azure price. 0 or blank means not set.",
                   "type": 1,
                   "isRequired": false,
                   "value": "__DEFAULT:ScenarioBaseline__"
@@ -1243,7 +1244,8 @@
                   "id": "ee0527c7-cbf2-5725-ad98-42bbaf88712a",
                   "version": "KqlParameterItem/1.0",
                   "name": "ScenarioSharePct",
-                  "label": "Share that scales with running hours",
+                  "label": "Eligible share",
+                  "description": "The share of the baseline that scales with running hours (compute or power).",
                   "type": 2,
                   "isRequired": false,
                   "value": "__DEFAULT:ScenarioSharePct__",
@@ -1501,7 +1503,7 @@
               "version": "KqlItem/1.0",
               "query": "__QUERY:opt-scenario__",
               "size": 3,
-              "title": "Illustrative scenario (your inputs, one workload, never summed)",
+              "title": "Illustrative scenario: your inputs (one workload, never summed)",
               "noDataMessage": "Set the proposed off-window and your figures above.",
               "noDataMessageStyle": 4,
               "timeContextFromParameter": "TimeRange",
@@ -1525,6 +1527,37 @@
               }
             },
             "name": "scenario-tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "__QUERY:opt-scenario-result__",
+              "size": 3,
+              "title": "Illustrative scenario: the arithmetic (not billing)",
+              "noDataMessage": "Set the proposed off-window and your figures above.",
+              "noDataMessageStyle": 4,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Label",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 1
+                },
+                "secondaryContent": {
+                  "columnMatch": "Note",
+                  "formatter": 1
+                },
+                "showBorder": true
+              }
+            },
+            "name": "scenario-result-tiles"
           }
         ]
       },

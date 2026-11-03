@@ -563,7 +563,7 @@ Describe 'Presenter runsheet template' {
         $presenter | Should -Not -Match 'bounded lock-timeout helper|Test-ArcDemoReadiness|Test-ArcSqlDemoInventory|Invoke-SqlEngineOnArc'
     }
 
-    It 'sets the stage first: workbooks opened from the gallery in their own tabs, and grids that fit the screen' {
+    It 'sets the stage first: workbooks from the gallery in their own tabs, grids that fit the screen and dates in the audience format' {
         $stage = @($sections | Where-Object { $_ -match '^## Stage setup' })
         $stage.Count | Should -Be 1
         $stageFlat = ($stage[0] -replace '(?m)^\s*>\s?', '') -replace '\s+', ' '
@@ -572,8 +572,11 @@ Describe 'Presenter runsheet template' {
         $stageFlat | Should -Match 'The links in this guide are the fallback, not the way in'
         $stageFlat | Should -Match 'browser zoom to 100 percent \(90 percent on a smaller screen\)'
         $stageFlat | Should -Match "collapse the portal's left menu, press F11 for full screen and hide the favourites bar"
+        $stageFlat | Should -Match 'Set the date format\.\*\* In the Azure portal, open \*\*Settings\*\*, then \*\*Language \+ region\*\*, set \*\*Regional format\*\* to your audience''s locale \(for example English \(Australia\)\) and select \*\*Apply\*\*'
+        $stageFlat | Should -Match 'so a date such as 3/11/2026 is not misread'
         $stage[0] | Should -Match '\{\{workspaceUrl\}\}'
         $notes | Should -Match 'Workbooks gallery'
+        ($notes -replace '\s+', ' ') | Should -Match "Set the portal's regional format for the audience on the presenter's account too \(Settings, Language \+ region\)"
         $template.IndexOf('## Stage setup') | Should -BeLessThan $template.IndexOf('## Opening:')
     }
 

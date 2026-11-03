@@ -1,13 +1,16 @@
 // include: summary
 // Collection coverage matrix: observed hours per counter and machine; missing is shown as missing, never zero.
+// A machine that sent nothing at all (for example one with no Azure Monitor Agent) reads "no telemetry" in every column, the same grey as everywhere else;
+// "missing" is a single counter absent from a machine that does report, which is an evidence gap worth a look.
 Summary
 | summarize CpuHours = maxif(ObservedHours, Metric == "CPU percent" and Samples > 0),
     MemoryHours = maxif(ObservedHours, Metric == "Memory percent" and Samples > 0),
     AvailableHours = maxif(ObservedHours, Metric == "Available MB" and Samples > 0),
     DiskHours = maxif(ObservedHours, Metric == "Disk free percent" and Samples > 0 and VolumeState != "No longer reported") by Machine, Os, Layer
-| extend CPU = iff(isnull(CpuHours), "missing", strcat(tostring(CpuHours), " h")),
-    Memory = iff(isnull(MemoryHours), "missing", strcat(tostring(MemoryHours), " h")),
-    AvailableMemory = iff(isnull(AvailableHours), "missing", strcat(tostring(AvailableHours), " h")),
-    DiskFree = iff(isnull(DiskHours), "missing", strcat(tostring(DiskHours), " h"))
+| extend Silent = isnull(CpuHours) and isnull(MemoryHours) and isnull(AvailableHours) and isnull(DiskHours)
+| extend CPU = case(Silent, "no telemetry", isnull(CpuHours), "missing", strcat(Num(CpuHours, 1), " h")),
+    Memory = case(Silent, "no telemetry", isnull(MemoryHours), "missing", strcat(Num(MemoryHours, 1), " h")),
+    AvailableMemory = case(Silent, "no telemetry", isnull(AvailableHours), "missing", strcat(Num(AvailableHours, 1), " h")),
+    DiskFree = case(Silent, "no telemetry", isnull(DiskHours), "missing", strcat(Num(DiskHours, 1), " h"))
 | sort by Machine asc
 | project Machine, Os, Layer, CPU, Memory, AvailableMemory, DiskFree

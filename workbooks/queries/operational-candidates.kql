@@ -74,11 +74,11 @@ let Candidates = materialize(CandidateBase
         Primary == "Scheduling", WhySched,
         Primary == "Consolidation", WhyConsol,
         NothingFlagged),
-    WhyAll = iff(ReasonCount == 0, NothingFlagged, strcat_array(array_concat(
+    WhyItems = iff(ReasonCount == 0, pack_array(NothingFlagged), array_concat(
         iff(StaleState == "Flagged", pack_array(strcat("Not reporting: ", WhyStale)), dynamic([])),
         iff(OwnershipState == "Flagged", pack_array(strcat("Ownership gap: ", WhyOwner)), dynamic([])),
         iff(UnderState == "Flagged", pack_array(strcat("Low utilisation: ", WhyUnder)), dynamic([])),
         iff(SchedulingState == "Flagged", pack_array(strcat("Scheduling: ", WhySched)), dynamic([])),
-        iff(ConsolidationState == "Flagged", pack_array(strcat("Consolidation: ", WhyConsol)), dynamic([]))), "  |  "))
+        iff(ConsolidationState == "Flagged", pack_array(strcat("Consolidation: ", WhyConsol)), dynamic([]))))
 | extend SizeContext = iff(Vcpu > 0, strcat(tostring(Vcpu), " vCPU / ", Num(MemoryGb, 0), " GB (Arc inventory)"), "not reported")
 | sort by ReasonCount desc, Machine asc);

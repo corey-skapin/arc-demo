@@ -1,0 +1,34 @@
+// include: schedule
+// Labelled optional cost scenario, shared by the two rows of scenario tiles. Only the eligible share of a user-supplied baseline scales with running hours; the rest stays fixed.
+// The week is a 168-hour cycle, not a calendar month. No price lookup, no billing data, no realised savings, no guest scenario.
+// Captions stay short enough for a tile: the full wording of the guardrails is in the section text and the method tab.
+let Baseline = todouble('{ScenarioBaseline}');
+let SharePct = todouble('{ScenarioSharePct}');
+let SelectedLayer = toscalar(AllMachines | where Machine == '{SelectedHost}' | project Layer);
+let Offered = isnotempty(SelectedLayer) and SelectedLayer != "guest";
+let Configured = Offered and isnotnull(Baseline) and Baseline > 0 and isnotnull(SharePct) and SharePct between (0.0 .. 100.0) and WeeklyOffHours > 0;
+let Eligible = iff(Configured, Baseline * SharePct / 100.0, real(null));
+let Reduction = iff(Configured, Eligible * WeeklyOffHours / 168.0, real(null));
+let ScenarioTiles = datatable(SortKey:long, Label:string)[
+    1, "Workload",
+    2, "Your baseline",
+    3, "Eligible share",
+    4, "Hours off per week",
+    5, "Illustrative reduction",
+    6, "Stays unchanged"]
+| project SortKey, Label,
+    Value = case(
+        SortKey == 1, iff(isempty(SelectedLayer), "none selected", '{SelectedHost}'),
+        SortKey == 2, iff(isnull(Baseline) or Baseline <= 0, "not set", Num(Baseline, 2)),
+        SortKey == 3, iff(isnull(SharePct), "not set", strcat(Num(SharePct, 1), "%")),
+        SortKey == 4, iff(WeeklyOffHours > 0, strcat(tostring(WeeklyOffHours), " of 168"), "not set"),
+        SortKey == 5, iff(Configured, Num(Reduction, 2), "not configured"),
+        iff(Configured, Num(Baseline - Eligible, 2), "not configured")),
+    Note = case(
+        SortKey == 1, case(isempty(SelectedLayer), "pick a row in the candidates table first",
+            SelectedLayer == "guest", "a guest's cost sits with its parent", "one workload only, never summed"),
+        SortKey == 2, "your own figure: not a price or a bill",
+        SortKey == 3, "share that scales with running hours",
+        SortKey == 4, "from your proposed schedule, not a decision",
+        SortKey == 5, "not billing, not realised savings",
+        "fixed, licensed, storage and security costs");

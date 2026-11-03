@@ -2458,8 +2458,14 @@
                       "thresholdsGrid": [
                         {
                           "operator": "==",
+                          "thresholdValue": "no telemetry",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
                           "thresholdValue": "missing",
-                          "representation": "redBright",
+                          "representation": "orange",
                           "text": "{0}{1}"
                         },
                         {
@@ -2480,8 +2486,14 @@
                       "thresholdsGrid": [
                         {
                           "operator": "==",
+                          "thresholdValue": "no telemetry",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
                           "thresholdValue": "missing",
-                          "representation": "redBright",
+                          "representation": "orange",
                           "text": "{0}{1}"
                         },
                         {
@@ -2502,8 +2514,14 @@
                       "thresholdsGrid": [
                         {
                           "operator": "==",
+                          "thresholdValue": "no telemetry",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
                           "thresholdValue": "missing",
-                          "representation": "redBright",
+                          "representation": "orange",
                           "text": "{0}{1}"
                         },
                         {
@@ -2524,8 +2542,14 @@
                       "thresholdsGrid": [
                         {
                           "operator": "==",
+                          "thresholdValue": "no telemetry",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
                           "thresholdValue": "missing",
-                          "representation": "redBright",
+                          "representation": "orange",
                           "text": "{0}{1}"
                         },
                         {

@@ -75,7 +75,7 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             $readsSharedSamples = $text.Contains('let PerfRows = Perf')
             $text = $text.Replace('let PerfRows = Perf', 'let PerfRows = FixturePerf').Replace('let InsightsRows = InsightsMetrics', 'let InsightsRows = FixtureInsights')
             # Only the scenario arithmetic may skip the shared samples; every other item must run on the fixture tables.
-            if (-not $readsSharedSamples -and $Name -ne 'opt-scenario') {
+            if (-not $readsSharedSamples -and $Name -notin 'opt-scenario', 'opt-scenario-result') {
                 throw "Query '$Name' does not read the shared telemetry sources; refusing to claim fixture coverage."
             }
             @{ query = ($fixture + "`n" + $text) } | ConvertTo-Json -Depth 5
@@ -109,8 +109,12 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             optTilesHygiene = New-FixtureRequest 'opt-tiles-hygiene'
             card = New-FixtureRequest 'opt-detail-card' @{ SelectedHost = 'devidle' }
             scenario = New-FixtureRequest 'opt-scenario' $scenarioInputs
+            scenarioResult = New-FixtureRequest 'opt-scenario-result' $scenarioInputs
             guestScenario = New-FixtureRequest 'opt-scenario' $guestInputs
+            guestScenarioResult = New-FixtureRequest 'opt-scenario-result' $guestInputs
             emptyScenario = New-FixtureRequest 'opt-scenario'
+            emptyScenarioResult = New-FixtureRequest 'opt-scenario-result'
+            methodMatrix = New-FixtureRequest 'cap-method-matrix'
         }
         # Read-only queries run a few at a time: the service allows only a handful of concurrent queries per user.
         $uri = "https://api.loganalytics.io/v1/workspaces/$($workspace.properties.customerId)/query"
@@ -157,9 +161,11 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         $candidates = $results.candidates
         $optTiles = $results.optTiles
         $card = $results.card
-        $scenario = $results.scenario
-        $guestScenario = $results.guestScenario
-        $emptyScenario = $results.emptyScenario
+        # The scenario is two rows of tiles (the inputs, then the arithmetic); the assertions read them as one list.
+        $scenario = @($results.scenario) + @($results.scenarioResult)
+        $guestScenario = @($results.guestScenario) + @($results.guestScenarioResult)
+        $emptyScenario = @($results.emptyScenario) + @($results.emptyScenarioResult)
+        $methodMatrix = $results.methodMatrix
     }
 
     AfterAll {
@@ -312,8 +318,8 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             [int]$reporting.Value | Should -Be 11
             $reporting.Note | Should -Be '2 not reporting'
             $latest = & $tile 'Latest sample'
-            $latest.Value | Should -Be '0 min'
-            $latest.Note | Should -Be 'since newest sample'
+            [int]$latest.Value | Should -Be 0
+            $latest.Note | Should -Be 'min since newest sample'
             $adequate = & $tile 'Adequate evidence'
             [int]$adequate.Value | Should -Be 7
             # Median of the machines that have CPU samples only: the invalid-only host and the one without telemetry are not counted as zero.
@@ -338,23 +344,24 @@ Describe 'Operational workbook queries executed against deterministic literal ta
         It 'tells unknown from parked when nothing is reporting' {
             $tile = { param($rows, $label) @($rows | Where-Object Label -like "*$label*")[0] }
             # Every machine without telemetry: nothing was observed, so there is no last observed data to describe and nothing is zero.
-            (& $tile $scopeAllAbsent 'Reporting').Value | Should -Be '0'
+            (& $tile $scopeAllAbsent 'Reporting').Value | Should -Be 0
             (& $tile $scopeAllAbsent 'Reporting').Note | Should -Be 'no telemetry in window'
-            (& $tile $scopeAllAbsent 'Latest sample').Value | Should -Be 'none'
+            (& $tile $scopeAllAbsent 'Latest sample').Value | Should -BeNullOrEmpty -Because 'no sample at all is unknown, never zero minutes'
             (& $tile $scopeAllAbsent 'Latest sample').Note | Should -Be 'no sample: unknown'
-            (& $tile $scopeAllAbsent 'Adequate evidence').Value | Should -Be '0'
+            (& $tile $scopeAllAbsent 'Adequate evidence').Value | Should -Be 0
             (& $tile $scopeAllAbsent 'Adequate evidence').Note | Should -Be 'no CPU samples'
             # Every machine silent: parked, and the figures describe the last observed data (48 hours old, 71% of the window observed).
             $silent = & $tile $scopeAllSilent 'Reporting'
-            $silent.Value | Should -Be '0'
+            $silent.Value | Should -Be 0
             $silent.Note | Should -Be 'parked or silent'
-            (& $tile $scopeAllSilent 'Latest sample').Value | Should -Be '2 d'
+            (& $tile $scopeAllSilent 'Latest sample').Value | Should -Be 2
+            (& $tile $scopeAllSilent 'Latest sample').Note | Should -Be 'days since newest sample'
             (& $tile $scopeAllSilent 'Adequate evidence').Note | Should -Be 'median coverage 71%'
             # A mix: only the silent subset has observed data to describe.
             $mixed = & $tile $scopeMixed 'Reporting'
-            $mixed.Value | Should -Be '0'
+            $mixed.Value | Should -Be 0
             $mixed.Note | Should -Be '2 not reporting'
-            (& $tile $scopeMixed 'Latest sample').Value | Should -Be '2 d'
+            (& $tile $scopeMixed 'Latest sample').Value | Should -Be 2
         }
 
         It 'counts mutually exclusive capacity assessments that add up to the machines in scope, on two rows of tiles' {
@@ -420,6 +427,17 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             foreach ($row in $whyLines) { $row.Why.Length | Should -BeLessOrEqual 95 }
             (($whyLines.Why) -join ' ') | Should -Match "do not reflect the guest's load or physical CPU use"
         }
+
+        It 'reads a silent machine as no telemetry in every counter and one absent counter as missing' {
+            foreach ($column in 'CPU', 'Memory', 'AvailableMemory', 'DiskFree') {
+                (Get-Fixture $methodMatrix 'missing').$column | Should -Be 'no telemetry'
+            }
+            # A machine that reports is never "no telemetry": its hours read as hours, and a counter it lacks reads as missing.
+            (Get-Fixture $methodMatrix 'spike').CPU | Should -Match '^\d+(\.\d)? h$'
+            (Get-Fixture $methodMatrix 'guest').CPU | Should -Match '^\d+(\.\d)? h$'
+            (Get-Fixture $methodMatrix 'guest').Memory | Should -Be 'missing'
+            (Get-Fixture $methodMatrix 'guest').DiskFree | Should -Be 'missing'
+        }
     }
 
     Context 'Optimisation review reasons' {
@@ -460,6 +478,10 @@ Describe 'Operational workbook queries executed against deterministic literal ta
                 @($lines) -join ' '
             }
             foreach ($row in $card) { $row.Detail.Length | Should -BeLessOrEqual 90 }
+            # Each reason starts on its own line and no line starts or ends on a separator character.
+            foreach ($row in $card) { $row.Detail.Trim() | Should -Not -Match '^\||\|$' }
+            @($card | Where-Object { $_.Detail -match '^Low utilisation: ' }).Count | Should -BeGreaterOrEqual 2 -Because 'one line in the reasons and one in the decisions'
+            @($card | Where-Object { $_.Detail -match '^Scheduling: ' }).Count | Should -BeGreaterOrEqual 2
             $why = & $text 'Why'
             $why | Should -Match 'Low utilisation: .*sizing conversation starter'
             $why | Should -Match 'Scheduling: .*proposal for the owner to confirm'
@@ -489,9 +511,17 @@ Describe 'Operational workbook queries executed against deterministic literal ta
             $reference = Get-DemoOperationalScenario -MonthlyBaseline 1000 -EligibleSharePercent 60 -WeeklyHoursOff 108
             $text = { param($rows, $label) @($rows | Where-Object Label -eq $label)[0] }
             (& $text $scenario 'Illustrative reduction').Value | Should -Be ([math]::Round($reference.IllustrativeReduction, 2).ToString([cultureinfo]::InvariantCulture))
-            (& $text $scenario 'Proposed hours off per week').Value | Should -Be '108 of 168'
-            (& $text $scenario 'Unchanged by the scenario').Value | Should -Be ([math]::Round($reference.FixedBaseline, 2).ToString([cultureinfo]::InvariantCulture))
+            (& $text $scenario 'Hours off per week').Value | Should -Be '108 of 168'
+            (& $text $scenario 'Stays unchanged').Value | Should -Be ([math]::Round($reference.FixedBaseline, 2).ToString([cultureinfo]::InvariantCulture))
             (& $text $scenario 'Illustrative reduction').Note | Should -Match 'not billing'
+        }
+
+        It 'shows the scenario as two rows of three tiles: the inputs, then the arithmetic' {
+            @($results.scenario).Count | Should -Be 3
+            @($results.scenarioResult).Count | Should -Be 3
+            @($results.scenario.Label) | Should -Be @('Workload', 'Your baseline', 'Eligible share')
+            @($results.scenarioResult.Label) | Should -Be @('Hours off per week', 'Illustrative reduction', 'Stays unchanged')
+            foreach ($row in $scenario) { $row.Note.Length | Should -BeLessOrEqual 46 -Because "'$($row.Note)' must fit a tile" }
         }
 
         It 'offers no scenario for a guest and stays unconfigured without inputs' {

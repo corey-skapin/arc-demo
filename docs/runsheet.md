@@ -122,6 +122,10 @@ guardrails and the questions you may be asked.
 - **Make the grids fit.** Set browser zoom to 100 percent (90 percent on a smaller screen),
   collapse the portal's left menu, press F11 for full screen and hide the favourites bar. A
   narrow window clips table headers and cells.
+- **Set the date format.** In the Azure portal, open **Settings**, then **Language +
+  region**, set **Regional format** to your audience's locale (for example English
+  (Australia)) and select **Apply**, so a date such as 3/11/2026 is not misread. The dates
+  in the workbook tables follow this setting.
 
 ## Opening: the Monday-morning questions (1 minute, clock 0:00 to 1:00)
 
@@ -807,7 +811,9 @@ not presenter patter, and nothing here is run during the presentation.
   ready handoff. Open every link on this page once, and open each workbook from the
   workspace's Workbooks gallery too: a workbook opened by a direct link shows its ID in
   the blade title, which is why the stage setup tells the presenter to use the gallery
-  and keep the links as the fallback. Check the nested guest with
+  and keep the links as the fallback. Set the portal's regional format for the audience
+  on the presenter's account too (Settings, Language + region): it decides how dates
+  read in every workbook table. Check the nested guest with
   `Test-ArcSqlDemoInventory.ps1` (read-only).
 - **Nested guest:** its lifecycle follows the `nestedSqlGuest` block in the private
   skin. The presenter never starts, stops or repairs it; a guest that is parked or

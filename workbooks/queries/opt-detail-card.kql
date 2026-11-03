@@ -14,28 +14,30 @@ datatable(SortKey:long, Aspect:string)[
     10, "Not done here"]
 | extend K = 1
 | join kind=inner C on K
+// Each aspect is a list of parts (one per reason where there are several), so no separator character is ever left at the end of a line.
 | project SortKey, Aspect,
-    Detail = case(
-        SortKey == 1, strcat(Machine, " (", Topology, ", ", Os, ")"),
-        SortKey == 2, iff(ReasonCount == 0, "none", strcat_array(Reasons, ", ")),
-        SortKey == 3, WhyAll,
-        SortKey == 4, strcat("the selected time range (", iff(WindowSpan < 2d, strcat(Num(WindowSpan / 1h, 1), " hours"), strcat(Num(WindowSpan / 1d, 1), " days")), "); ",
-            tostring(coalesce(round(CpuObservedHours, 1), 0.0)), " observed CPU hours"),
-        SortKey == 5, strcat(EvidenceState, " | ", EvidenceNote),
-        SortKey == 6, iff(isempty(EvidenceGaps), "nothing further identified", EvidenceGaps),
-        SortKey == 7, strcat("owner: ", iff(isempty(Owner), "missing", Owner), " | cost centre: ", iff(isempty(CostCentre), "missing", CostCentre),
-            " | environment: ", Environment, " | application: ", Application),
-        SortKey == 8, SizeContext,
-        SortKey == 9, iff(ReasonCount == 0, "No reason is flagged; nothing needs a decision from this view.", strcat_array(array_concat(
+    Parts = case(
+        SortKey == 1, pack_array(strcat(Machine, " (", Topology, ", ", Os, ")")),
+        SortKey == 2, pack_array(iff(ReasonCount == 0, "none", strcat_array(Reasons, ", "))),
+        SortKey == 3, WhyItems,
+        SortKey == 4, pack_array(strcat("the selected time range (", iff(WindowSpan < 2d, strcat(Num(WindowSpan / 1h, 1), " hours"), strcat(Num(WindowSpan / 1d, 1), " days")), "); ",
+            Num(coalesce(CpuObservedHours, 0.0), 1), " observed CPU hours")),
+        SortKey == 5, pack_array(strcat(EvidenceState, " | ", EvidenceNote)),
+        SortKey == 6, pack_array(iff(isempty(EvidenceGaps), "nothing further identified", EvidenceGaps)),
+        SortKey == 7, pack_array(strcat("owner: ", iff(isempty(Owner), "missing", Owner), " | cost centre: ", iff(isempty(CostCentre), "missing", CostCentre),
+            " | environment: ", Environment, " | application: ", Application)),
+        SortKey == 8, pack_array(SizeContext),
+        SortKey == 9, iff(ReasonCount == 0, pack_array("No reason is flagged; nothing needs a decision from this view."), array_concat(
             iff(StaleState == "Flagged", dynamic(["Not reporting: the application owner confirms whether the machine should be running. Fix collection before any other decision."]), dynamic([])),
             iff(OwnershipState == "Flagged", dynamic(["Ownership gap: record a named owner first. Until then no other decision about this machine has an accountable approver."]), dynamic([])),
             iff(UnderState == "Flagged", dynamic(["Low utilisation: the owner and application team decide whether a sizing review is worthwhile, using peaks, business cycles and dependencies."]), dynamic([])),
             iff(SchedulingState == "Flagged", dynamic(["Scheduling: the owner confirms the environment and proposes a schedule. This workbook never stops or starts a machine."]), dynamic([])),
-            iff(ConsolidationState == "Flagged", dynamic(["Consolidation: the application owner assesses dependencies, licensing and placement. Nothing here implies a target or a guarantee."]), dynamic([]))), "  |  ")),
-        "No shutdown, resize, schedule, tag change or deletion exists in this workbook. Observation is separate from approval.")
-// A grid cell cuts a long sentence off, so every aspect is wrapped into readable lines (the aspect name is shown on the first line only).
-| extend Lines = extract_all(@"(.{1,90})(?:\s+|$)", dynamic([1]), Detail)
-| mv-expand with_itemindex=LineNo Lines
-| sort by SortKey asc, LineNo asc
+            iff(ConsolidationState == "Flagged", dynamic(["Consolidation: the application owner assesses dependencies, licensing and placement. Nothing here implies a target or a guarantee."]), dynamic([])))),
+        pack_array("No shutdown, resize, schedule, tag change or deletion exists in this workbook. Observation is separate from approval."))
+// A grid cell cuts a long sentence off, so every part is wrapped into readable lines. The aspect name shows on its first line only and each part starts a new line.
+| mv-expand with_itemindex=PartNo Part = Parts to typeof(string)
+| extend Lines = extract_all(@"(.{1,90})(?:\s+|$)", dynamic([1]), Part)
+| mv-expand with_itemindex=LineNo Line = Lines to typeof(string)
+| sort by SortKey asc, PartNo asc, LineNo asc
 | take 40
-| project Aspect = iff(LineNo == 0, Aspect, ""), Detail = tostring(Lines)
+| project Aspect = iff(PartNo == 0 and LineNo == 0, Aspect, ""), Detail = Line

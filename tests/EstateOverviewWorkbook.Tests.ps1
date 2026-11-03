@@ -204,10 +204,40 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
         $q | Should -Match 'Priority = case\(ObjectName == "Processor Information", 0'
     }
 
-    It 'leaves gaps as gaps: load series are null-filled, never zero-filled' {
+    It 'leaves gaps as gaps: every aggregation of a load series is null-filled, never zero-filled' {
         foreach ($name in 'cpu-avg', 'cpu-peak', 'mem', 'disk', 'detail-cpu', 'detail-mem', 'detail-disk') {
-            (Get-Query $name) | Should -Match 'default = real\(null\)' -Because $name
+            $series = [regex]::Match((Get-Query $name), '(?s)make-series\s+(.*?)\s+on\s+TimeGenerated').Groups[1].Value
+            $series | Should -Not -BeNullOrEmpty -Because "$name makes a series"
+            foreach ($aggregation in @($series -split ',\s*(?=[A-Za-z]+\s*=)')) {
+                $aggregation | Should -Match 'default = real\(null\)$' -Because "$name '$aggregation' would draw a parked period as zero"
+            }
         }
+    }
+
+    It 'draws every load series as columns with a wide step, so a parked period is blank, not a cliff to zero or a line across the gap' {
+        foreach ($name in 'cpu-avg', 'cpu-peak', 'mem', 'disk') {
+            (Get-Item $name).visualization | Should -Be 'unstackedbar' -Because "$name compares machines side by side and a stacked bar would add percentages"
+            $q = Get-Query $name
+            $q | Should -Match 'let BarStep = case\(End - Start <= 6h, 30m, End - Start <= 2d, 2h, End - Start <= 8d, 12h, End - Start <= 16d, 1d, 2d\);'
+            $q | Should -Match 'from bin\(Start, BarStep\) to End step BarStep by Name'
+        }
+        foreach ($name in 'detail-cpu', 'detail-mem', 'detail-disk') {
+            (Get-Item $name).visualization | Should -Be 'unstackedbar' -Because "$name shows one machine and a line would interpolate across the gap"
+            $q = Get-Query $name
+            $q | Should -Match 'let DetailStep = case\(End - Start <= 6h, 10m, End - Start <= 2d, 1h, End - Start <= 8d, 2h, End - Start <= 16d, 6h, 12h\);'
+            $q | Should -Match 'from bin\(Start, DetailStep\) to End step DetailStep'
+        }
+        foreach ($name in 'detail-cpu', 'detail-mem') {
+            $labels = @{}
+            foreach ($label in @((Get-Item $name).chartSettings.seriesLabelSettings)) { $labels[$label.seriesName] = $label.color }
+            $labels['Average'] | Should -Be 'blue' -Because $name
+            $labels['Peak'] | Should -Be 'orange' -Because $name
+        }
+    }
+
+    It 'leaves Hosts reporting over time as the one line, because zero hosts reporting is a true value, not a missing sample' {
+        (Get-Item 'beating').visualization | Should -Be 'timechart'
+        (Get-Query 'beating') | Should -Match 'coalesce\(Hosts, 0\)'
     }
 
     It 'drives the machine detail from the selected row and shows data only for a machine that has an agent' {
@@ -255,7 +285,7 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
     }
 
     It 'shows chart legends with series names and colours only, never aggregate totals under the chart' {
-        $charts = @($script:Queries | Where-Object { $_.content.visualization -in 'timechart', 'barchart', 'linechart', 'areachart' })
+        $charts = @($script:Queries | Where-Object { $_.content.visualization -in 'timechart', 'barchart', 'unstackedbar', 'linechart', 'areachart' })
         $charts.Count | Should -BeGreaterOrEqual 11
         foreach ($chart in $charts) {
             $chart.content.chartSettings.showLegend | Should -BeTrue -Because $chart.name
@@ -310,7 +340,7 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
         $sharing.Count | Should -BeGreaterThan 0
         foreach ($item in $sharing) {
             $item.type | Should -Be 3 -Because $item.name
-            $item.content.visualization | Should -BeIn @('timechart', 'barchart', 'linechart', 'areachart') -Because "$($item.name) shares a row, so it must be a chart, never a table or tiles"
+            $item.content.visualization | Should -BeIn @('timechart', 'barchart', 'unstackedbar', 'linechart', 'areachart') -Because "$($item.name) shares a row, so it must be a chart, never a table or tiles"
             $item.content.size | Should -Be 1 -Because "$($item.name) shares a row with a chart of the same size"
         }
     }
@@ -347,6 +377,17 @@ Describe 'Estate Overview tells the estate story with honest numbers' {
             $formatter[0].dateFormat.showUtcTime | Should -BeNullOrEmpty -Because "$name shows local time"
             [int]($formatter[0].formatOptions.customColumnWidthSetting -replace 'ch$', '') | Should -BeGreaterOrEqual 28 -Because "$name $($timestamps[$name]) is a 21-character timestamp"
         }
+    }
+
+    It 'gives every column of the configuration-changes grid its own fixed width, so no count header is cut to "Daemo..."' {
+        $grid = (Get-Item 'chg-hosts').gridSettings
+        foreach ($column in 'Machine', 'Software', 'Services', 'Daemons', 'Other', 'Total', 'LastChange') {
+            $formatter = @($grid.formatters | Where-Object columnMatch -eq $column)
+            $formatter.Count | Should -Be 1 -Because "chg-hosts needs one formatter for its $column column"
+            $formatter[0].formatOptions.customColumnWidthSetting | Should -Match '^\d+ch$' -Because "chg-hosts $column needs a width that fits its header"
+        }
+        $daemons = @($grid.formatters | Where-Object columnMatch -eq 'Daemons')[0]
+        [int]($daemons.formatOptions.customColumnWidthSetting -replace 'ch$', '') | Should -BeGreaterOrEqual ('Daemons'.Length + 6)
     }
 
     It 'gives the long text columns the remaining width instead of a fixed width that cuts them' {

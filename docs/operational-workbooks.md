@@ -118,7 +118,7 @@ environment and application/role, plus the threshold selectors.
 
 | Section | Shows |
 |---|---|
-| Scope and evidence quality tiles | Can this view be relied on? Four tiles: **Machines in scope** (with the guest caption), **Reporting now**, **Latest sample** (minutes, hours or days since the newest sample) and **Adequate evidence** (with the median window coverage, which counts only machines with CPU samples and is parked time, not idle time) |
+| Scope and evidence quality tiles | Can this view be relied on? Four tiles, each a big numeral like the assessment tiles: **Machines in scope** (with the guest caption), **Reporting now**, **Latest sample** (the age of the newest sample as a number, with its unit, minutes, hours or days, in the caption) and **Adequate evidence** (with the median window coverage, which counts only machines with CPU samples and is parked time, not idle time) |
 | Estate capacity summary tiles | The five assessments on two rows (**Pressure observed**, **Apparent headroom**, **Within thresholds**; then **Insufficient evidence**, **No telemetry**), which add up to the machines in scope. Count tiles carry no colour; each names up to two machines |
 | Status and evidence table | One row per machine, worst first: assessment, evidence, CPU P95 and peak, memory P95 and lowest free space. Selecting a row drives *Resource detail* |
 | Declared parent and guest | The pair side by side, never summed |
@@ -126,12 +126,13 @@ environment and application/role, plus the threshold selectors.
 | Memory tab | Memory in use P95 and lowest available MB by machine, per-machine evidence with the basis |
 | Disk tab | Lowest free space over time; per-volume table (lowest free space first) with size, change and state |
 | Resource detail tab | Seven tiles (assessment, reporting, evidence, CPU, memory, tightest volume and the application context), a *Why this assessment* table that wraps the explanation into readable lines, paired P95 and peak CPU columns, memory in use and lowest available memory for the one machine, per-volume disk, parent/guest context and every counter's evidence |
-| Evidence and method tab | How figures are built, rules and constants, coverage matrix, counters by OS, live Arc inventory |
+| Evidence and method tab | How figures are built, rules and constants, the coverage matrix (observed hours per counter: a machine that sent nothing reads *no telemetry* in grey in every column, a single counter absent from a machine that does report reads *missing* in amber), counters by OS, live Arc inventory |
 
 *Reporting now* means a sample within 15 minutes of the window end; for a custom past range the tile reads
 *Reporting at end*. With every machine parked it reads 0 with the caption *parked or silent*, and *Latest sample* gives the
 age of the newest sample, which is the data the figures below describe. When no machine in scope has sent any telemetry the
-caption reads *no telemetry in window*, *Latest sample* reads *none* and there is no coverage figure: unknown, not zero.
+caption reads *no telemetry in window*, *Latest sample* has no number (its caption reads *no sample: unknown*) and there is
+no coverage figure: unknown, not zero.
 A mix of reporting and silent machines reads *N not reporting*; the table below names each one.
 
 ## Optimisation opportunities
@@ -156,9 +157,12 @@ into lines) and *Evidence and method*. The review detail charts the selected mac
 in use and free space as column charts.
 
 The **optional cost scenario** is arithmetic on figures typed into the workbook for one selected workload:
-`baseline x eligible share x hours off / 168`. It is not billing, a price, realised or guaranteed savings, a safe
-shutdown schedule or an all-in cost; fixed, licensed, retained-storage, monitoring and security costs stay outside
-the reduction. No guest scenario is offered. `Get-DemoOperationalScenario` is the reference implementation the tests compare against.
+`baseline x eligible share x hours off / 168`. It reads as two rows of three tiles, the inputs (**Workload**, **Your
+baseline**, **Eligible share**) and then the arithmetic (**Hours off per week**, **Illustrative reduction**, **Stays
+unchanged**), with captions short enough for a tile; the parameters are *Your baseline cost* and *Eligible share*. It is not
+billing, a price, realised or guaranteed savings, a safe shutdown schedule or an all-in cost; fixed, licensed,
+retained-storage, monitoring and security costs stay outside the reduction. No guest scenario is offered.
+`Get-DemoOperationalScenario` is the reference implementation the tests compare against.
 
 The live Arc inventory and ownership tables read Resource Graph for the exact roster IDs and follow the same
 operating-system, environment and application selectors using each machine's **current** tags.
@@ -180,7 +184,11 @@ is, apart from pinning its Log Analytics items to the deployment workspace, and 
   Updates pending, Alerts fired); *Hosts reporting over time*, which reads zero when parked and draws the Arc inventory as
   a baseline; *CPU average by machine*; the *Arc machines* grid (select a row); then tabs for memory, disk and CPU peaks,
   events and logs, changes and software, posture, and the selected machine's detail.
-- **Reading aids.** Chart legends list series names and colours only, never summed totals. The *Arc machines* grid prints
+- **Reading aids.** Chart legends list series names and colours only, never summed totals. The load charts (CPU average
+  and peak, memory and free disk by machine, and the selected machine's CPU, memory and free space) are column charts
+  over a wide interval with null-filled series, so a parked period is a blank column, never a drop to zero or a line
+  drawn across the gap; only *Hosts reporting over time* is a line, because zero hosts reporting is a real value. The
+  *Arc machines* grid prints
   CPU, memory and disk as percentages with one decimal, and the alert time is shown in the viewer's local time. Every table
   uses the Full size, because a Small or Medium table reserves a fixed height and leaves a blank band under a short table.
   Only charts of the same height share a row, because a row takes the height of its taller item and leaves a blank band
@@ -223,21 +231,30 @@ rendered. The rules, each enforced by `tests/OperationalWorkbooksLayout.Tests.ps
 - **Tables** use the Full size so a short table leaves no blank band (a Small or Medium grid reserves a fixed height), and
   are bounded: one row per machine of the 50-machine roster, or an explicit `take`. Every column is a proportional `fr`
   width, so a grid fits any container instead of pushing columns off screen; the widths add up to at most 115, each header
-  fits its column, and one long column takes the room. Status columns keep the colour rules written in the template.
+  fits its column, and one long column takes the room. The one exception is the activity heat map: its 24 hour cells are
+  fixed at six characters each, because a flexible column cannot shrink below the portal's minimum and 24 of them overflow
+  even a very wide screen; the machine column takes the width that is left. Status columns keep the colour rules written in
+  the template.
 - **Numbers** are one format per column: percentages are bars on a fixed 0 to 100 scale that print one decimal. In
   *Capacity and headroom* load runs green to red and free space red to green; in *Optimisation opportunities* the bars are a
-  neutral blue, because low utilisation is the flag there and not a health signal. Plain numbers pad to one decimal or none.
+  neutral blue, because low utilisation is the flag there and not a health signal. Whole numbers carry no number format (the
+  Count unit abbreviates 3,000 to *3 K* beside a plain *747*); a fraction prints at most one decimal and is never padded, so
+  52 reads 52 like the text beside it. The same rounding is used in the text of a tile or a reason and in the grid.
 - **Times** are the viewer's local time in a date renderer wide enough for the clock; text that must name a time states the
-  display offset (for example *UTC+10:30*), never a bare UTC clock.
+  display offset (for example *UTC+10:30*), never a bare UTC clock. How a date reads (3/11/2026 or 11/3/2026) follows the
+  portal's regional format, which the stage setup of the presenter guide tells the presenter to set.
 - **Charts** are column charts. A missing interval is a null, so parked time is blank rather than zero or a line across the
   gap. Charts by machine are clustered, not stacked, so percentages are never added; a single-machine chart has one series.
   Legends carry no summed totals.
 - **Tiles** carry no palette colour (a left-bar colour must mean something, and the status dot already does), show at most
   four per row, and keep a short label and a short caption: a fixed tile is about 160 px wide, so a caption names one machine
-  and a count (*lnx-app-01 +2*), never a list. The five assessments and the six review reasons are split over two rows.
-  Detail and scenario tiles size to their content.
+  and a count (*lnx-app-01 +2*), never a list. Counts, including the scope and evidence tiles, are big numerals; a tile whose
+  value is text (the selected machine, the scenario) sizes to its content. The five assessments and the six review reasons
+  are split over two rows, and the scenario into two rows of three. Parameter labels stay within 20 characters, because the
+  parameter bar cuts a longer label off; the longer explanation sits in the parameter's description.
 - **Explanations** that are longer than a cell are wrapped into lines by the query (the *Why this assessment* table and the
-  *Review card*), because a grid cell cuts a long sentence off.
+  *Review card*), because a grid cell cuts a long sentence off. The card wraps each reason as its own part, so no line starts
+  or ends on a separator character.
 
 ## Publish, review and promote
 
@@ -256,9 +273,11 @@ tag changes or a newly onboarded nested guest.
 
 - Offline Pester (`tests/OperationalWorkbooks.Tests.ps1`) covers rendering, scoping, roster and topology rules, size bounds,
   draft handling, sibling links, the documented icon, colour and palette names, empty-state styles and scenario arithmetic.
-- `tests/OperationalWorkbooksLayout.Tests.ps1` guards the portal layout offline: fr widths and headers that fit, Full-size
-  bounded tables, percentage and number formats with the right colour direction, local times, column charts with null gaps and
-  no legend totals, colourless tiles with at most four per row, the layout pass's refusals and the display-offset label.
+- `tests/OperationalWorkbooksLayout.Tests.ps1` guards the portal layout offline: fr widths and headers that fit (and the
+  heat map's fixed hour cells), Full-size bounded tables, percentage and number formats with the right colour direction,
+  local times, column charts with null gaps and no legend totals, colourless tiles with at most four per row, big-numeral scope
+  tiles, the scenario's two rows and caption length, parameter label length, the coverage matrix colours, the layout pass's
+  refusals and the display-offset label.
 - `tests/OperationalWorkbookQueries.Tests.ps1` is explicit opt-in and read-only. It runs the production item queries against
   deterministic literal tables (spike versus sustained, missing counters, thin history, parked gaps, invalid samples, Linux
   names and pseudo mounts, parent/guest, tags, scenario arithmetic) with the telemetry sources swapped inside the query text.

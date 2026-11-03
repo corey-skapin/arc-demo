@@ -25,6 +25,7 @@ $script:OperationalFragments = @{
     hosts = 'operational-hosts.kql'
     candidates = 'operational-candidates.kql'
     schedule = 'operational-schedule.kql'
+    scenario = 'operational-scenario.kql'
 }
 
 function Get-DemoOperationalScenario {
@@ -400,9 +401,12 @@ function Set-DemoJsonProperty {
 }
 
 function New-DemoGridColumn {
-    # One grid column formatter. Every width is a proportional fr unit, so a grid fits any container instead of pushing columns off screen.
+    # One grid column formatter. Widths are proportional fr units, so a grid fits any container instead of pushing columns off screen.
+    # A column may ask for fixed characters (ch) instead: the 24 narrow cells of a heat map cannot shrink below the portal's minimum for a flexible column.
     param([Parameter(Mandatory)]$Column, [Parameter(Mandatory)][string]$Name, $TemplateFormatter)
-    $width = "$([int]$Column.width)fr"
+    $unit = if ($Column.PSObject.Properties.Name -contains 'unit') { [string]$Column.unit } else { 'fr' }
+    if ($unit -notin 'fr', 'ch') { throw "Unknown width unit '$unit' for column $Name." }
+    $width = "$([int]$Column.width)$unit"
     $percent = [ordered]@{ unit = 1; options = [ordered]@{ style = 'decimal'; maximumFractionDigits = 1 } }
     switch ($Column.kind) {
         'text' {
@@ -410,10 +414,12 @@ function New-DemoGridColumn {
         }
         'num' {
             $digits = [int]$Column.decimals
-            [ordered]@{
-                columnMatch = $Name; formatter = 1; formatOptions = [ordered]@{ customColumnWidthSetting = $width }
-                numberFormat = [ordered]@{ unit = 17; options = [ordered]@{ style = 'decimal'; minimumFractionDigits = $digits; maximumFractionDigits = $digits } }
+            $formatter = [ordered]@{ columnMatch = $Name; formatter = 1; formatOptions = [ordered]@{ customColumnWidthSetting = $width } }
+            # A whole number needs no format (the Count unit abbreviates 3,000 to "3 K"); a fraction is capped at the stated decimals and never padded, so 52 reads 52 like the text beside it.
+            if ($digits -gt 0) {
+                $formatter.numberFormat = [ordered]@{ unit = 0; options = [ordered]@{ style = 'decimal'; useGrouping = $false; minimumFractionDigits = 0; maximumFractionDigits = $digits } }
             }
+            $formatter
         }
         'pct' {
             [ordered]@{

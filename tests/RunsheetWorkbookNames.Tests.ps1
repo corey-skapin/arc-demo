@@ -42,7 +42,8 @@ BeforeAll {
     $script:Token = '^\{\{[A-Za-z]+\}\}$'
     $script:Portal = @(
         'Check for updates', 'Test', 'Updates', 'Last assessed', 'Overview', 'Resources', 'Data sources', 'Extensions', 'Type',
-        'Logs', 'Simple mode', 'KQL mode', 'Connected', 'Disconnected', 'Expired', 'Last collected time', 'Status', 'Workbooks'
+        'Logs', 'Simple mode', 'KQL mode', 'Connected', 'Disconnected', 'Expired', 'Last collected time', 'Status', 'Workbooks',
+        'Settings', 'Language + region', 'Regional format', 'Apply'
     )
     $script:Emphasis = @('follow one database', 'understand', 'plan', 'prioritise', 'operate', 'close', 'Live', 'Recorded')
     function Test-NotAWorkbookName([string]$Name) {

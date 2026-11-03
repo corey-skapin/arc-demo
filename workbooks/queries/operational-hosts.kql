@@ -94,7 +94,7 @@ let Hosts = materialize(Machines
     EvidenceState != "Adequate", "Insufficient evidence",
     CpuP95 < LowCpuP95, "Apparent headroom",
     "Within thresholds")
-| extend PeakNote = iff(CpuSpike, strcat(" Peak ", Num(CpuMax, 0), "% was brief (never above ", CpuHigh, "% for ", SustainedMinutes, " continuous minutes)."), "")
+| extend PeakNote = iff(CpuSpike, strcat(" Peak ", Num(CpuMax, 1), "% was brief (never above ", CpuHigh, "% for ", SustainedMinutes, " continuous minutes)."), "")
 | extend Reason = case(
     not(AnyTelemetry), "No samples in this window. That is unknown, not zero use: check the Arc agent, DCR association and power state.",
     CpuSustained, strcat("CPU stayed at or above ", CpuHigh, "% for ", CpuLongestHotMin, " continuous minutes (sustained threshold ", SustainedMinutes, ")."),
