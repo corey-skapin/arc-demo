@@ -69,7 +69,10 @@ Describe 'Rebuilt workbooks lay out cleanly in the portal' {
                 $rows.Count | Should -Be 3 -Because $query.content.title
                 @($rows | ForEach-Object { $_.representation }) | Should -Be @('redBright', 'orange', 'green') -Because "$($query.content.title): low is red and high is green, never the other way round"
                 @($rows | ForEach-Object { $_.thresholdValue }) | Should -Be @('50', '80', $null) -Because $query.content.title
-                foreach ($row in $rows) { $row.text | Should -Be '{0}%' -Because "$($query.content.title): the unit belongs in the text, otherwise the cell prints 21.600" }
+                foreach ($row in $rows) { $row.text | Should -Be '{0}%' -Because "$($query.content.title): the unit belongs in the text, so the number format below must not add one" }
+                $formatter.numberFormat.unit | Should -Be 0 -Because "$($query.content.title): a unit here would double the percent sign"
+                $formatter.numberFormat.options.style | Should -Be 'decimal' -Because $query.content.title
+                $formatter.numberFormat.options.maximumFractionDigits | Should -Be 1 -Because "$($query.content.title): without a number format the cell prints 21.600%"
             }
         }
     }
