@@ -77,6 +77,3 @@ occasion; they are not current health.
 - [Module map](module-map.md): maintained scripts, templates and tests, with the
   evidence behind them. [CONTRIBUTING](../CONTRIBUTING.md) covers the checks to
   run before a change.
-- [SQL-shaped simulator](sql-workload-simulation.md): the retired events-only
-  simulator (`scripts/Invoke-SqlWorkloadOnArc.ps1`), kept for reference; it is not
-  engine proof and no build step runs it.
