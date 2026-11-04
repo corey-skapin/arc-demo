@@ -267,7 +267,9 @@ readiness from extension state in either direction.
 ## Arc reconnects after startup, but Windows Heartbeat is still pending
 
 First inspect exact backing-VM power and Arc connection read-only. Overnight
-auto-shutdown does not start hosts the next morning; a deallocated VM is not
+auto-shutdown (the DevTest schedule, or governance automation on the
+subscription, see the [runbook](runbook.md#5-park-and-wake-separate-disruptive-approval))
+does not start hosts the next morning; a deallocated VM is not
 proof of a broken Arc agent. Starting it needs explicit approval and a verified
 existing outbound path, not an incidental repair.
 
@@ -409,6 +411,11 @@ in the private skin to its exact name, only when it is already deallocated and
 not part of the active fleet. Activate leaves it parked and readiness checks it;
 unknown, running or missing exclusions still fail explicitly. Do not add it to
 the active manifest or boot its nested guest merely to clear the error.
+
+The reverse failure, `Explicit keep-parked VM <name> must exist in <infra-rg> and be
+deallocated`, means a listed VM was deleted (or is running). Remove deleted VMs
+from `operations.keepParkedVmNames` in the private skin; keep a name there only
+while that VM exists and is parked.
 
 ## Deploy fails immediately with `SkuNotAvailable`
 
@@ -571,7 +578,7 @@ deterministic, so reruns update existing resources instead of duplicating them.
 
 **Cause** — One of two:
 
-1. The Linux Arc GC extension stack is broken on Ubuntu 22.04 with `MSFT_ARC_TEST=true`. The repo installs AMA via the Azure VM extension path on Linux, which sidesteps this. If you reverted that and installed via the Arc extension, you'll hit this.
+1. The Linux Arc GC extension stack is broken on Ubuntu 22.04 with `MSFT_ARC_TEST=true` (a suspected contributor is the agent daemons missing that variable on hosts onboarded by an older Deploy; see [Linux Arc extensions and assessments](#linux-arc-extensions-and-assessments-stay-creating-after-every-wake)). The repo installs AMA via the Azure VM extension path on Linux, which sidesteps this. If you reverted that and installed via the Arc extension, you'll hit this.
 2. The DCR association is on the **Azure VM** resource ID instead of the **Arc** resource ID. The Linux AMA detects Arc and pulls config from Arc IMDS, which only sees DCRA's attached to the Arc resource.
 
 **Fix** — Inspect:
@@ -610,6 +617,42 @@ Invoke-DemoGuestCommand -Machine $machine -Script 'set -e; sudo systemctl restar
 
 Use bounded exact-ID readiness afterward; do not promise a fixed five-minute recovery.
 
+## Linux Arc extensions and assessments stay `Creating` after every wake
+
+**Symptom** - On the Linux hosts the Arc extension manager keeps exiting and
+restarting, so Arc extensions and Update Manager assessments stay
+`Creating`/`InProgress` after each wake while Heartbeats are fine.
+
+**Suspected cause (confirm in the live proof)** - Arc on an Azure VM needs
+`MSFT_ARC_TEST=true` in the environment of the agent **daemons** as well as for
+`azcmagent connect` ([Learn](https://learn.microsoft.com/azure/azure-arc/servers/plan-evaluate-on-azure-virtual-machine)).
+Onboarding set it for `connect` only, so `extd` (extension manager) and `gcad` (guest
+configuration) ran without it, and a manual `systemctl set-environment` does not
+survive the reboot that every wake involves.
+
+**Fix** - Deploy's Linux onboarding (`New-DemoArcLinuxOnboardScript` in
+`scripts/lib/Common.psm1`) now writes a persistent systemd drop-in,
+`/etc/systemd/system/<unit>.service.d/msft-arc-test.conf` with
+`Environment=MSFT_ARC_TEST=true`, for `himdsd`, `extd` and `gcad` before it connects,
+runs `systemctl set-environment`, and restarts `extd`/`gcad` afterwards (a failed
+restart only warns). Pester renders the script and runs `bash -n`; it has **not** run
+on a Linux host yet. **To validate in the live proof**, after the first Linux
+onboarding `systemctl show himdsd extd gcad -p Id -p Environment -p NRestarts` should
+show the variable with a steady restart count, and Arc extensions and assessments
+should reach `Succeeded` after a wake. Keep AMA and Change Tracking on the VM
+extension path either way.
+
+**Limit: hosts onboarded by an older Deploy** - Deploy onboards only machines that are
+not Arc-connected yet, and Activate runs no guest commands (Run Command queues behind
+VM extension updates and can stall a wake), so earlier hosts keep the old services.
+Rebuild the host, or after separate approval run the same idempotent step once on each:
+
+```powershell
+Import-Module .\scripts\lib\Common.psm1 -Force
+$machine = @{ Name = 'lnx-app-01'; OsType = 'Linux'; Id = "/subscriptions/<SUB>/resourceGroups/rg-arc-demo-infra/providers/Microsoft.Compute/virtualMachines/lnx-app-01" }
+Invoke-DemoGuestCommand -Machine $machine -Script ((Get-DemoArcTestServiceEnvScript) + "`nsudo systemctl restart extd gcad`necho ARC_DEMO_OK")
+```
+
 ## Update Manager shows no update data after activation
 
 **Symptom** - Azure Update Manager shows no update data, or Linux Arc machines
@@ -619,7 +662,9 @@ show `LinuxOsUpdateExtension` stuck in `Creating` or `Deleting`.
 script submits an on-demand assessment, but Update Manager creates temporary OS
 update extensions and the portal data is asynchronous. In the current lab,
 Windows assessment results complete reliably first; Linux extension provisioning
-can lag.
+can lag, and on a Linux host onboarded before the `MSFT_ARC_TEST` service drop-ins
+it can stall at every wake (see
+[Linux Arc extensions and assessments stay `Creating`](#linux-arc-extensions-and-assessments-stay-creating-after-every-wake)).
 
 **Fix** - First confirm the activation script submitted assessments:
 

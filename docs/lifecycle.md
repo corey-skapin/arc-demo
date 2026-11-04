@@ -21,7 +21,7 @@ and [managed identity lifecycle](https://learn.microsoft.com/entra/identity/mana
 
 ```powershell
 $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVATE_SKIN_PATH>' }
-.\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
+.\scripts\Test-Prerequisites.ps1 @target
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 .\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json
 
@@ -43,8 +43,10 @@ Owner (or Contributor + User Access Administrator), and needed provider
 registrations. Supplying a deployer principal ID does not bypass RBAC checks.
 Missing registrations must be approved and registered separately. Baseline
 providers include KeyVault, DevTestLab and Consumption. Optional Container Apps
-requires Microsoft.App; AKS additionally needs ContainerService, ManagedIdentity,
-Resources, Storage and ContainerInstance for its deployment script.
+requires Microsoft.App and the `containerapp` CLI extension; AKS additionally needs
+ContainerService, ManagedIdentity, Resources, Storage and ContainerInstance for its
+deployment script. `Test-Prerequisites.ps1 @target`, Deploy and the build wrapper's
+P0 all read the same set for the skin's workload toggles.
 The retired mixed SQL path no longer requests AzureArcData registration;
 optional real SQL preparation does not enable Arc SQL.
 The genuine nested guest uses its separate explicit extension helper.
@@ -142,7 +144,10 @@ the private skin can explicitly set `operations.keepParkedVmNames` to an array
 of names in this infra group. Each must already be deallocated and outside the
 active retained fleet/configured nested parent. Activate never starts or invokes
 guests on these VMs; Active readiness verifies they remain deallocated. Other
-unknown VMs still fail closed. Hibernate instead discovers all
+unknown VMs still fail closed. A listed name must keep existing: once that VM is
+deleted, Activate and readiness stop with `Explicit keep-parked VM <name> must
+exist … and be deallocated`, so remove deleted VMs from `operations.keepParkedVmNames`
+in the same change. Hibernate instead discovers all
 VMs, AKS and Container Apps in the explicitly targeted `rg-<prefix>-infra`;
 manifest/OS/skin drift is a warning, not a reason to leave that compute running.
 No workload ID outside that exact subscription/group is accepted. If the skin
@@ -424,7 +429,12 @@ VM-path CT reconciliation produced guest provisioning success and CT records for
 all three Linux hosts without restarts. Do not delete stuck Arc extensions or
 change paths incidentally. See the [CT support matrix and CLI examples](https://learn.microsoft.com/azure/azure-change-tracking-inventory/change-tracking-inventory-support-matrix).
 
-Linux VM Insights/Dependency Agent map remains disabled. Linux memory and disk
+Linux VM Insights/Dependency Agent map remains disabled. Linux onboarding gives the
+Arc agent daemons (`himdsd`, `extd`, `gcad`) a persistent `MSFT_ARC_TEST=true`
+systemd drop-in so the extension manager does not restart-loop after a wake; hosts
+onboarded by an older Deploy do not have it (limits and one-off fix in
+[troubleshooting](troubleshooting.md#linux-arc-extensions-and-assessments-stay-creating-after-every-wake)).
+Linux memory and disk
 telemetry comes from the four Linux AMA counters in the core DCR (table `Perf`),
 not from VM Insights; see the [workbook reference](operational-workbooks.md#linux-memory-and-disk-counters).
 The optional

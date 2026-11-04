@@ -123,7 +123,7 @@ Describe 'Workbook workspace scope is stamped at publish, never stored in the re
         }
     }
 
-    It 'publishes all five workbooks from Phase 11' {
+    It 'publishes each of the five upstream-derived workbooks from Phase 11' {
         $deploy = Get-Content -LiteralPath $deployPath -Raw
         foreach ($case in $books) { $deploy | Should -Match ([regex]::Escape((Split-Path $case.Path -Leaf))) -Because $case.Name }
     }

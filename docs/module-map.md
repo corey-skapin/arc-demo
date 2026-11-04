@@ -32,7 +32,7 @@ the customer-facing Arc records and observability plane are in the other group.
 
 | Entry point | Responsibility |
 | --- | --- |
-| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions/baseline provider checks and required CLI extension (`connectedmachine`) presence; reports every gap in one error, installs/registers nothing |
+| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions and the providers/CLI extensions the skin's workload toggles need (`Get-DemoPrerequisiteSet`, shared with Deploy and the wrapper's P0); reports every gap in one error, installs/registers nothing |
 | `scripts/New-NestedSqlDemoGuest.ps1`, `Connect-NestedSqlDemoGuest.ps1`, `Install-NestedSqlDemoEngine.ps1` | Primary scratch Windows/SQL/Arc guest build; private credentials and approved media |
 | `scripts/New-NestedSqlDemo.ps1`, `Invoke-NestedSqlDemoStep.ps1`, `scripts/lib/NestedSqlDemo.psm1` | Working build sequence (its onboarding credential comes from the shared identity helper), protected parent-side step transport and retained Windows answer-file generator; no retired V1-V3 controller layers |
 | `scripts/Test-NestedSqlDemoGuest.ps1`, `Enable-NestedSqlDemoExtension.ps1`, `Remove-NestedSqlDemoGuest.ps1` | Actual guest/SQL checks, Arc SQL extension and explicit scratch-guest teardown |
@@ -51,6 +51,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/lib/Common.psm1` | Skin/fleet validation (optional per-entry size, security type, data disks), checked CLI/REST with subscription pinning, tenant-only directory guards and CLI 2.91 not-found text, retained inventory, retained VM size/disk guards and per-size demand, bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota (CLI string quotas read as numbers; `-Requirements` adds several sizes per family), allocation guidance, retrying Key Vault secret write, stale-manifest selection, readiness checks |
 | `Get-DemoNestedSqlGuestConfig`, `Invoke-DemoNestedSqlGuest`, `Wait-DemoNestedSqlArcConnected` in `Common.psm1`, `tests/NestedSqlLifecycle.Tests.ps1` | One skin-defined nested guest, normal graceful shutdown/start and bounded Arc connection wait across Activate/Hibernate/Remove |
 | `Initialize-DemoOnboardingIdentity`, `Invoke-DemoOnboardingCredential` and the Graph helpers in `Common.psm1`, `tests/OnboardingIdentity.Tests.ps1` | Shared by Deploy and the nested build: an existing onboarding SP keeps its credentials, its Arc-group role is ensured after the group exists, a one-day credential is minted through Graph, passed as a SecureString and removed in `finally` with the original key IDs verified; with no SP it is created with the role and nothing is stored |
+| `New-DemoArcLinuxOnboardScript`, `Get-DemoArcTestServiceEnvScript` in `Common.psm1`, `tests/LinuxArcOnboard.Tests.ps1` | Linux Arc onboarding script, always LF: `MSFT_ARC_TEST` for `azcmagent connect` plus a persistent systemd drop-in for `himdsd`, `extd` and `gcad` (best-effort restart of `extd`/`gcad` after connect). The drop-in step is idempotent and is also the one-off fix for a host onboarded by an older Deploy. Checked with `bash -n`; not yet run on a Linux host |
 | `scripts/Invoke-SqlWorkloadOnArc.ps1` | Separate SQL-shaped guest signal simulator; not SQL Server enabled by Azure Arc validation |
 | `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved media/terms, bounded startup and hash ownership; guarded emitter-only update preserves normal worker functions and migrates the owned checkpoint with rollback/backups; no Arc SQL, automatic reboot/repair or Defender changes |
 | `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; v2 actual error/wait/session evidence, bounded rollback and independently gated recovery, not synthetic proof or SRE remediation |
@@ -174,6 +175,8 @@ retry, allocation guidance and the Remove workspace/history options.
 `tests/FleetVmShape.Tests.ps1` covers the optional per-entry size/security/disk
 schema, the skin-declared nested parent, retained size/disk refusal and per-size
 capacity demand, including the Deploy preview wiring.
+`tests/LinuxArcOnboard.Tests.ps1` renders the Linux onboarding script and checks the
+daemon drop-ins, their order around `azcmagent connect`, LF line endings and `bash -n`.
 `tests/BuildPlan.Tests.ps1` covers the build wrapper's config, plan, approvals,
 resume state, runner and presenter handoff with stub scripts;
 `tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded

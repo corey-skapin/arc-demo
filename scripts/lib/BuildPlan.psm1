@@ -200,6 +200,7 @@ function New-ArcDemoBuildContext {
         Location = [string](Get-DemoSkinValue $skin 'azure.location' 'australiaeast')
         Nested = (Get-DemoNestedSqlGuestConfig -Skin $skin)
         ContainerApps = [bool](Get-DemoSkinValue $skin 'workloads.deployContainerApps' $false)
+        Aks = [bool](Get-DemoSkinValue $skin 'workloads.deployAks' $false)
         ArcGroup = "rg-$prefix"
         InfraGroup = "rg-$prefix-infra"
         ArcRoot = $RepoRoot
@@ -745,11 +746,9 @@ function Invoke-ArcDemoBuildPreflight {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context)
     $notes = [System.Collections.Generic.List[string]]::new()
-    $null = Test-Prerequisites -SubscriptionId "$($Context.SubscriptionId)" -TenantId "$($Context.TenantId)" -DeployerPrincipalId $Context.Config.DeployerPrincipalId
-    if ($Context.ContainerApps) {
-        $registration = Invoke-DemoAz -Arguments @('provider', 'show', '--namespace', 'Microsoft.App', '--query', 'registrationState', '-o', 'tsv')
-        if ((@($registration) -join '').Trim() -ne 'Registered') { throw 'Provider Microsoft.App is not registered; an authorized operator must register it (preflight never does).' }
-    }
+    $prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$Context.ContainerApps -Aks:$Context.Aks
+    $null = Test-Prerequisites -SubscriptionId "$($Context.SubscriptionId)" -TenantId "$($Context.TenantId)" -DeployerPrincipalId $Context.Config.DeployerPrincipalId `
+        -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions
     $notes.Add((Get-BuildRepoSummary $Context.ArcRoot 'Arc repo'))
     if ($Context.Config.Sre) { $notes.Add((Get-BuildRepoSummary $Context.Config.Sre.RepoPath 'SRE repo')) }
     $deleted = Invoke-AzRest -Method Get -Url "https://management.azure.com/subscriptions/$($Context.SubscriptionId)/providers/Microsoft.OperationalInsights/deletedWorkspaces?api-version=2020-08-01"
