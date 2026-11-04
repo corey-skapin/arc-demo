@@ -49,6 +49,7 @@ or application health. See [support boundaries](docs/lifecycle.md).
 
 | Need | Reference |
 |---|---|
+| Build everything from zero, in order (plan first) | [Ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper) |
 | Build, prepare the presenter guide, or operate an existing lab | [Runbook](docs/runbook.md) |
 | Build, park, wake or remove the nested SQL guest | [Short nested SQL runbook](docs/nested-sql-demo.md) |
 | Activate, park, remove, retry or understand readiness | [Lifecycle contract](docs/lifecycle.md) |

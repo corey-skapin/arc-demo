@@ -743,6 +743,35 @@ Describe 'Build window' {
     }
 }
 
+Describe 'Build preflight' {
+    BeforeEach {
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' } -ModuleName BuildPlan
+        Mock Invoke-AzRest { [pscustomobject]@{ value = @() } } -ModuleName BuildPlan
+        Mock Invoke-DemoAz { 'false' } -ModuleName BuildPlan
+        Mock Write-Step {} -ModuleName BuildPlan
+    }
+    It 'checks the providers and CLI extension the skin workloads need, not only the defaults' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        (Invoke-ArcDemoBuildPreflight -Context $t.Context).status | Should -Be 'pass'
+        Should -Invoke Test-Prerequisites -ModuleName BuildPlan -Times 1 -Exactly -ParameterFilter {
+            'containerapp' -in $RequiredExtensions -and 'Microsoft.App' -in $Providers -and 'Microsoft.ContainerService' -notin $Providers
+        }
+    }
+    It 'checks the AKS providers, and no Container Apps prerequisite, when the skin deploys only AKS' {
+        $f = New-BuildFixture
+        $skinPath = Join-Path $f.Private 'arc-skin.json'
+        $skin = Get-Content $skinPath -Raw | ConvertFrom-Json -AsHashtable
+        $skin.workloads = @{ deployContainerApps = $false; deployAks = $true }
+        $skin | ConvertTo-Json -Depth 5 | Set-Content $skinPath
+        $t = Get-BuildTest $f
+        $null = Invoke-ArcDemoBuildPreflight -Context $t.Context
+        Should -Invoke Test-Prerequisites -ModuleName BuildPlan -Times 1 -Exactly -ParameterFilter {
+            'containerapp' -notin $RequiredExtensions -and 'Microsoft.App' -notin $Providers -and 'Microsoft.ContainerService' -in $Providers
+        }
+    }
+}
+
 Describe 'Evidence safety' {
     It 'redacts credentials and secret-named fields at every depth' {
         $credential = [pscredential]::new('user', (ConvertTo-SecureString -String 'fixture' -AsPlainText -Force))

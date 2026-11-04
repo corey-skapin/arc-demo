@@ -224,6 +224,20 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
             Should -Invoke az -Times 0 -ParameterFilter { $args[0] -eq 'extension' }
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'register' -in $Arguments }
         }
+        It 'adds the Container Apps and AKS prerequisites only for the workloads selected' {
+            $base = Get-DemoPrerequisiteSet
+            $base.Extensions | Should -Be @('connectedmachine')
+            $base.Providers | Should -Not -Contain 'Microsoft.App'
+            $base.Providers | Should -Not -Contain 'Microsoft.ContainerService'
+            $apps = Get-DemoPrerequisiteSet -ContainerApps
+            $apps.Extensions | Should -Be @('connectedmachine', 'containerapp')
+            $apps.Providers | Should -Contain 'Microsoft.App'
+            $apps.Providers | Should -Not -Contain 'Microsoft.ContainerService'
+            $aks = Get-DemoPrerequisiteSet -Aks
+            $aks.Extensions | Should -Be @('connectedmachine')
+            $aks.Providers | Should -Contain 'Microsoft.ContainerService'
+            $aks.Providers | Should -Not -Contain 'Microsoft.App'
+        }
     }
 }
 
@@ -428,6 +442,10 @@ Describe 'Deploy hardening wiring' {
         Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter {
             @($RequiredExtensions) -contains 'connectedmachine' -and @($RequiredExtensions) -contains 'containerapp' -and @($Providers) -contains 'Microsoft.App'
         }
+        & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -DeployAks $true -WhatIf
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter {
+            @($Providers) -contains 'Microsoft.ContainerService' -and @($Providers) -notcontains 'Microsoft.App' -and @($RequiredExtensions) -notcontains 'containerapp'
+        }
     }
     It 'saves the generated password through the retrying Key Vault helper right after the deployment' {
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -Confirm:$false } | Should -Throw '*stop after the secret write*'
@@ -451,6 +469,37 @@ Describe 'Deploy hardening wiring' {
     It 'passes any other deployment failure through unchanged' {
         $state.createError = 'Azure CLI deployment sub failed (exit 1): ERROR: {"code":"InvalidTemplateDeployment","message":"fixture template problem"}'
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -Confirm:$false } | Should -Throw '*fixture template problem*'
+    }
+}
+
+Describe 'Test-Prerequisites.ps1 checks what Deploy would check for the skin' {
+    BeforeEach {
+        Mock Import-Module {}
+        Mock Write-Ok {}
+        Mock Write-Host {}
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
+        $script:skinPath = Join-Path $TestDrive 'skin.json'
+    }
+    It 'adds the Container Apps prerequisites when the skin selects them' {
+        Set-Content -LiteralPath $script:skinPath -Value '{"schemaVersion":1,"workloads":{"deployContainerApps":true}}'
+        & (Join-Path $repo 'scripts\Test-Prerequisites.ps1') @target -SkinPath $script:skinPath
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter {
+            @($RequiredExtensions) -contains 'containerapp' -and @($Providers) -contains 'Microsoft.App' -and @($Providers) -notcontains 'Microsoft.ContainerService'
+        }
+    }
+    It 'adds the AKS providers when the skin selects AKS, and an explicit parameter overrides the skin' {
+        Set-Content -LiteralPath $script:skinPath -Value '{"schemaVersion":1,"workloads":{"deployContainerApps":true,"deployAks":true}}'
+        & (Join-Path $repo 'scripts\Test-Prerequisites.ps1') @target -SkinPath $script:skinPath -DeployContainerApps $false
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter {
+            @($Providers) -contains 'Microsoft.ContainerService' -and @($Providers) -notcontains 'Microsoft.App' -and @($RequiredExtensions) -notcontains 'containerapp'
+        }
+    }
+    It 'checks only the base set for a skin with no optional workloads' {
+        Set-Content -LiteralPath $script:skinPath -Value '{"schemaVersion":1}'
+        & (Join-Path $repo 'scripts\Test-Prerequisites.ps1') @target -SkinPath $script:skinPath
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter {
+            @($RequiredExtensions).Count -eq 1 -and @($RequiredExtensions) -contains 'connectedmachine' -and @($Providers) -notcontains 'Microsoft.App'
+        }
     }
 }
 

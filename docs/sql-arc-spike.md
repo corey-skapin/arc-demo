@@ -16,9 +16,10 @@ on an Azure VM.
 | What the presenter wants | Repo path | Boundary |
 |---|---|---|
 | Real SQL instance/database/query activity in this existing lab | [Real SQL workload](sql-engine-workload.md) | SQL 2022 Developer, approved media/terms; no Arc SQL extension/Paid/BPA |
-| Historical lightweight SQL-shaped events only | [Simulator reference](sql-workload-simulation.md) | No engine or SQL query proof; label it accurately |
 | Functional nested SQL/Arc demo | [Scratch nested guest](nested-sql-demo.md) | Real Windows/SQL/Arc guest; Azure-hosted nested demo, not blanket support validation |
 | Supported SQL Server enabled by Azure Arc product validation | Supported non-Azure SQL host | Confirm the documented host/licensing requirements; do not extrapolate from this demo |
+
+SQL-shaped simulator events (the old events-only worker) were retired and never proved a SQL engine.
 
 The scratch build is primary; Jumpstart is a manual alternative. The
 [nested runbook](nested-sql-demo.md#alternative-jumpstart-prebuilt-image) owns the

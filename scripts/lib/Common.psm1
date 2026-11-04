@@ -39,6 +39,26 @@ function Get-DemoMissingCliExtension {
     @($Required | Where-Object { $_ -notin $installed })
 }
 
+function Get-DemoPrerequisiteSet {
+    <#
+    .SYNOPSIS
+        The resource providers and Azure CLI extensions Deploy needs for the selected workloads.
+    .DESCRIPTION
+        One list shared by Deploy, the build wrapper preflight and Test-Prerequisites.ps1, so a
+        read-only check cannot pass while Deploy would stop on a provider or extension it skipped.
+    #>
+    [CmdletBinding()]
+    param([switch]$ContainerApps, [switch]$Aks)
+    $providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
+        'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement', 'Microsoft.Insights', 'Microsoft.Security',
+        'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab',
+        'Microsoft.Consumption')
+    $extensions = @('connectedmachine')
+    if ($ContainerApps) { $providers += 'Microsoft.App'; $extensions += 'containerapp' }
+    if ($Aks) { $providers += @('Microsoft.ContainerService', 'Microsoft.ManagedIdentity', 'Microsoft.Resources', 'Microsoft.Storage', 'Microsoft.ContainerInstance') }
+    [pscustomobject]@{ Providers = $providers; Extensions = $extensions }
+}
+
 function Test-Prerequisites {
     <#
     .SYNOPSIS
@@ -54,11 +74,8 @@ function Test-Prerequisites {
         [Parameter(Mandatory)][string]$SubscriptionId,
         [Parameter(Mandatory)][string]$TenantId,
         [string]$DeployerPrincipalId = '',
-        [string[]]$Providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
-            'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement', 'Microsoft.Insights', 'Microsoft.Security',
-            'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab',
-            'Microsoft.Consumption'),
-        [string[]]$RequiredExtensions = @('connectedmachine')
+        [string[]]$Providers = (Get-DemoPrerequisiteSet).Providers,
+        [string[]]$RequiredExtensions = (Get-DemoPrerequisiteSet).Extensions
     )
 
     Write-Header 'Pre-flight checks'
@@ -248,7 +265,7 @@ function Invoke-AzRest {
     <#
     .SYNOPSIS
         Wrapper for Azure Resource Manager REST calls. Use this instead of `az rest`
-        for URLs containing `?` or `()` — see AGENTS.md Gotcha 5.
+        for URLs containing `?` or `()` — see "Preserve platform workarounds" in AGENTS.md.
     #>
     [CmdletBinding()]
     param(
@@ -1428,6 +1445,59 @@ while (-not @(Get-Process -ErrorAction Stop | Where-Object ProcessName -eq 'MonA
         $text = "set -e`n$restartCommand`nfor service in $($services -join ' '); do sudo systemctl is-active --quiet `"`$service`"; done`necho ARC_DEMO_OK"
     }
     [pscustomobject]@{ Script = $text; Services = $services }
+}
+
+function Get-DemoArcTestServiceEnvScript {
+    <#
+    .SYNOPSIS
+        Bash that gives the Linux Arc agent daemons MSFT_ARC_TEST=true, which Arc simulation on an Azure VM needs.
+        systemd drop-ins survive reboots (a wake); set-environment covers units started before the next reboot.
+        Idempotent, so it is also the one-off fix for a host onboarded before the drop-ins existed.
+    #>
+    [CmdletBinding()]
+    param()
+    @(
+        'for svc in himdsd extd gcad; do'
+        '  sudo mkdir -p "/etc/systemd/system/${svc}.service.d"'
+        '  printf ''[Service]\nEnvironment=MSFT_ARC_TEST=true\n'' | sudo tee "/etc/systemd/system/${svc}.service.d/msft-arc-test.conf" > /dev/null'
+        'done'
+        'sudo systemctl set-environment MSFT_ARC_TEST=true'
+        'sudo systemctl daemon-reload'
+    ) -join "`n"
+}
+
+function New-DemoArcLinuxOnboardScript {
+    <#
+    .SYNOPSIS
+        Builds the Linux Arc onboarding script for an Azure VM, with LF line endings whatever the checkout uses.
+        MSFT_ARC_TEST is set for azcmagent connect and, through systemd drop-ins, for the agent daemons;
+        without it the extension manager and guest configuration services keep exiting and restarting.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ServicePrincipalId,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ServicePrincipalSecret,
+        [Parameter(Mandatory)][string]$ResourceGroup,
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory)][string]$SubscriptionId,
+        [Parameter(Mandatory)][string]$Tags
+    )
+    @(
+        'set -e'
+        'curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -o /tmp/pmp.deb'
+        'sudo dpkg -i /tmp/pmp.deb'
+        'sudo apt-get update -qq'
+        'sudo apt-get install -y azcmagent'
+        Get-DemoArcTestServiceEnvScript
+        'sudo MSFT_ARC_TEST=true azcmagent connect \'
+        "  --service-principal-id $ServicePrincipalId --service-principal-secret '$ServicePrincipalSecret' \"
+        "  --resource-group $ResourceGroup --tenant-id $TenantId --location $Location \"
+        "  --subscription-id $SubscriptionId \"
+        "  --tags `"$Tags`""
+        'sudo systemctl restart extd gcad || echo ''WARN: could not restart extd/gcad; they read MSFT_ARC_TEST on their next start.'''
+        'echo ARC_DEMO_OK'
+    ) -join "`n"
 }
 
 function Remove-DemoGuestJob {

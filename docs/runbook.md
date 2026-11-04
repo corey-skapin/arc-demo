@@ -312,16 +312,17 @@ Relative fleet paths resolve against the repo root.
 ## 2. Read-only preflight and preview
 
 ```powershell
-.\scripts\Test-Prerequisites.ps1 -SubscriptionId <SUB> -TenantId <TENANT>
+.\scripts\Test-Prerequisites.ps1 @target
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 ```
 
 Preflight does not register providers, install CLI extensions or change context.
 It reports every unregistered provider and every missing CLI extension (`connectedmachine`,
 plus `containerapp` for Container Apps) in one error with the exact fix, for example
-`az extension add --name connectedmachine --yes`; resolve missing providers with
+`az extension add --name containerapp --yes`; resolve missing providers with
 separate operator authorization, using the exact providers reported
-by deployment preflight for the selected workloads. Supplying
+by preflight for the skin's workload toggles (`Test-Prerequisites.ps1`, Deploy and
+the build wrapper's P0 check the same set). Supplying
 `-DeployerPrincipalId <OBJECT_ID>` bypasses only Graph user discovery, not RBAC.
 SKU restriction and regional/family vCPU quota checks do not guarantee capacity. If Azure still
 refuses allocation, Deploy prints the options and never switches VM size or
@@ -443,7 +444,12 @@ in an existing private directory to preserve per-host outcomes, and distinguish
 script completion from Monitor Ready and asynchronous assessment completion.
 It does not reset faults. Optional AKS can take longer and
 requires a 15-30 minute stop/start separation; capacity is not guaranteed.
-Nightly VM auto-shutdown is not whole-lab hibernation.
+Nightly VM auto-shutdown is not whole-lab hibernation. VMs can also be
+deallocated outside these scripts: the DevTest auto-shutdown schedule (19:00 by
+default) and, in some subscriptions, governance automation that deallocates VMs
+on its own schedule (observed nightly at about 02:17). Neither starts anything
+again, so a stopped fleet after a quiet night is expected, not a fault. Run
+Activate, which starts whatever is stopped, rather than repairing hosts by hand.
 
 Retain runtime target/skin/fleet inputs and deployment history outside git.
 If SRE is attached, park that dependent layer first through its own maintained
@@ -469,7 +475,10 @@ pause/restore of their previous enabled state.
 ```
 
 This deletes both demo groups and named policies/budget and verifies all their
-absence. A running nested parent gets one bounded graceful guest stop that warns
+absence. It is `ConfirmImpact='High'` and prompts: after the user's separate approval,
+add `-Confirm:$false` when running from an unattended or AI-driven shell (Deploy,
+Hibernate and Activate do not prompt; the wrapper, `Prepare-NestedSqlParent.ps1` and
+the nested helpers do, like Remove). A running nested parent gets one bounded graceful guest stop that warns
 and continues if it fails. Two opt-in switches serve an intended clean same-prefix
 rebuild: `-ForceDeleteWorkspace` first permanently deletes `law-<prefix>` (irreversible;
 otherwise re-creating that name within 14 days recovers the old workspace and its

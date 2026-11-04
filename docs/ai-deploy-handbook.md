@@ -23,8 +23,9 @@ optional Container App/AKS/SQL scenarios a prerequisite for the Arc story.
 1. Verify the exact supplied target without changing CLI defaults. Use normal
    prerequisites/preview and obtain approval before any deployment, activation,
    repair, provider registration, assessment, fault, email test or other write.
-2. Follow the runbook/lifecycle path for the approved operation. Preserve VM/SP
-   credentials, retained identities/data and workload fault flags. Never run a
+2. Follow the runbook/lifecycle path for the approved operation; to build the whole
+   estate from zero, use the plan-first ordered build wrapper in the runbook. Preserve
+   VM/SP credentials, retained identities/data and workload fault flags. Never run a
    destructive lifecycle rehearsal against this in-use lab.
 3. Verify Active readiness independently, preserving dated JSON evidence outside
    source. Pending telemetry is not a presenter-ready handoff. Monitor readiness

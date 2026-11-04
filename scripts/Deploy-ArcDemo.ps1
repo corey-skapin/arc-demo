@@ -6,19 +6,26 @@
     Runs the following phases. Each phase is idempotent — re-running the script
     after a partial failure picks up where it left off.
 
-      1. Pre-flight checks (PS, az, bicep, signed-in tenant, RBAC)
+      1. Pre-flight checks (PS, az, bicep, CLI extensions, signed-in tenant, RBAC)
       2. Bicep main.bicep deployment (RGs, network, KV, LAW, VMs,
          alerts, Defender, policies, budget)
       2.5 Data Collection Rules after Log Analytics table readiness
+      2.6 Azure-native VM DCR associations (only with -DeployAzureVMs)
       3. Verify explicit NAT outbound before guest onboarding
-      4. Arc onboarding service principal
-      5. Connected Machine Agent install via VM Run Command for both OS types
+      4. Arc onboarding service principal (a one-day credential, removed afterwards)
+      5. Arc onboarding of machines not yet Connected, through VM Run Command
+         (Linux also gets the MSFT_ARC_TEST service environment)
+      5.5 Update Manager periodic assessment
       6. AMA install + DCR associations for Monitor-supported fleet entries
-         only (DCRA against the Arc resource ID — see AGENTS.md Gotcha 3)
+         only (DCRA against the Arc resource ID — see "Preserve platform
+         workarounds" in AGENTS.md)
       7. Dependency Agent for VM Insights-supported Windows entries only
       8. Change Tracking extension for Change Tracking-supported entries only
       9. SQL engine preparation is a separate, explicitly approved operation
-     11. Workbook upload
+         (see docs/nested-sql-demo.md and Prepare-NestedSqlParent.ps1)
+     11. Workbooks (six published here; the two capacity/optimisation workbooks
+         are published by Set-OperationalWorkbook.ps1, steps P6.2/P6.3 of the
+         ordered build wrapper, or by hand)
      12. Post-deploy validation (heartbeat, alert rule, workbook URL)
 
 .PARAMETER SubscriptionId
@@ -528,14 +535,8 @@ function New-ChangeTrackingDcrBody {
 }
 
 # Phase 1: pre-flight
-$providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
-    'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement', 'Microsoft.Insights', 'Microsoft.Security',
-    'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab', 'Microsoft.Consumption')
-if ($DeployContainerApps) { $providers += 'Microsoft.App' }
-if ($DeployAks) { $providers += @('Microsoft.ContainerService', 'Microsoft.ManagedIdentity', 'Microsoft.Resources', 'Microsoft.Storage', 'Microsoft.ContainerInstance') }
-$cliExtensions = @('connectedmachine')
-if ($DeployContainerApps) { $cliExtensions += 'containerapp' }
-$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $providers -RequiredExtensions $cliExtensions
+$prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Aks:$DeployAks
+$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"
@@ -848,19 +849,8 @@ Start-Process msiexec.exe -Wait -ArgumentList "/i `$env:TEMP\acm.msi /qn"
 if (`$LASTEXITCODE -ne 0) { throw 'Arc onboarding failed' }
 'ARC_DEMO_OK'
 "@
-$lnxOnboard = @"
-set -e
-curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -o /tmp/pmp.deb
-sudo dpkg -i /tmp/pmp.deb
-sudo apt-get update -qq
-sudo apt-get install -y azcmagent
-sudo MSFT_ARC_TEST=true azcmagent connect \
-  --service-principal-id $spnAppId --service-principal-secret '$spnSecret' \
-  --resource-group $arcRg --tenant-id $TenantId --location $Location \
-  --subscription-id $SubscriptionId \
-  --tags "$arcOnboardingTags"
-echo ARC_DEMO_OK
-"@
+$lnxOnboard = New-DemoArcLinuxOnboardScript -ServicePrincipalId $spnAppId -ServicePrincipalSecret $spnSecret `
+    -ResourceGroup $arcRg -TenantId $TenantId -Location $Location -SubscriptionId $SubscriptionId -Tags $arcOnboardingTags
 $winFile = Join-Path $libDir 'arc-win.ps1'
 $lnxFile = Join-Path $libDir 'arc-lnx.sh'
 [System.IO.File]::WriteAllText($winFile, $winOnboard, [System.Text.UTF8Encoding]::new($false))
@@ -1161,6 +1151,7 @@ Write-Host "  Infra RG:  https://portal.azure.com/#@$TenantId/resource/subscript
 Write-Host ''
 Write-Host "  Next steps:"
 Write-Host "    - Wait ~12h for MCSB/NIST compliance scores to populate."
-Write-Host "    - SQL preparation is separate; use Invoke-SqlEngineOnArc.ps1 only with approved media/licence consent. No Arc SQL/BPA."
+Write-Host "    - Optional nested SQL guest: docs/nested-sql-demo.md (Prepare-NestedSqlParent.ps1, then New-NestedSqlDemo.ps1). Real SQL: Invoke-SqlEngineOnArc.ps1, only with approved media/licence consent. No Arc SQL/BPA on the base simulation."
+Write-Host "    - Presenter guide: docs/runbook.md#prepare-the-local-presenter-guide (offline; not a health check)."
 Write-Host "    - After operator approval, use Hibernate-ArcDemo.ps1 with the same subscription, tenant and skin; retained services still incur costs."
 Write-Host ''
