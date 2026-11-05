@@ -374,7 +374,7 @@
         "query": "resources\n| where type =~ 'microsoft.azurearcdata/sqlserverinstances/databases'\n| extend InstanceId = tolower(substring(id, 0, indexof(tolower(id), '/databases/')))\n| join kind=inner (resources | where type =~ 'microsoft.azurearcdata/sqlserverinstances' | project InstanceId = tolower(id), Instance = name) on InstanceId\n| project Instance, Database = name, Kind = iff(name in~ ('master', 'model', 'msdb', 'tempdb'), 'System', 'User'), State = tostring(properties.state), SizeMB = round(todouble(properties.sizeMB), 1),\n    Recovery = tostring(properties.recoveryMode), CompatibilityLevel = toint(properties.compatibilityLevel)\n| order by Instance asc, Kind desc, Database asc",
         "size": 3,
         "title": "Databases discovered by Arc",
-        "noDataMessage": "No databases to list because no Arc-enabled SQL Server instance is registered in the subscriptions selected.",
+        "noDataMessage": "No databases to list: no Arc SQL instance is registered in scope, or its database inventory has not been indexed yet (Resource Graph can lag after a rebuild; LicenseOnly mode lists the instance only).",
         "noDataMessageStyle": 4,
         "queryType": 1,
         "resourceType": "microsoft.resourcegraph/resources",
