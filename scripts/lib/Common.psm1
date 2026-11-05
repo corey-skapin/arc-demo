@@ -1485,15 +1485,20 @@ function New-DemoCheck {
 }
 
 function Get-DemoHeartbeatIds {
+    <#
+    .SYNOPSIS
+        The resources with a Heartbeat in the last 10 minutes: one object per exact lower-cased _ResourceId, with the
+        UTC time of its latest Heartbeat so that evidence can show how fresh it is.
+    #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$WorkspaceCustomerId)
     $token = Get-LawQueryToken
     $response = Invoke-RestMethod -Method Post -TimeoutSec 60 `
         -Uri "https://api.loganalytics.io/v1/workspaces/$WorkspaceCustomerId/query" `
         -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' `
-        -Body (@{ query = 'Heartbeat | where TimeGenerated > ago(10m) | distinct tolower(_ResourceId)' } | ConvertTo-Json)
+        -Body (@{ query = 'Heartbeat | where TimeGenerated > ago(10m) | summarize LastHeartbeat = max(TimeGenerated) by ResourceId = tolower(_ResourceId)' } | ConvertTo-Json)
     if ($response.error) { throw "Log Analytics returned a query error: $($response.error.code)" }
-    return @($response.tables[0].rows | ForEach-Object { [string]$_[0] })
+    return @($response.tables[0].rows | ForEach-Object { [pscustomobject]@{ Id = [string]$_[0]; LastHeartbeat = (ConvertTo-DemoUtc $_[1]) } })
 }
 
 function Get-DemoReadinessChecks {
@@ -1549,10 +1554,13 @@ function Get-DemoReadinessChecks {
     $workbooks = @($arcResources | Where-Object { $_.type -eq 'Microsoft.Insights/workbooks' })
     New-DemoCheck 'workbook' "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/workbooks" 'at least one workbook' $workbooks.Count $(if ($workbooks) { 'pass' } else { 'fail' })
     $arcMachines = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $Inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
-    $heartbeatIds = @()
+    $heartbeats = @{}
     if (@($Inventory.Machines | Where-Object Monitor).Count -gt 0) {
         $workspace = Invoke-DemoAz -Arguments @('monitor', 'log-analytics', 'workspace', 'show', '--ids', $workspaceId, '-o', 'json') | ConvertFrom-Json
-        $heartbeatIds = @(Get-DemoHeartbeatIds -WorkspaceCustomerId $workspace.customerId)
+        foreach ($entry in @(Get-DemoHeartbeatIds -WorkspaceCustomerId $workspace.customerId)) {
+            if ($entry -is [string]) { $heartbeats[$entry.ToLowerInvariant()] = $null }
+            else { $heartbeats[([string]$entry.Id).ToLowerInvariant()] = $entry.LastHeartbeat }
+        }
     }
     foreach ($machine in $Inventory.Machines) {
         $actual = $machine.Actual
@@ -1573,6 +1581,13 @@ function Get-DemoReadinessChecks {
         }
         $scope = if ($machine.Native) { $machine.Id } else { $machine.ArcId }
         $extensionScope = if ($machine.Native -or $machine.OsType -eq 'Linux') { $machine.Id } else { $machine.ArcId }
+        $provisioning = if ($actual) { [string]$actual.provisioningState }
+        if ($provisioning) {
+            # Soft: a Linux VM can sit Updating for about 90 minutes behind a Defender MDE.Linux install lock while the guest is healthy.
+            $provisioningStatus = if ($provisioning -eq 'Succeeded') { 'pass' } elseif ($provisioning -eq 'Failed') { 'fail' } else { 'pending' }
+            New-DemoCheck "provisioning/$($machine.Name)" $machine.Id 'Succeeded' $provisioning $provisioningStatus -Required $false `
+                -Message $(if ($provisioningStatus -eq 'pass') { '' } else { "ARM provisioning state $provisioning. Soft warning, not a readiness gate: a Linux VM can stay Updating for about 90 minutes behind a Defender MDE.Linux install lock while the guest is healthy and its Heartbeat is fresh. See docs/troubleshooting.md, A Linux VM stays Updating behind a Defender MDE.Linux install lock." })
+        }
         $extensions = @()
         if ($machine.Monitor -and $actual) {
             $extensions = if ($machine.Native -or $machine.OsType -eq 'Linux') {
@@ -1585,9 +1600,14 @@ function Get-DemoReadinessChecks {
         $amaExtension = $extensions | Where-Object name -eq $amaName | Select-Object -First 1
         $amaState = if ($amaExtension.provisioningState) { $amaExtension.provisioningState } else { $amaExtension.properties.provisioningState }
         if ($machine.Monitor) {
-            $seen = $scope.ToLowerInvariant() -in $heartbeatIds
+            $beatKey = $scope.ToLowerInvariant()
+            $seen = $heartbeats.ContainsKey($beatKey)
+            $lastBeat = if ($seen) { $heartbeats[$beatKey] }
+            $observedBeat = if (-not $seen) { 'no Heartbeat in the last 10 minutes' }
+                elseif ($lastBeat) { "Heartbeat at $($lastBeat.ToString('yyyy-MM-ddTHH:mm:ssZ')), $([int][Math]::Max(0, ((Get-Date).ToUniversalTime() - $lastBeat).TotalMinutes)) min before this check" }
+                else { 'Heartbeat in the last 10 minutes' }
             $amaFailed = -not $seen -and $amaState -eq 'Failed'
-            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'Heartbeat within 10 minutes by _ResourceId' $seen $(if ($seen) { 'pass' } elseif ($amaFailed) { 'fail' } else { 'pending' }) `
+            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'Heartbeat within 10 minutes by _ResourceId' $observedBeat $(if ($seen) { 'pass' } elseif ($amaFailed) { 'fail' } else { 'pending' }) `
                 -Message $(if ($amaFailed) { 'No recent Heartbeat and the AMA extension is Failed: a real failure, not telemetry lag.' } else { '' })
         } else {
             New-DemoCheck "heartbeat/$($machine.Name)" $scope 'unsupported host' $null 'skipped' $false
@@ -1604,6 +1624,9 @@ function Get-DemoReadinessChecks {
         $extensionNames = @($amaName)
         if ($machine.VmInsights) { $extensionNames += 'DependencyAgentWindows' }
         if ($machine.ChangeTracking) { $extensionNames += "ChangeTracking-$($machine.OsType)" }
+        # Defender for Servers installs MDE itself, so its row exists only when the extension does; its state is as soft as the others.
+        $mdeName = if ($machine.OsType -eq 'Windows') { 'MDE.Windows' } else { 'MDE.Linux' }
+        if (@($extensions | Where-Object name -eq $mdeName).Count) { $extensionNames += $mdeName }
         # Extension provisioning is a soft diagnostic. Only the heartbeat row can gate readiness.
         $connectedMinutes = if ($arc.status -eq 'Connected' -and $arc.lastStatusChange) {
             [int][Math]::Max(0, ((Get-Date).ToUniversalTime() - (ConvertTo-DemoUtc $arc.lastStatusChange)).TotalMinutes)

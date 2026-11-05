@@ -420,7 +420,9 @@ outside committed source because it contains live environment identifiers.
 
 Checks cover retained groups, core resources/workbook presence, exact VM power,
 Arc connection, the `role` and `osTier` tags on every Arc machine (required `tags/*`
-rows, compared with the deployment manifest), recent Heartbeat by expected ARM ID, supported extension
+rows, compared with the deployment manifest), recent Heartbeat by expected ARM ID
+(its `observed` text carries the time of the latest Heartbeat and its age), the VM's
+ARM provisioning state (soft `provisioning/*` rows) and supported extension
 provisioning (soft, non-required `extension/*` diagnostics), DCRA identities, NAT
 attachment/presence, AKS power/provisioning and
 active Container App revision health. `RunningAtMinScale`/`RunningAtMaxScale` are
@@ -483,6 +485,33 @@ EDR/event-delivery validation, or change policy to make the story greener.
 The earlier timeout's underlying cause is not established. Keep timestamped ARM,
 guest health and existing log evidence separate. No reinstall/retry/removal,
 service restart, VM restart or AV-mode change follows from diagnosis alone.
+
+### Linux VMs and the Defender MDE.Linux install lock
+
+A defect in the vendor's MDE.Linux handler can leave a Linux VM `Updating` for about
+90 minutes while the guest is healthy: every real `enable` leaves a 36-minute orphan
+install lock, and a Defender push inside that window is never completed. The
+[troubleshooting entry](troubleshooting.md#a-linux-vm-stays-updating-behind-a-defender-mdelinux-install-lock)
+has the cause and the recovery. For the lifecycle this means:
+
+- Every boot of a Linux VM runs a real `enable`, so a Defender push within 36 minutes
+  after an Activate can leave that VM `Updating`. With the observed hourly push and
+  independent timing that is roughly three in five VMs (derived from the 36-of-60-minute
+  window, not measured; the push cadence did not stay hourly after one recovery, so treat
+  it as an upper bound). Activation is unaffected: it passes a host on VM running, Arc
+  `Connected` and a fresh Heartbeat, and shows the extension state as a soft warning.
+- Readiness reports the VM's ARM provisioning state and `MDE.Linux` state as non-required
+  `provisioning/*` and `extension/*` rows with a pointer to the entry; they never gate.
+- Hibernate meets such a VM only if one is `Updating` when it runs. What `az vm
+  deallocate` does then (queue, conflict or success) has not been tested. Hibernate
+  submits every deallocation without waiting, then waits up to 20 minutes for each VM
+  to read deallocated; a VM that is still not deallocated fails the run with an error
+  (never "verified stopped") and keeps the progress made, and a rerun after the VM
+  settles finishes the job. The DevTest auto-shutdown and any governance deallocation
+  face the same unknown.
+- Deploy warns before it submits when a VM is already `Updating`, then polls with progress.
+  A tag edit or a re-PUT of a Linux VM is a write that can seed the stall, so Deploy skips
+  the Arc tag write when the tags already match.
 
 ## Validation boundaries
 

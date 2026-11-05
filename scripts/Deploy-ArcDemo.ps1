@@ -608,6 +608,11 @@ if ($kvName) {
 Write-Header 'Deploying main.bicep'
 $vmOutput = Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
 $existingVms = @(if ($null -ne $vmOutput) { $vmOutput | ConvertFrom-Json })
+# A VM that is already Updating holds this deployment's own write to it for as long as the platform keeps the earlier
+# operation open: about 90 minutes behind a Defender MDE.Linux install lock on a healthy Linux guest. Say so now.
+foreach ($busyVm in @($existingVms | Where-Object { $_.provisioningState -and $_.provisioningState -ne 'Succeeded' })) {
+    Write-Warn "VM $($busyVm.name) is $($busyVm.provisioningState). This deployment's write to it waits behind the earlier operation, which can take about 90 minutes when it is a Defender MDE.Linux install lock on a healthy Linux guest. The deployment is polled with progress below. Do not cancel it, reapply the VM or send it a Run Command to speed it up (docs/troubleshooting.md, A Linux VM stays Updating behind a Defender MDE.Linux install lock)."
+}
 # The password saved by an earlier run (-AdminPasswordPath) is the way back in when the vault cannot be read from here,
 # for example a vault that a tenant policy made private-only, or a build that stopped before the vault copy was written.
 $savedPassword = if ($AdminPasswordPath -and -not $AdminPassword) { Read-DemoSecretFile -Path $AdminPasswordPath }

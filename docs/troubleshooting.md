@@ -115,7 +115,9 @@ and Change Tracking reporting ARM Updating even when their guest handlers report
 Succeeded and data continues to arrive. A read-only look at one awake Linux host
 showed the VM provisioning state `Updating`, `MDE.Linux` `Transitioning` (the guest
 agent reported no status file) and the other handlers Ready, still so about 75
-minutes after wake with fresh Heartbeats.
+minutes after wake with fresh Heartbeats. The cause (an orphaned install lock in the
+vendor's MDE.Linux handler) and the recovery are in
+[A Linux VM stays Updating behind a Defender MDE.Linux install lock](#a-linux-vm-stays-updating-behind-a-defender-mdelinux-install-lock).
 
 **Not a gate.** Extension provisioning state (AMA, Change Tracking, MDE) is a soft
 warning, not a readiness condition. Activation prints `extension <name> Updating for
@@ -127,6 +129,49 @@ with no Heartbeat is different: that is a real failure. A missing MDE status fil
 not proof of working endpoint protection.
 Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
 restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
+
+## A Linux VM stays Updating behind a Defender MDE.Linux install lock
+
+**Symptom** — a Linux VM reads `Updating` and its `MDE.Linux` extension `Transitioning` for far longer than a
+wake or a deployment should take, while the guest is healthy: the agent is active, Heartbeats are fresh and AMA
+and Change Tracking run. A Deploy rerun waits at that VM's module with nothing else wrong, and a Run Command sent
+to it queues. It recurs, because Defender pushes the extension about hourly: in one build window three Linux VMs
+spent most of four hours `Updating`. Readiness shows non-required `provisioning/<vm>` and `extension/<vm>/MDE.Linux` rows.
+
+**Cause** — the vendor's MDE.Linux handler (observed in version 1.0.16.6) writes an install lock with a 36-minute
+expiry at the end of every real `enable`, even when its installer wrapper already finished and removed its own, so
+every real `enable` on a healthy host leaves an orphan lock. An `enable` inside that window logs "Installation
+already in progress." and writes no status file, so ARM keeps the VM `Updating` until the platform times the write
+out (about 90 minutes) or a new goal state reaches the guest after the lock is over 36 minutes old. Defender's push
+skips a VM whose write is still open. Defender for Servers Plan 2 provisions the VM-path and the Arc-path
+`MDE.Linux` extension on a simulated host, and they share one handler directory, lock and status directory with
+colliding sequence numbers, so an Arc-path `Succeeded` is not evidence of an install. Anything that makes the
+handler run `enable` within 36 minutes before a push seeds the stall: a Run Command, a Deploy re-PUT of the VM, a
+tag edit (a write now, a propagation write about 10 minutes later, and a Defender re-push minutes after the first)
+or a boot of the VM. `ExcludeMdeAutoUpdate=true` on the VM and the Arc machine did not stop the push. This is a
+defect in the vendor extension: nothing here removes, reinstalls or patches Defender.
+
+**What to do**
+
+- Treat it as a soft warning and present normally; the required `heartbeat/*` rows decide readiness.
+- Wait. The platform releases the open write at about 90 minutes and the VM becomes `Succeeded` with no action.
+- Do not cancel the update, remove or reinstall Defender, restart the agent or the VM, or send a Run Command to a VM
+  whose `MDE.Linux` is `Transitioning` with a fresh lock: it queues and then blocks the one nudge that could help.
+- If recovery cannot wait, ask the owner first, then send exactly ONE new goal state (`az vm reapply`, or a read-only
+  Run Command) only when the last `enable` is more than 36 minutes old and right after a Defender push. A nudge
+  resets the lock clock, so one sent shortly before the next push recreates the stall.
+- When the VM channel is stuck, inspect through the Arc channel (`az connectedmachine run-command create`, preview and
+  best effort). It only inspects: an Arc-channel run command produces no goal state and cannot heal the VM.
+- Deploy warns before it submits when a VM is already `Updating` and then polls its deployment with progress, so the
+  wait is visible rather than silent. It does not skip, cancel or reorder anything.
+- What a deallocate does to a VM that is `Updating` (queue, conflict or success) has not been tested. Hibernate
+  submits the deallocation without waiting and then waits up to 20 minutes for the VM to read deallocated; if it
+  does not, the run fails with an error rather than reporting verified stopped compute, and a rerun after the VM
+  settles finishes the job; see [the lifecycle note](lifecycle.md#linux-vms-and-the-defender-mdelinux-install-lock).
+
+The defect belongs to the Defender for Endpoint extension owners (create the lock before starting the wrapper and
+delete it when the wrapper ends, or write a status file in the "already in progress" branch, and do not share one
+handler directory between the VM and Arc paths). It has not been reported upstream from this repository.
 
 ## Activation fails parsing an absent NAT or public IP
 
