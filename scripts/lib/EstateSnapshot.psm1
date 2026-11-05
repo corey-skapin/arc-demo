@@ -301,7 +301,7 @@ function Test-DemoEstateParity {
                     $start = ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'startDateTime')
                     $end = ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'endDateTime')
                     $start -and $end -and ($end - $start).TotalDays -gt 2 })
-                & $add $id 'no credential that lives longer than two days' @($long | ForEach-Object { "$($_.displayName) until $((ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'endDateTime')).ToString('yyyy-MM-dd'))" }) ($long.Count -eq 0) 'The build only ever mints one-day credentials. A longer one was left by the application''s creation (an older Deploy) or added by hand; deleting it is the owner''s decision (az ad app credential delete).'
+                & $add $id 'no credential that lives longer than two days' @($long | ForEach-Object { "$($_.displayName) until $((ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'endDateTime')).ToString('yyyy-MM-dd'))" }) ($long.Count -eq 0) 'The build only ever mints one-day credentials. A longer one was left by the application''s creation (an older Deploy) or added by hand; deleting it is your decision (az ad app credential delete).'
             }
             default {
                 $state = Get-SnapshotSection $Snapshot 'groups'

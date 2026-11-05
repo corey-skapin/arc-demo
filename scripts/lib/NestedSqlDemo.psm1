@@ -33,7 +33,7 @@ function New-NestedSqlAnswerXml {
         if ($plain -cnotmatch '\A[\x21-\x7e]{24,128}\z' -or
             $plain -cnotmatch '[A-Z]' -or $plain -cnotmatch '[a-z]' -or
             $plain -notmatch '[0-9]' -or $plain -notmatch '[^A-Za-z0-9]') {
-            throw 'The protected random credential must use printable ASCII and meet the approved complexity contract.'
+            throw 'The protected random credential must use 24 to 128 printable ASCII characters with an upper-case letter, a lower-case letter, a digit and a symbol.'
         }
         $escaped = [Security.SecurityElement]::Escape($plain)
         @"

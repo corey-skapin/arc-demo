@@ -1,8 +1,8 @@
 # Capacity and optimisation workbooks
 
 Optional, read-only engineer views built only from telemetry the lab already collects
-and from Arc inventory. They are chapters 5 and 6 of the 25-28 minute presenter story
-and they never act on a machine. The operator procedure (preview, draft, publish,
+and from Arc inventory. They are chapters 5 and 6 of the 25-28 minute demo story
+and they never act on a machine. The procedure (preview, draft, publish,
 remove) is in the [runbook](runbook.md#optional-capacity-and-optimisation-workbooks);
 this page says what each view shows and the rules behind it. The first-chapter
 [Estate Overview](#estate-overview-chapter-1) is a static template, described after the two.
@@ -25,9 +25,9 @@ tiles, then the status or candidate table, then select a row for the per-machine
   column, never a zero or an interpolated line.
 - Evidence quality is shown beside every status: observed hours per counter, sampling while
   active, last sample, invalid samples ignored (never clamped or zero-filled).
-- Thresholds are illustrative triage values, not an approved service objective or sizing advice.
-- Nothing stops, resizes, schedules, tags or deletes a resource. Reasons are conversation starters
-  for a human decision, not savings.
+- Thresholds are illustrative triage values, not a service objective or sizing advice.
+- Nothing stops, resizes, schedules, tags or deletes a resource. Reasons are conversation starters,
+  not savings; any action is your decision.
 - A declared parent and its nested guest are separate observations. They are never added,
   never counted as extra hardware capacity, and a guest is never a consolidation candidate.
 - No fake data is ingested. The opt-in tests use literal tables inside the query text.
@@ -143,7 +143,7 @@ measurement is never read as a clean result.
 | Reason | Flagged when |
 |---|---|
 | Low utilisation | Adequate CPU and memory evidence, CPU P95 below the low-CPU threshold, memory in use P95 below 50%, no pressure signal; never for a parent on its own counters |
-| Scheduling | The owner-maintained environment tag is non-production (dev, test, uat, qa, stage, sandbox, demo, lab, poc, nonprod, preprod) and at least half of observed full hours are idle; a blank tag is *unclassified*, never assumed |
+| Scheduling | The environment tag is non-production (dev, test, uat, qa, stage, sandbox, demo, lab, poc, nonprod, preprod) and at least half of observed full hours are idle; a blank tag is *unclassified*, never assumed |
 | Consolidation | Two or more low-utilisation non-guest machines share an application or role and operating system; peaks are not additive and no placement is implied |
 | Ownership gap | The published tags lack an owner, cost centre, environment or application/role; evidence gap, not proof that nobody owns it |
 | Not reporting | No telemetry, or silent for more than 24 hours; stale does not mean redundant or safe to delete |
@@ -152,7 +152,7 @@ Sections: opportunity tiles (**Machines reviewed**, **Low utilisation**, **Sched
 **Ownership gaps** and **Not reporting**), reasons by evidence quality, candidate matrix (select a row), *Underutilisation*,
 *Scheduling and scenario*, *Ownership and hygiene* (live Resource Graph tags and the not-reporting list),
 *Consolidation*, *Review detail* (every flagged reason, evidence window, what is still needed, published owner tags,
-size context, the next human decision and what the workbook never does, as a Full-size card that wraps long sentences
+size context, the next decision and what the workbook never does, as a Full-size card that wraps long sentences
 into lines) and *Evidence and method*. The review detail charts the selected machine's CPU 95th percentile and peak, memory
 in use and free space as column charts. *Scheduling and scenario* opens with the activity heat map: average CPU in twelve
 two-hour blocks of the local day, *00-01* (midnight to 02:00) to *22-23*, beside *Idle share*, then the proposed off-window
@@ -252,7 +252,7 @@ rendered. The rules, each enforced by `tests/OperationalWorkbooksLayout.Tests.ps
   52 reads 52 like the text beside it. The same rounding is used in the text of a tile or a reason and in the grid.
 - **Times** are the viewer's local time in a date renderer wide enough for the clock; text that must name a time states the
   display offset (for example *UTC+10:30*), never a bare UTC clock. How a date reads (3/11/2026 or 11/3/2026) follows the
-  portal's regional format, which the stage setup of the presenter guide tells the presenter to set.
+  portal's regional format, which the stage setup in the runsheet tells you to set.
 - **Charts** are column charts. A missing interval is a null, so parked time is blank rather than zero or a line across the
   gap. Charts by machine are clustered, not stacked, so percentages are never added; a single-machine chart has one series.
   Legends carry no summed totals.
@@ -268,7 +268,7 @@ rendered. The rules, each enforced by `tests/OperationalWorkbooksLayout.Tests.ps
 
 ## Publish, review and promote
 
-Preview is the default and writes nothing. Publication is a separate approved operation with the same explicit
+Preview is the default and writes nothing. Publishing is a separate command (`-Action Deploy`) with the same explicit
 subscription, tenant, prefix and skin. The deterministic ID derives from the workspace and purpose; a foreign
 workbook is never adopted, and exact serialized content is read back after deployment.
 
@@ -296,12 +296,12 @@ tag changes or a newly onboarded nested guest.
   Pass the workspace, subscription and tenant through `New-PesterContainer -Data`. It ingests nothing.
 - `tests/EstateOverviewWorkbook.Tests.ps1` covers the static Estate Overview offline: no tokens or identifiers, defaults and
   All handling, a flat option list, no-data messages, the honest tile logic, colour meaning, chart legends, grid headers and
-  number formats, the local alert time, the no-agent detail state and the names chapter 1 of the presenter template uses. It is
+  number formats, the local alert time, the no-agent detail state and the names chapter 1 of the runsheet template uses. It is
   explicit opt-in for the live part: pass the workspace, subscription and tenant through
   `New-PesterContainer -Data` to run its Log Analytics items read-only under every form of All.
-- `tests/RunsheetWorkbookNames.Tests.ps1` is the presenter name guard: every bold tile, section or tab name in a chapter of
+- `tests/RunsheetWorkbookNames.Tests.ps1` is the runsheet name guard: every bold tile, section or tab name in a chapter of
   `docs/runsheet.md` must exist in the workbook that chapter opens (the Capacity and Optimisation tile labels live in
-  `workbooks/queries`), so a workbook rename fails a test instead of surprising the presenter.
+  `workbooks/queries`), so a workbook rename fails a test instead of surprising you during the demo.
 - Query execution against the real workspace and portal rendering are separate evidence. A passing mock or query run does
   not prove the portal draws a tile or chart the way it should; review the draft in the portal first.
 - `arg()` inside a Log Analytics item works in the portal and through `api.loganalytics.io`, but the ARM

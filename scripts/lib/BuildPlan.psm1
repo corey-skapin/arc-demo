@@ -1,5 +1,5 @@
 #Requires -Version 7.4
-# Ordered "build everything" wrapper helpers: plan, approvals, resume state and step runner.
+# Ordered "build everything" wrapper helpers: plan, confirmation switches, resume state and step runner.
 # The wrapper only calls the maintained scripts; it owns no deployment logic and no second manifest.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -388,7 +388,7 @@ function Resolve-ArcDemoPlanSkip {
     .SYNOPSIS
         Marks the steps that would be skipped because their target already exists. Read-only; updates the plan rows in place.
     .DESCRIPTION
-        A skip is not a failure and needs no approval. A check that cannot be read blocks the step with the exact error
+        A skip is not a failure and needs no switch. A check that cannot be read blocks the step with the exact error
         instead of guessing.
     #>
     [CmdletBinding()]
@@ -434,9 +434,9 @@ function Get-BuildGuestCredential {
         return $saved
     }
     try {
-        Get-Credential -UserName Administrator -Message 'Approved Administrator credential for the nested guest (asked now so the build can run unattended; save one to nested-guest-credential.clixml in the private folder to skip this prompt)'
+        Get-Credential -UserName Administrator -Message 'Administrator credential for the nested guest (asked now so the build can run unattended; save one to nested-guest-credential.clixml in the private folder to skip this prompt)'
     } catch {
-        throw "The nested guest (P4) needs an approved Administrator credential and this session cannot prompt for it ($($_.Exception.Message)). Pass -GuestCredential, or save one with Export-Clixml to $path (docs/private-config.md). Nothing was started."
+        throw "The nested guest (P4) needs an Administrator credential and this session cannot prompt for it ($($_.Exception.Message)). Pass -GuestCredential, or save one with Export-Clixml to $path (docs/private-config.md). Nothing was started."
     }
 }
 
@@ -608,7 +608,7 @@ function Get-ArcDemoBuildSteps {
                 New-BuildArguments $c $c.Config.Sre.SkinPath @{ DesiredState = 'Active'; OutputFormat = 'Json'; TimeoutSeconds = 180 }
             }
         New-BuildStep -Id 'P10' -Title 'Presenter context and guide for the Arc repo (local files only)' -Repo internal -Minutes 3 -SkipReason $noPresenter `
-            -Run { param($c, $s) Invoke-ArcDemoPresenterHandoff -Context $c -State $s }
+            -Run { param($c, $s) Invoke-ArcDemoPresenterGuide -Context $c -State $s }
         New-BuildStep -Id 'P11.1' -Title 'Read-only inventory snapshot' -Script 'scripts\Export-ArcDemoInventory.ps1' -Minutes 6 -AlwaysRun -ExitCodes -Arguments {
                 param($c)
                 New-BuildArguments $c $c.Config.ArcSkinPath @{
@@ -657,7 +657,7 @@ function Get-BuildScriptParameter {
 function Get-ArcDemoBuildPlan {
     <#
     .SYNOPSIS
-        Adds status, blockers and missing approvals to each selected step. Makes no Azure call.
+        Adds status, blockers and missing switches to each selected step. Makes no Azure call.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object[]]$Steps, [Parameter(Mandatory)]$State, [switch]$Force)
@@ -813,7 +813,7 @@ function Invoke-ArcDemoBuildPreflight {
     if ($Context.Config.Sre) { $notes.Add((Get-BuildRepoSummary $Context.Config.Sre.RepoPath 'SRE repo')) }
     $deleted = Invoke-AzRest -Method Get -Url "https://management.azure.com/subscriptions/$($Context.SubscriptionId)/providers/Microsoft.OperationalInsights/deletedWorkspaces?api-version=2020-08-01"
     if (@($deleted.value | Where-Object { $_.name -eq "law-$($Context.Prefix)" }).Count) {
-        $notes.Add("A soft-deleted workspace named law-$($Context.Prefix) exists: creating it again recovers the old workspace and its data (14-day window). Permanently delete it first, with separate approval, if you want a clean workspace.")
+        $notes.Add("A soft-deleted workspace named law-$($Context.Prefix) exists: creating it again recovers the old workspace and its data (14-day window). Permanently delete it first if you want a clean workspace.")
     }
     $existing = @(@($Context.ArcGroup, $Context.InfraGroup) | Where-Object { Invoke-DemoAz -Arguments @('group', 'exists', '-n', $_, '-o', 'json') | ConvertFrom-Json })
     $notes.Add($(if ($existing) { "Existing groups: $($existing -join ', ') (a resume or re-run)." } else { 'No demo groups exist yet (a fresh build).' }))
@@ -947,7 +947,7 @@ function New-ArcDemoPresenterContext {
     $document
 }
 
-function Invoke-ArcDemoPresenterHandoff {
+function Invoke-ArcDemoPresenterGuide {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$State)
     $leftOut = [System.Collections.Generic.List[string]]::new()
@@ -967,7 +967,7 @@ function Invoke-ArcDemoPresenterHandoff {
             if ('Confirm' -in (Get-BuildScriptParameter $sreGuide)) { $options['Confirm'] = $false }
             Invoke-BuildLooseScript -Path $sreGuide -Arguments $options | Out-Host
         } else {
-            Write-Warn 'The SRE repo has no .local\demo-context.json yet; record it with the SRE handbook, then run its New-PresenterRunsheet.ps1.'
+            Write-Warn 'The SRE repo has no .local\demo-context.json yet; save its context there first (see the SRE repo''s docs), then run its New-PresenterRunsheet.ps1.'
         }
     }
     [pscustomobject]@{ status = 'pass'; contextPath = $file; resourceIds = @($document.Keys | Where-Object { $_ -match 'ResourceId$' }).Count; chaptersLeftOut = $leftOut.ToArray() }
@@ -1116,5 +1116,5 @@ function Get-ArcDemoApprovalSwitch { $script:ApprovalSwitch }
 Export-ModuleMember -Function Read-ArcDemoBuildConfig, New-ArcDemoBuildContext, Get-ArcDemoBuildSteps, Select-ArcDemoBuildStep,
     Get-ArcDemoBuildPlan, Resolve-ArcDemoPlanSkip, Get-ArcDemoBuildWindowWarning, New-ArcDemoBuildState, Read-ArcDemoBuildState, Save-ArcDemoBuildState,
     Test-ArcDemoBuildStateFresh, Invoke-ArcDemoBuildPreflight, Invoke-ArcDemoBuildIdentityCheck, New-ArcDemoPresenterContext,
-    Invoke-ArcDemoPresenterHandoff, Invoke-ArcDemoBuildStep, Write-ArcDemoBuildPlan, Get-ArcDemoApprovalSwitch, ConvertTo-BuildSafeValue,
+    Invoke-ArcDemoPresenterGuide, Invoke-ArcDemoBuildStep, Write-ArcDemoBuildPlan, Get-ArcDemoApprovalSwitch, ConvertTo-BuildSafeValue,
     Get-BuildGuestCredential

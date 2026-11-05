@@ -2,7 +2,7 @@
     Severity = @('Error', 'Warning')
 
     ExcludeRules = @(
-        # We intentionally use Write-Host for human-readable progress banners.
+        # We intentionally use Write-Host for readable progress banners.
         # All scripts here are interactive demos, not pipeline-targeted cmdlets.
         'PSAvoidUsingWriteHost',
 

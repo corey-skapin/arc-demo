@@ -354,7 +354,7 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
                 'connectedmachine show' { return '{"status":"Connected","provisioningState":"Succeeded"}' }
                 'network vnet' { return '["10.50.0.0/16"]' }
                 'ad sp' { return '["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]' }
-                'account show' { return 'operator@example.com' }
+                'account show' { return 'user@example.com' }
                 default { throw "Unexpected az call in the simulation: $verb" }
             }
         }
@@ -557,12 +557,12 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         { & $script:prepare @script:common -Phase Verify -BuildInputPath $script:build } | Should -Throw '*media/windows-server-2022-eval*'
         Test-Path $script:build | Should -BeFalse
         $global:PrepWorld.MediaHashOk = $true
-        Set-Content -LiteralPath $script:build -Value '{"OperatorNote":"keep me","Gateway":"stale"}'
+        Set-Content -LiteralPath $script:build -Value '{"ExtraNote":"keep me","Gateway":"stale"}'
         $result = & $script:prepare @script:common -Phase Verify -BuildInputPath $script:build
         $result.status | Should -Be 'pass'
         ($result.phases | Where-Object phase -eq 'Preflight').detail | Should -BeLike '*lab Active: not checked*'
         $merged = Get-Content -LiteralPath $script:build -Raw | ConvertFrom-Json
-        $merged.OperatorNote | Should -Be 'keep me'
+        $merged.ExtraNote | Should -Be 'keep me'
         $merged.Gateway | Should -Be '172.31.240.1'
         @($global:PrepWorld.Calls | Where-Object { $_ -ne 'guest Inspect' }) | Should -BeNullOrEmpty
     }

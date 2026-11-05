@@ -3,8 +3,8 @@
 .SYNOPSIS
     Runs an isolated, real SQL Server 2022 Developer demonstration on Windows.
 .DESCRIPTION
-    Guest-side helper. Installation requires approved Developer ISO media and
-    explicit licence consent. No Arc SQL extension, SQL password or public listener.
+    Guest-side helper. Installation requires the Developer ISO media and explicit
+    licence acceptance. No Arc SQL extension, SQL password or public listener.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -60,8 +60,8 @@ function Test-DemoRebootPending {
 }
 
 function Get-DemoRebootPendingDetail {
-    # What Test-DemoRebootPending saw, for the error text: the flags and the first pending rename sources, so an
-    # operator can tell a routine installer leftover from a real servicing restart. Read-only.
+    # What Test-DemoRebootPending saw, for the error text: the flags and the first pending rename sources, so you
+    # can tell a routine installer leftover from a real servicing restart. Read-only.
     $found = @()
     foreach ($path in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
             'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')) {
@@ -346,7 +346,7 @@ function Get-DemoArcExtensionPolicy {
 
 function Assert-DemoSqlExtensionBlocked {
     if ('Microsoft.AzureData/WindowsAgent.SqlServer' -notin (Get-DemoArcExtensionPolicy).blocklist) {
-        throw 'The exact Arc SQL publisher/type is not locally blocked; prepare ProtectArcSql under separate approval before SQL installation.'
+        throw 'The exact Arc SQL publisher/type is not locally blocked; prepare ProtectArcSql before SQL installation.'
     }
 }
 
@@ -541,7 +541,7 @@ function Update-DemoIncidentEmitter {
         $replacement = @($functions | Where-Object Name -eq $old.Name)
         if ($replacement.Count -ne 1 -or
             (Get-DemoWorkerFunctionContract $replacement[0]) -cne (Get-DemoWorkerFunctionContract $old)) {
-            throw "Normal worker function '$($old.Name)' changed; use the separately reviewed full-worker update procedure."
+            throw "Normal worker function '$($old.Name)' changed; update the whole worker as described in docs/sql-engine-workload.md."
         }
     }
     $newHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
@@ -658,7 +658,7 @@ function Install-DemoEngine {
     param([string]$MediaIsoPath, [string]$MediaSha256, [switch]$AcceptDeveloperLicenseTerms, [switch]$ArcSqlAutoConnectOptOutConfirmed)
     $record = $null
     if (-not $AcceptDeveloperLicenseTerms -or -not $MediaIsoPath -or -not $MediaSha256) {
-        throw 'Install requires user-accepted Developer licence terms and an explicitly approved local Developer ISO path/SHA256.'
+        throw 'Install requires accepted Developer licence terms and a local Developer ISO path/SHA256.'
     }
     if (-not $ArcSqlAutoConnectOptOutConfirmed) {
         throw 'Confirm a reviewed effective Arc SQL automatic-connection opt-out before installing; installation never changes tags/extension policy.'
@@ -676,8 +676,8 @@ function Install-DemoEngine {
     }
     if (Get-Process | Where-Object { $_.ProcessName -in @('setup', 'ScenarioEngine', 'SqlSetupBootstrapper') -or $_.ProcessName -match '^SQL.*SSEI' }) { throw 'An installer may be active. Inspect it before another setup attempt.' }
     if (Test-DemoRebootPending) {
-        throw ('A reboot/pending rename is recorded (' + (Get-DemoRebootPendingDetail) + '). Resolve with the operator; no automatic reboot or bypass. ' +
-            'With the owner''s approval one graceful restart from Azure (az vm restart) normally clears a routine leftover; ' +
+        throw ('A reboot/pending rename is recorded (' + (Get-DemoRebootPendingDetail) + '). Resolve it yourself; no automatic reboot or bypass. ' +
+            'One graceful restart from Azure (az vm restart) normally clears a routine leftover; ' +
             'rerun this step afterwards (it waits up to six minutes for the Arc services and MonAgentCore). See docs/troubleshooting.md, SQL preparation reports a pending file rename.')
     }
     if ($record) {
@@ -701,7 +701,7 @@ function Install-DemoEngine {
     if (-not [Environment]::Is64BitOperatingSystem -or -not (Test-Path -LiteralPath $framework) -or
         (Get-Item -LiteralPath $framework).GetValue('Release', 0) -lt 461808) { throw 'Require x64 Windows and .NET Framework 4.7.2+ before installation; no implicit framework upgrade.' }
     if ($MediaIsoPath -notmatch '^[A-Za-z]:\\[^"]+\.iso$' -or
-        (Get-FileHash -LiteralPath $MediaIsoPath -Algorithm SHA256).Hash -ne $MediaSha256) { throw 'Approved ISO hash/type does not match.' }
+        (Get-FileHash -LiteralPath $MediaIsoPath -Algorithm SHA256).Hash -ne $MediaSha256) { throw 'ISO hash/type does not match.' }
     $image = Get-DiskImage -ImagePath $MediaIsoPath
     $mountedHere = -not $image.Attached
     $process = $null

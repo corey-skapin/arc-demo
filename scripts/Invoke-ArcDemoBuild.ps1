@@ -12,10 +12,11 @@
     stopped. A workbook step (P6.2, P6.3) records a snapshot of the Arc roster and tags, so
     it runs again when P2 or P4 finished after it did. -Only takes a phase (P6) or one step
     (P6.2, P6.3), for example `-Only P6.2, P6.3 -Force` to republish just the two workbooks
-    after a tag repair. Billing, licence and IAM decisions are explicit switches, never implied:
-    -ApproveCostStart (P2), -AcceptWindowsEvaluationTerms and -AcceptSqlDeveloperTerms
-    (P3, P5), -ApproveSreCreation (P9) and -ApproveSubscriptionGrant (the opt-in
-    subscription-scope Azure Monitor alert-access grant for the SRE identity).
+    after a tag repair. Billable resources, licence terms and IAM changes each need an explicit switch, never implied.
+    Pass -ApproveCostStart (P2) to confirm you want to start billable resources, -AcceptWindowsEvaluationTerms
+    and -AcceptSqlDeveloperTerms (P3, P5) to accept those licence terms, -ApproveSreCreation (P9) to create the
+    SRE parent and -ApproveSubscriptionGrant for the opt-in subscription-scope Azure Monitor alert-access grant
+    for the SRE identity. The plan lists the switches it needs.
 
     When the nested guest (P4) will run, the Administrator credential is resolved at
     the start, not about an hour in: -GuestCredential, else a DPAPI-protected export
@@ -105,10 +106,10 @@ function Assert-PlanRunnable {
         throw "Blocked step(s): $($blocked.Step -join ', '). Nothing was started. Fix the blockers above, or select other phases with -From/-To/-Only."
     }
     $missing = @($Rows | Where-Object { $_.Needs.Count } | ForEach-Object { foreach ($need in $_.Needs) { "-$((Get-ArcDemoApprovalSwitch)[$need]) ($($_.Step))" } })
-    if ($missing) { throw "Approval switch(es) missing: $($missing -join ', '). Nothing was started." }
+    if ($missing) { throw "Confirmation switch(es) missing: $($missing -join ', '). Nothing was started." }
 }
 # Steps that can never be skipped fail fast, before any Azure read; the others (the SRE parent steps) are
-# checked after the read-only resolution, so a skipped step neither blocks nor needs an approval.
+# checked after the read-only resolution, so a skipped step neither blocks nor needs a switch.
 Assert-PlanRunnable @($plan | Where-Object { -not $_.Definition.SkipWhen })
 Initialize-DemoContext -SubscriptionId $SubscriptionId -TenantId $TenantId
 $stale = Test-ArcDemoBuildStateFresh -Context $context -State $state
@@ -118,12 +119,12 @@ Assert-PlanRunnable $plan
 $todo = @($plan | Where-Object { $_.Status -eq 'ready' })
 Write-ArcDemoBuildPlan -Plan $plan
 if (-not $todo) { Write-Ok 'Nothing to do: every selected step is already recorded as done or skipped.'; return }
-if (-not $PSCmdlet.ShouldProcess("$($context.Prefix): $($todo.Step -join ', ')", 'Run the ordered build (billable resources, credentials and IAM per the approved switches)')) { return }
+if (-not $PSCmdlet.ShouldProcess("$($context.Prefix): $($todo.Step -join ', ')", 'Run the ordered build (billable resources, credentials and IAM per the switches you passed)')) { return }
 if ('P4' -in $todo.Step -and -not $context.GuestCredential) {
     # Ask now rather than about an hour in, so the long build can run unattended: -GuestCredential, else the private
     # folder's saved nested-guest-credential.clixml, else a prompt. This script never writes a credential.
     $context.GuestCredential = Get-BuildGuestCredential -Context $context
-    if (-not $context.GuestCredential) { throw 'The nested guest (P4) needs an approved Administrator credential. Nothing was started.' }
+    if (-not $context.GuestCredential) { throw 'The nested guest (P4) needs an Administrator credential. Nothing was started.' }
 }
 foreach ($row in $todo) {
     Invoke-ArcDemoBuildStep -Step $row.Definition -Context $context -State $state

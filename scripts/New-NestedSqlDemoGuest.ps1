@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Applies an approved Windows Server image to a new Hyper-V demo guest.
+    Applies a Windows Server image to a new Hyper-V demo guest.
 .DESCRIPTION
     Run on the Hyper-V parent. Uses existing media and storage; never replaces
     an existing guest or disk. Leaves partial new artifacts on failure.
@@ -46,7 +46,7 @@ $null = Get-VMSwitch -Name $SwitchName
 $null = Get-Item -LiteralPath $WindowsIsoPath
 $volume=Get-Volume -DriveLetter ([IO.Path]::GetPathRoot($VmRoot).Substring(0,1))
 if ($volume.SizeRemaining -lt 24GB) { throw 'At least 24 GiB free space is required for this dynamic-disk demo build.' }
-if (-not $PSCmdlet.ShouldProcess($VmName, 'Create a new Windows guest from existing approved media')) {
+if (-not $PSCmdlet.ShouldProcess($VmName, 'Create a new Windows guest from existing media')) {
     $answer = $null
     return
 }

@@ -1,13 +1,13 @@
 # Arc: from servers to an operational view
 
-**Presenter:** open the generated `.local/presenter-runsheet.md` (Arc only) or, to run the
+Open the generated `.local/presenter-runsheet.md` (Arc only) or, to run the
 whole demo from one page, `.local/full-demo-runsheet.md` (this guide, then the SRE half,
 then one close), and follow it from top to bottom. Its links and queries are already
 filled in. This tracked file is the source template, not a second presentation.
 
 Context recorded **{{RecordedAtUtc}}**; document generated **{{GeneratedAtUtc}}**.
-Generation is offline, not a fresh readiness or application-health check.
-The preparing operator verifies readiness before handing over this page.
+Generation is offline, not a fresh readiness or application-health check. Check that the
+lab is ready before you present: see the [notes](#notes) at the end.
 
 ## The story in one minute
 
@@ -51,9 +51,9 @@ come up; none needs a terminal, a subscription ID or hand-written queries.
 | 3. Open an incident, read the investigation and review a narrowly scoped proposed action | Chapter 7, then the SRE guide |
 
 **Live** means the page reads current Azure data when you open it. **Recorded**
-means dated evidence from an earlier approved run: say its date and never present
+means dated evidence from an earlier run: say its date and never present
 it as happening now. Anything that needs a command is in the
-[operator notes](#operator-notes) at the end, not in what you say.
+[notes](#notes) at the end, not in what you say.
 
 ## Timing and cut lists
 
@@ -93,7 +93,7 @@ each plus its conversation. What to drop:
 - **Read-only.** Everything on this Arc path is read-only: do not start machines, run
   assessments, select **Check for updates**, change configuration, send test emails,
   approve anything or induce a fault here. Live faults, fresh investigations and the
-  Review approval belong to the SRE half, with their own approvals.
+  Review approval belong to the SRE half, where you click Approve in the SRE portal.
 - **Honest frame.** This lab simulates on-premises servers using Azure VMs and
   `MSFT_ARC_TEST=true`. It is a demo, not a hardened production architecture or
   blanket feature validation. Say so once, early, in your own words.
@@ -104,7 +104,7 @@ each plus its conversation. What to drop:
   point of these views. Say them out loud; they are why the numbers can be trusted.
 - **Stay out of** a machine's **Extensions** page, the experimental governance
   workbook and the nested guest's Monitoring, best practices and Defender panes. They
-  show lab artifacts or are not enabled; the reasons are in the operator notes.
+  show lab artifacts or are not enabled; the reasons are in the notes.
 
 Every chapter has the same shape: the customer's question and the thread; what to
 show, in order; what to say (written to be spoken, about 40 seconds); one wow
@@ -423,7 +423,7 @@ there room for what comes next?"
 >   in the portal within about an hour, so judge freshness by **Last collected time**,
 >   not by the guest being up. If the guest or instance shows **Disconnected** or
 >   **Expired**, or has no databases, say it is not available in this run and stay on
->   the Azure Monitor half. The presenter never starts or repairs it.
+>   the Azure Monitor half. Do not start or repair it.
 > - The guest runs on a Hyper-V parent host that is itself an Azure VM, a disclosed lab
 >   detail. In the capacity workbook (chapter 5) the parent and the guest are separate
 >   rows and are never added together.
@@ -561,7 +561,7 @@ Open [the missing-heartbeat alert rule]({{heartbeatAlertUrl}}), **{{heartbeatAle
 3. The SQL and application rules: {{SqlIncidentAvailability}} {{LobIncidentAvailability}}
    Show each rule's scope, condition and severity. The lock-timeout rule is the one you
    saw drawn into the SQL page in chapter 4.
-4. Hand over to the SRE half (next section).
+4. Continue with the SRE half (next section).
 
 **Say:**
 
@@ -597,7 +597,7 @@ with the right context is looking at it?"
 >   already do, say the copies are the same rules, temporary, and leave the originals
 >   alone.
 
-## Hand over to the SRE half
+## Continue with the SRE half
 
 {{CompanionSection}}
 
@@ -615,8 +615,8 @@ half, go straight to the close.
 >
 > - If the SRE half runs from dated threads and no live fault, say "had a bad night earlier
 >   today" instead of "is about to have one".
-> - The SRE guide owns the investigation, the human Review approval and any separate
->   approval to send an investigation or trigger an incident. Arc-only activation never
+> - The SRE guide owns the investigation and the Review approval: you click Approve in
+>   the SRE portal. Arc-only activation never
 >   prompts for or induces an incident.
 > - Do the close after the SRE half. If the SRE half is not run, do it now.
 
@@ -643,7 +643,7 @@ Return to [the estate workbook]({{workbookUrl}}).
 | 5 Training and skills | Engineers answering real questions from prepared views: no terminal, no subscription ID, no hand-written queries | Every chapter |
 | 6 Migration and modernisation | The evidence that comes before the decision: what runs where, how hard, who owns it | Chapters 1, 4, 5 and 6; prepared answer |
 | 7 Operational efficiency | An alert that becomes an investigation, with a person in charge of any change | Chapter 7 and the SRE half |
-| 8 Cost optimisation | Candidates for a conversation, with evidence and a human decision, never a promised saving | Chapter 6 |
+| 8 Cost optimisation | Candidates for a conversation, with evidence and a person's decision, never a promised saving | Chapter 6 |
 
 **Next step:** choose one group of servers to start with; we suggest the SQL estate.
 Connecting a server to Arc installs the Azure agents on it, and everything we do after
@@ -651,7 +651,7 @@ that starts read-only. We point these same views at the group and review togethe
 two weeks, what they show: what you have, what is safe, where there is room and where the
 money goes.
 
-Leave the lab unchanged. Parking is a separate operator action, with the companion
+Leave the lab unchanged. When you are finished, park it, with the companion
 parked first if present; retained services and storage still cost money.
 
 ## Prepared answers
@@ -801,23 +801,23 @@ These rows are dated history. The lock self-recovers in about 12 seconds, so exp
 historical SQL wait evidence, not a currently blocked orders worker or an SRE-performed
 remediation.
 
-## Operator notes
+## Notes
 
-These notes are for the operator who prepares and hands over this page. They are
-not presenter patter, and nothing here is run during the presentation.
+These notes are for you, before and after the presentation. They are not patter, and
+nothing here is run during the presentation.
 
-- **Before handing over:** verify Active readiness independently
+- **Before you present:** verify Active readiness independently
   (`Test-ArcDemoReadiness.ps1 -DesiredState Active`, read-only with a bounded
-  timeout) and poll until any telemetry-only lag clears to a pass; lag is not a
-  ready handoff. Open every link on this page once, and open each workbook from the
+  timeout) and poll until any telemetry-only lag clears to a pass; lag is not ready.
+  Open every link on this page once, and open each workbook from the
   workspace's Workbooks gallery too: a workbook opened by a direct link shows its ID in
-  the blade title, which is why the stage setup tells the presenter to use the gallery
+  the blade title, which is why the stage setup tells you to use the gallery
   and keep the links as the fallback. Set the portal's regional format for the audience
-  on the presenter's account too (Settings, Language + region): it decides how dates
+  on your account too (Settings, Language + region): it decides how dates
   read in every workbook table. Check the nested guest with
   `Test-ArcSqlDemoInventory.ps1` (read-only).
 - **Nested guest:** its lifecycle follows the `nestedSqlGuest` block in the private
-  skin. The presenter never starts, stops or repairs it; a guest that is parked or
+  skin. Do not start, stop or repair it during the tour; a guest that is parked or
   still starting is "not available in this run", never claimed. The Azure parent
   that hosts it is disclosed as lab implementation detail.
 - **Extension states:** the Extensions page of an Arc machine shows lab artifacts
@@ -826,29 +826,29 @@ not presenter patter, and nothing here is run during the presentation.
   Failed while assessments and telemetry still work). Do not delete stuck Arc
   extensions, change AV mode or policy, reinstall or restart anything to tidy it.
 - **Alert history:** Monitor alert history lists older instances and the temporary
-  copies of the rules used for live runs. The presenter stays on the rules and the
+  copies of the rules used for live runs. Stay on the rules and the
   workbook tiles.
 - **SQL incident:** a navigation-only rehearsal uses the dated threads. A fresh run
   needs a fresh alert route first (SRE repo: `Invoke-SreDemoRoute.ps1 -Action
   Prepare`, then `-Action Restore` afterwards) or the agent merges the new alert
-  into the earlier thread. It uses only the Arc-owned bounded lock-timeout helper
-  and the exact-host Sev2 alert, preserves the orders worker, needs its own
-  approval, runs sequentially with any LOB scenario and is never run as readiness
+  into the earlier thread. It uses only the repo's bounded lock-timeout helper
+  and the exact-host Sev2 alert, preserves the orders worker, runs one at a time
+  with any LOB scenario and is never run as readiness
   or lifecycle preparation. An alert that remains Fired is not proof of a current
   block.
-- **LOB incident:** the degraded state is run in the SRE half under its own
-  approval and the same fresh alert route; it is never a step on this Arc path and
+- **LOB incident:** the degraded state runs in the SRE half with the same fresh
+  alert route; it is never a step on this Arc path and
   never part of navigation-only rehearsal. Starting the application, changing
   collection or injecting a fault is not done to make a tile or a query green.
 - **Workbooks:** they read existing telemetry only. Do not change collection,
   induce load or activate hosts to populate a tile; history is thin when the lab
   runs on demand, and the page says so.
-- **Reader and approver:** on this Arc path the presenter only reads evidence: do
+- **Reading and approving:** on this Arc path you only read evidence: do
   not approve a Review card or accept a request for additional permissions here.
-  The Review approval belongs to the SRE half.
-- **SRE hand-over:** the companion guide owns the investigation, the human Review
-  approval and any separate approval to send an investigation or trigger an
-  incident. The handover and closing lines in this page are the ones the SRE guide
+  The Review approval is in the SRE half: you click Approve in the SRE portal.
+- **SRE half:** the companion guide owns the investigation and the Review approval.
+  The lines under "Continue with the SRE half" and the closing lines in this page are
+  the ones the SRE guide
   echoes, so change them in both places together.
 - **Whole-demo page:** generating with `-SreGuidePath` also writes
   `.local/full-demo-runsheet.md`: a whole-demo table, this guide, the SRE guide's own

@@ -1,9 +1,8 @@
 # AKS crash-loop scenario
 
-**Optional scenario/operator procedure, not a presenter prerequisite.**
+**Optional scenario, not a prerequisite for the demo.**
 Use [the docs index](README.md) to choose the default read-only tour.
-Use the retained private skin and actual names; this document is not approval
-to deploy, execute cluster commands or send alert notifications.
+Use the retained private skin and actual names.
 
 Optional workload behind `-DeployAks $true`. It creates a one-node AKS cluster
 `<prefix>-aks` in the chosen region (default `australiaeast`), enables Container Insights against the shared
@@ -13,7 +12,9 @@ The prefix, region, and AKS toggle can come from `config\demo-skin.json`; see
 [`reskin-guide.md`](reskin-guide.md).
 This workload was absent from the verified eight-host active lab; its optional
 deployment and stop/start path are not implied to be live-validated.
-Break/reset require a separately approved bounded window and fallback plan.
+
+Set a time limit for the break, and run the [Repair](#repair) command yourself
+when it runs out.
 
 ## Deploy
 

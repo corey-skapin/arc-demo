@@ -189,7 +189,7 @@ function Invoke-SizePhase {
     try {
         Invoke-DemoAz -Arguments @('vm', 'resize', '-g', $infraRg, '-n', $parentName, '--size', $nested.ParentVmSize, '--only-show-errors') | Out-Null
     } catch {
-        throw "Resize to $($nested.ParentVmSize) failed: $($_.Exception.Message) The parent stays deallocated at $size; retry later or restore it with the approved lifecycle. No other size or region is tried for you."
+        throw "Resize to $($nested.ParentVmSize) failed: $($_.Exception.Message) The parent stays deallocated at $size; retry later or restore it with the lifecycle scripts. No other size or region is tried for you."
     }
     $after = Get-ParentVm
     if ($after.hardwareProfile.vmSize -ne $nested.ParentVmSize -or $after.provisioningState -ne 'Succeeded') { throw "The parent is $($after.hardwareProfile.vmSize)/$($after.provisioningState) after the resize; inspect it before continuing." }
@@ -358,7 +358,7 @@ function Invoke-VerifyPhase {
     Add-Check 'security-type' 'Standard or unset' $securityType ($securityType -in @('', 'Standard'))
     $own = @($current.storageProfile.dataDisks | Where-Object { $_.name -eq $diskName })
     Add-Check 'data-disk' "$diskName LUN 0, $($nested.ParentDataDiskGb) GiB, caching None" $(if ($own.Count) { "LUN $($own[0].lun), $((Get-DiskValues $own[0]).SizeGb) GiB, $($own[0].caching)" } else { 'absent' }) ($own.Count -eq 1 -and (Test-DiskMatchesDeclaration $own[0]))
-    Add-Check 'power' 'VM running' $current.powerState ($current.powerState -eq 'VM running') 'Verify never starts a VM; run the approved Activate or the Volume phase first.'
+    Add-Check 'power' 'VM running' $current.powerState ($current.powerState -eq 'VM running') 'Verify never starts a VM; run Activate or the Volume phase first.'
     if ($isFleetMember -and $current.powerState -eq 'VM running') {
         $arc = Invoke-DemoAz -Arguments @('connectedmachine', 'show', '-g', $arcRg, '-n', $parentName, '-o', 'json') | ConvertFrom-Json
         Add-Check 'arc' 'Connected' $arc.status ($arc.status -eq 'Connected')
@@ -417,7 +417,7 @@ $labActive = $false
 if ($mutating.Count) {
     $network = Get-DemoNetworkState -InfraRg $infraRg -NamePrefix $NamePrefix
     $labActive = [bool]($network.Subnet.natGateway.id -and $network.Subnet.natGateway.id -eq $network.NatId)
-    if (-not $labActive) { throw 'The lab is not Active (no NAT gateway on snet-vms). Run the approved Activate first: Prepare never starts compute without explicit outbound networking.' }
+    if (-not $labActive) { throw 'The lab is not Active (no NAT gateway on snet-vms). Run Activate first: Prepare never starts compute without explicit outbound networking.' }
 }
 Write-Step "Preparing $parentName ($($vm.hardwareProfile.vmSize), $($vm.powerState)) for the nested SQL guest; phases: $($requested -join ', ')"
 $phaseResults.Add((New-PhaseResult 'Preflight' 'satisfied' "$parentName $($vm.hardwareProfile.vmSize), $($vm.powerState), lab Active: $(if ($mutating.Count) { $labActive } else { 'not checked (no phase changes anything)' })"))

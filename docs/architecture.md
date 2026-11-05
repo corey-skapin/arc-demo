@@ -52,7 +52,7 @@ flowchart TB
     VM1 -. installs Arc agent .-> ARC1
     VM2 -. installs Arc agent .-> ARC2
     VM3 -. installs Arc agent .-> ARC3
-    VM2 -. separately approved preparation .-> SQL1
+    VM2 -. separate preparation .-> SQL1
 
     ARC1 -.->|DCR assoc| DCR1
     ARC2 -.->|DCR assoc| DCR1

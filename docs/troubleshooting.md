@@ -1,9 +1,9 @@
 # Troubleshooting
 
 Known failure modes with verified observations, fixes where established, and
-explicit unresolved boundaries. Confirm the runtime tenant/subscription and get
-scoped approval before any repair, restart, policy scan or fault operation.
-This is a symptom reference, not required presenter reading; use
+explicit unresolved boundaries. Confirm the tenant and subscription you are
+working in before any repair, restart, policy scan or fault operation.
+This is a symptom reference, not required reading for the demo; use
 [the docs index](README.md) and [runsheet.md](runsheet.md) for the default tour.
 
 ## Nested SQL build and cold-wake lessons
@@ -31,10 +31,10 @@ live selector and Arc-resource DCRA before assuming the task stopped.
 
 The current definition adds only provider `ArcLobBridgeApp`, event `4000`,
 level `4`; it does not broaden all informational collection or start the sample.
-For an existing lab, obtain approval for that narrow collection change and allow
+For an existing lab, apply that narrow collection change and allow
 agent propagation/ingestion time. Verify new post-change records rather than
 historical rows. Use the [LOB sample's healthy activity query](../samples/lob-arc-app/README.md#showing-healthy-activity-in-log-analytics).
-Guest task/config/log inspection and any start/fault/repair need their own scope;
+Guest task/config/log inspection and any start/fault/repair are separate steps;
 do not induce a fault just to make this query nonempty.
 
 ## SQL preparation reports a pending file rename
@@ -51,19 +51,19 @@ It does not identify the owning package or prove an active installer, and SQL Se
 a host with a pending restart, so the [real SQL helper](sql-engine-workload.md) fails closed before
 installation and never deletes the value or skips setup checks.
 
-**Fix** — keep the running lab otherwise unchanged and ask the owner for **one graceful restart** of that
-VM; request it together with the other approvals for the build, not when the step fails. Then:
+**Fix** — keep the running lab otherwise unchanged and restart that VM **once, gracefully**, ideally before
+the step runs rather than after it fails. Then:
 
 1. Read-only first: confirm in the error (or the guest) that only routine entries are listed and no
    installer is running.
-2. With approval, restart once from Azure: `az vm restart --subscription <SUB> -g rg-<prefix>-infra -n <vm>`
+2. Restart once from Azure: `az vm restart --subscription <SUB> -g rg-<prefix>-infra -n <vm>`
    (about 45 seconds). Never restart from inside the guest or repeatedly.
 3. Rerun the step (`-Only P5`, or `Invoke-SqlEngineOnArc.ps1 -Action Install`). It waits up to six minutes
    for `himds`, `ExtensionService` and `GCArcService` (running about 3.5 minutes after the restart) and
    `MonAgentCore` (about 4.5 minutes) before its Arc SQL block check, which requires all four.
 
 If the value is still set after a restart, or the list names something other than routine leftovers,
-stop and obtain separate scope for deeper diagnosis.
+stop and diagnose further before you change anything else.
 
 ## Media staging stops on a size or hash mismatch
 
@@ -124,11 +124,11 @@ warning, not a readiness condition. Activation prints `extension <name> Updating
 at least <n> min (not a gate)`, and readiness shows non-required `extension/*` rows
 (state, how long the host's Arc identity has been connected, a pointer here), so the
 overall status follows the required `heartbeat/*` rows. Do not force Heartbeat green
-and do not wait for these rows to clear before presenting. A `Failed` AMA extension
+and do not wait for these rows to clear before you present. A `Failed` AMA extension
 with no Heartbeat is different: that is a real failure. A missing MDE status file is
 not proof of working endpoint protection.
-Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
-restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
+Preserve healthy AMA/CT and DCRAs; plan a targeted recovery before you retry MDE or
+restart anything. No reinstall/restart is part of read-only rehearsal preflight.
 
 ## A Linux VM stays Updating behind a Defender MDE.Linux install lock
 
@@ -159,7 +159,7 @@ defect in the vendor extension: nothing here removes, reinstalls or patches Defe
 - Wait. The platform releases the open write at about 90 minutes and the VM becomes `Succeeded` with no action.
 - Do not cancel the update, remove or reinstall Defender, restart the agent or the VM, or send a Run Command to a VM
   whose `MDE.Linux` is `Transitioning` with a fresh lock: it queues and then blocks the one nudge that could help.
-- If recovery cannot wait, ask the owner first, then send exactly ONE new goal state (`az vm reapply`, or a read-only
+- If recovery cannot wait, send exactly ONE new goal state (`az vm reapply`, or a read-only
   Run Command) only when the last `enable` is more than 36 minutes old and right after a Defender push. A nudge
   resets the lock clock, so one sent shortly before the next push recreates the stall.
 - When the VM channel is stuck, inspect through the Arc channel (`az connectedmachine run-command create`, preview and
@@ -180,9 +180,10 @@ defect in the vendor extension: nothing here removes, reinstalls or patches Defe
   provisioning-state transitions, from `extensions/write` events in the activity log whose caller is the Defender
   resource provider, or from the vmSettings goal-state events.
 
-The defect belongs to the Defender for Endpoint extension owners (create the lock before starting the wrapper and
-delete it when the wrapper ends, or write a status file in the "already in progress" branch, and do not share one
-handler directory between the VM and Arc paths). It has not been reported upstream from this repository.
+The defect is in the Defender for Endpoint extension, so its maintainers would have to fix it
+(create the lock before starting the wrapper and delete it when the wrapper ends, or write a
+status file in the "already in progress" branch, and do not share one handler directory between
+the VM and Arc paths). It has not been reported upstream from this repository.
 
 ## Activation fails parsing an absent NAT or public IP
 
@@ -219,8 +220,8 @@ resource creation.
 
 **Observed cause** - The old script attempted
 `Restart-Service himds,AzureMonitorAgent`. On the inspected Windows Arc host,
-`himds` was running but no `AzureMonitorAgent` SCM service existed. A separately
-approved read-only guest invocation returned a valid stdout completion marker;
+`himds` was running but no `AzureMonitorAgent` SCM service existed. A read-only
+guest invocation returned a valid stdout completion marker;
 the marker/transport was not broken. Do not treat its absence in the original
 failed command as evidence that the guest script never ran.
 
@@ -235,7 +236,7 @@ services, failed status entries and absent stdout markers still fail.
 The helper reports safe status metadata without logging potentially sensitive
 guest output. Optional `-ResultPath` retains per-host outcomes and failures.
 
-With scoped activation approval, rerun the corrected script with the same
+Rerun the corrected script with the same
 explicit target and retained skin. Do not add skip switches, reinstall AMA,
 restart the VM/extension host or equate an independent Ready snapshot with a
 successful activation. Assessment submissions still run unless explicitly skipped;
@@ -243,7 +244,7 @@ they are asynchronous, not proof of completed update inventory.
 
 ## Windows AMA is healthy but starts after the old three-minute guard
 
-An approved cold-start diagnosis found `MonAgentCore` naturally starting about
+A cold-start diagnosis found `MonAgentCore` naturally starting about
 five minutes after boot, roughly half a minute after the old guard failed.
 Fresh exact-ID Heartbeat followed; no repair was needed. That observation is not
 a guarantee of future boot/ingestion time.
@@ -255,7 +256,7 @@ in `-ResultPath`; nothing is restarted or reinstalled. The opt-in guest script k
 its own ten-minute AMA wait and explicit pending marker. Final readiness
 reports telemetry lag separately. If only Heartbeat is pending, activation exits
 0 with pending evidence and a re-check message. Poll read-only readiness before
-presenting or the combined incident offer; report pending if it does not converge.
+you present or continue with the SRE half; report pending if it does not converge.
 Do not turn an auth failure, unhealthy service or failed extension into telemetry
 lag. Microsoft documents both the
 [MonAgentCore process and a further Heartbeat wait](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-troubleshoot-windows-arc#basic-troubleshooting-steps-installation-agent-not-running-configuration-issues);
@@ -276,7 +277,7 @@ warning. Safe cleanup remains detach subnet, delete NAT, delete PIP, after compu
 parking. Incomplete network deletion is visible and may bill even when the
 compute checks pass. Inspect those non-required cost rows; do not claim a zero
 bill or change foreign bindings. Retained monitoring is not queried in parked
-readiness. Repair manifest/skin drift before a separately approved activation;
+readiness. Repair manifest/skin drift before you activate;
 startup, deployment and destructive removal remain fail-closed.
 
 ## An Arc Linux extension child is absent but the VM-path extension is present
@@ -295,7 +296,7 @@ or change policy to make resource counts match.
 The inspected MDE.Linux operations failed with `ResourceOperationFailure` /
 `VMExtensionProvisioningTimeout`, last reporting "Plugin enabled"; guest status
 reported a missing status file. That identifies the failure mode, not its cause.
-After separately approved VM starts, all three extension models converged to
+After the VMs were started, all three extension models converged to
 Succeeded/onboarding Success without a manual MDE repair. Existing logs recorded
 an interrupted installation, resumed onboarding and "Installation already in
 progress". Do not turn an old package error from another date into a current
@@ -306,7 +307,7 @@ and no direct health issues, but passive mode was enabled, real-time protection
 disabled and the engine not loaded. Two extension payloads still recorded
 event-provider issues differing from direct health. Do not claim active AV/full
 EDR or blindly reinstall a working sensor. Keep timestamped observations separate;
-review policy intent and the discrepancy under a new approved diagnostic scope
+review policy intent and the discrepancy with a new diagnostic
 before proposing a targeted change. See [lifecycle boundaries](lifecycle.md).
 
 ## Linux activation waits behind a VM extension update
@@ -342,12 +343,12 @@ readiness from extension state in either direction.
 
 First inspect exact backing-VM power and Arc connection read-only. Overnight
 auto-shutdown (the DevTest schedule, or governance automation on the
-subscription, see the [runbook](runbook.md#5-park-and-wake-separate-disruptive-approval))
+subscription, see the [runbook](runbook.md#5-park-and-wake))
 does not start hosts the next morning; a deallocated VM is not
-proof of a broken Arc agent. Starting it needs explicit approval and a verified
+proof of a broken Arc agent. Starting it needs a verified
 existing outbound path, not an incidental repair.
 
-During the approved eight-host rehearsal, Windows Arc connection returned before
+During the eight-host rehearsal, Windows Arc connection returned before
 fresh Heartbeats were queryable. Bounded read-only observation eventually verified
 all eight expected Arc IDs and all 79 checks without restarting/reinstalling AMA.
 Use `Test-ArcDemoReadiness.ps1` with the same target/skin and a bounded timeout;
@@ -443,25 +444,25 @@ Set-DemoResourceTags -ResourceId '/subscriptions/<SUBSCRIPTION_ID>/resourceGroup
 ```
 
 The capacity and optimisation workbooks list the Arc machines and their tags as they were when they were
-published, so a tag repair needs a republish of both (a separately approved step; see the
+published, so a tag repair needs a republish of both (see the
 [runbook](runbook.md)).
 
 ## Linux Change Tracking missing despite healthy AMA
 
-The previous deploy implementation installed CT via Arc while AGENTS required
-the Azure VM path for this lab's unreliable Linux guest-extension stack.
+The previous deploy implementation installed CT via Arc, but this lab needs
+the Azure VM path for its unreliable Linux guest-extension stack.
 Ordinary Arc CT support does not validate that stack on an Arc-enabled Azure VM.
 The maintained path uses `Microsoft.Azure.ChangeTrackingAndInventory` /
 `ChangeTracking-Linux` as a **VM extension**, retaining existing AMA and **Arc-ID**
-DCR associations. Approved installation on the three Linux lab hosts verified
+DCR associations. Installation on the three Linux lab hosts verified
 handler 2.42.0.0 guest success and fresh ConfigurationData/ConfigurationChange
 records without restarting VMs. The handler remains auto-upgrade enabled.
 See [Microsoft's supported CLI examples](https://learn.microsoft.com/azure/azure-change-tracking-inventory/change-tracking-inventory-support-matrix).
 
-First inspect both extension surfaces and DCRAs read-only. Obtain scoped approval
-before installation. Do not delete stuck Arc extensions, restart a VM or move
-DCRAs incidentally. Provisioning success and data arrival are separate checks;
-CT cycles/ingestion can lag substantially.
+First inspect both extension surfaces and DCRAs read-only, then install. Do not
+delete stuck Arc extensions, restart a VM or move DCRAs incidentally. Provisioning
+success and data arrival are separate checks; CT cycles/ingestion can lag
+substantially.
 
 ## Container App is healthy but readiness says pending
 
@@ -488,8 +489,8 @@ Health event existed. No defect in this repo is known.
 **Recovery** — confirm the state as in [a fresh Deploy failed part way](#a-fresh-deploy-failed-part-way),
 then rerun the same Deploy command: it adopts the failed deployment's vault, reuses the saved
 admin password and submits the template again. If it fails again on `cae-<prefix>`, check
-Service Health, wait and retry; deleting only that environment is the next step, and it needs
-the operator's approval (it holds nothing else and the fault app was never created). Do not
+Service Health, wait and retry; deleting only that environment is the next step
+(it holds nothing else and the fault app was never created). Do not
 Remove the estate for this. To keep a failure here from stranding the base estate, build
 the base first and add Container Apps as a second Deploy pass
 ([lifecycle](lifecycle.md#adding-an-optional-workload-to-a-running-estate)).
@@ -507,9 +508,9 @@ Quota/listing checks are not capacity guarantees.
 `Deploy-ArcDemo.ps1` does not reset SP credentials or generate a new password for
 existing VMs. Old labs without the saved Key Vault secret need their **current**
 password as `-AdminPassword` (SecureString), or the file an earlier run saved with
-`-AdminPasswordPath`; obtain it from the operator and
-do not rotate it as a shortcut. Arc onboarding needs no supplied secret: it adds
-and removes its own one-day SP credential (see the next entry).
+`-AdminPasswordPath`; do not rotate it as a shortcut. Arc onboarding needs no
+supplied secret: it adds and removes its own one-day SP credential (see the next
+entry).
 See [lifecycle semantics](lifecycle.md).
 The [nested build](nested-sql-demo.md) is separate: it needs no vault and uses
 the same one-day credential flow.
@@ -518,7 +519,7 @@ the same one-day credential flow.
 
 Deploy and the nested build stop with `Could not add a one-day credential to the
 onboarding application` when Graph refuses the new credential (for example
-`Authorization_RequestDenied`). The signed-in operator must own the
+`Authorization_RequestDenied`). Your signed-in account must own the
 `sp-<prefix>-onboard` application or hold an application administrator role.
 Either fix that, or pass the application's current secret as `-OnboardingSecret`
 (SecureString), which skips the one-day credential. The helper never resets or
@@ -540,15 +541,15 @@ role work.
 one-year password credential that nothing removed. The build only ever mints one-day credentials; Deploy now removes the
 creation-time credential once onboarding has used it. Nothing holds the old secret.
 
-**What to do** — this is the owner's decision, not a repair step: no script deletes an existing credential, and
-`Remove-ArcDemo.ps1 -RemoveOnboardingIdentity` removes only the service principal. With the owner's approval, delete
-that one credential by its key ID from `az ad app credential list --id <appId>`:
+**What to do** — decide whether to delete the old credential; it is not a repair step. No script deletes an existing
+credential, and `Remove-ArcDemo.ps1 -RemoveOnboardingIdentity` removes only the service principal. To delete it,
+take its key ID from `az ad app credential list --id <appId>`:
 
 ```powershell
 az ad app credential delete --id <appId> --key-id <keyId>
 ```
 
-The next Deploy and nested build mint and remove their own one-day credentials as before. Until the owner decides, report the
+The next Deploy and nested build mint and remove their own one-day credentials as before. Until you decide, treat the
 failed row as known rather than clearing it another way.
 
 ## Activate rejects an unused alternative parent as outside the manifest
@@ -642,7 +643,7 @@ under Trusted Launch) and Compute accepts it only on a subscription that has the
 (`Test-Prerequisites.ps1`, the build wrapper's P0 and Deploy) checks it read-only and stops
 before any spend, so this only appears with an older checkout.
 
-**Fix** — With separate approval, register the feature once, then refresh the provider (the
+**Fix** — Register the feature once, then refresh the provider (the
 refresh is what propagates it; both took under a minute in the rebuild that found this):
 
 ```powershell
@@ -769,7 +770,7 @@ az deployment sub show --name <arc-demo-timestamp from the console log> --query 
 If VMs exist and the saved file is missing (a build started without `-AdminPasswordPath` on an older
 checkout), the password is unknown and routine redeploy must not generate or rotate one. The only
 recovery that needs no credential change is `Remove-ArcDemo.ps1` for both groups and a fresh Deploy;
-resetting the VM password is a separate approved credential change.
+resetting the VM password is a separate credential change.
 
 ## What-if lists the Defender plan with `Delete properties.extensions`
 
@@ -798,9 +799,9 @@ drive letter for you.
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `The lab is not Active (no NAT gateway on snet-vms)` | Starting compute needs explicit outbound networking. Run the approved Activate first. |
+| `The lab is not Active (no NAT gateway on snet-vms)` | Starting compute needs explicit outbound networking. Run Activate first. |
 | `Only Standard_D4s_v5 is evidenced for nested virtualization` | The skin declares another size. Use a nested-capable size without a temp disk (the data volume must be `D:`) and add `-AllowUntestedSize`. |
-| `Resize to ... failed` | Usually no capacity for the size in that region. The parent stays deallocated at its old size; retry later or request quota. No other size is tried. Restore it with the approved lifecycle if the demo needs it now. |
+| `Resize to ... failed` | Usually no capacity for the size in that region. The parent stays deallocated at its old size; retry later or request quota. No other size is tried. Start it again with Activate if the demo needs it now. |
 | `A nested guest is running; stop it gracefully` | Size and HyperV restart the parent. Stop the guest with the pair-only state helper first. |
 | `LUN 0 already holds ...` or `Disk ... already exists but is attached elsewhere or differs` | Prepare never reuses, resizes, converts or moves a disk. Declare the existing disk in the skin or remove the stray disk deliberately. |
 | `Drive D: is already used by another volume` or `Refusing to initialise a data disk that already has partitions` | Volume moves the empty virtual DVD-ROM that a size without a temp disk leaves on `D:` to `Z:` (seen on a fresh `Standard_D4s_v5`), but will not touch any other `D:` (a temp disk on a `d` size, a data volume, a DVD-ROM that holds a disc) or a disk that is not blank. Inspect the VM and decide deliberately. |
@@ -829,7 +830,7 @@ disk; override with `parentVmSize`, `parentDataDiskGb`,
 `parentDataDiskStorageAccountType` when the retained VM differs, for example a
 retained `Standard_LRS` disk). For any other entry add `vmSize` and `dataDisks`
 to its [fleet entry](legacy-os-fleet.md#per-entry-size-and-data-disks). A real
-size change is a separate approved resize with the VM deallocated, not a deploy.
+size change is a separate resize with the VM deallocated, not a deploy.
 A disk tier that changed outside this repo is declared the same way; see
 [the OS disk tier changed by itself](#the-os-disk-tier-changed-by-itself).
 
@@ -856,7 +857,7 @@ deterministic, so reruns update existing resources instead of duplicating them.
 
 **Cause** — Earlier deployments relied on implicit default outbound rather than an explicit outbound path. Do not assume that path survives a deallocate/start cycle.
 
-**Fix** — Fresh deployment now creates a **NAT Gateway** before compute/extension provisioning. Activation recreates it before starting parked VMs. For an older lab missing NAT, after approving activation, run:
+**Fix** — Fresh deployment now creates a **NAT Gateway** before compute/extension provisioning. Activation recreates it before starting parked VMs. For an older lab missing NAT, run:
 
 ```powershell
 .\scripts\Activate-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -SkinPath <PRIVATE_SKIN_PATH>
@@ -882,8 +883,8 @@ az monitor data-collection rule association list --subscription <SUB> `
   --resource "/subscriptions/<SUB>/resourceGroups/rg-arc-demo/providers/Microsoft.HybridCompute/machines/lnx-app-01"
 ```
 
-If a DCRA is wrongly attached to the backing Azure VM, obtain approval for the
-exact association repair before changing/deleting anything. The intended Arc
+If a DCRA is wrongly attached to the backing Azure VM, repair only that exact
+association; do not change or delete anything else. The intended Arc
 association payload is:
 
 ```powershell
@@ -897,7 +898,7 @@ Invoke-AzRest -Method Put -Body $body `
   -Url "https://management.azure.com$arcId/providers/Microsoft.Insights/dataCollectionRuleAssociations/dcra-core-lnx-app-01?api-version=2022-06-01"
 ```
 
-Do not assume a restart is needed. Only if separately approved diagnostics
+Do not assume a restart is needed. Only if your diagnostics
 require an AMA service restart, use the checked, file-backed guest helper:
 
 ```powershell
@@ -935,7 +936,7 @@ extension path either way.
 **Limit: hosts onboarded by an older Deploy** - Deploy onboards only machines that are
 not Arc-connected yet, and Activate runs no guest commands (Run Command queues behind
 VM extension updates and can stall a wake), so earlier hosts keep the old services.
-Rebuild the host, or after separate approval run the same idempotent step once on each:
+Rebuild the host, or run the same idempotent step once on each:
 
 ```powershell
 Import-Module .\scripts\lib\Common.psm1 -Force
@@ -1024,9 +1025,9 @@ orders database and transaction-derived events, not Arc SQL registration or BPA.
 SQL Server in an Azure VM is not a supported Arc SQL validation target; see
 the [support decision](sql-arc-spike.md). Missing Arc SQL/BPA content is not a
 reason to install its extension, change licence metadata or promise that waiting
-will enable it. Genuine Arc SQL features need a separately approved supported
-non-Azure host. Any pre-existing extension needs reviewed diagnosis, not automatic
-removal or reconfiguration.
+will enable it. Genuine Arc SQL features need a supported non-Azure host. Any
+pre-existing extension needs a diagnosis first, not automatic removal or
+reconfiguration.
 
 ## SQL-only block is effective but two SQL-related extension rows appear
 
@@ -1042,18 +1043,18 @@ available activity evidence read-only. ARM-shaped extension responses expose
 metadata under `.properties`; missing flattened fields are not absence.
 An empty policy-state query does not overturn an actual policy deployment.
 Do not automatically delete the failed row, uninstall/block Defender, alter
-discovery or disable a plan to clear drift. A separately approved normal delete
-of only the Failed Arc SQL row can remain incomplete while disconnected; stop
-without forcing/replaying it, then inspect after separately approved activation.
-Retain required security and obtain policy-owner
-review if an engine-only exception is genuinely necessary. The Arc SQL opt-out
-does not exempt Defender; Succeeded with disconnected/empty sensor status does
-not establish protection or billing. See the [engine-only prerequisites](sql-engine-workload.md#approval-fit-and-media).
+discovery or disable a plan to clear drift. A normal delete of only the Failed
+Arc SQL row can remain incomplete while disconnected; stop without
+forcing/replaying it, then inspect after you activate. Retain required
+security; if an engine-only exception is genuinely necessary, raise it with
+whoever manages that policy. The Arc SQL opt-out does not exempt Defender;
+Succeeded with disconnected/empty sensor status does not establish protection
+or billing. See the [engine-only prerequisites](sql-engine-workload.md#fit-and-media).
 
 If Arc later reports Disconnected, inspect the exact backing VM power state
 before diagnosing an agent failure. A deallocated VM cannot provide fresh SQL
 or guest telemetry proof; earlier successful installation/Status evidence is
-historical, not permission to activate, reinstall or repair it.
+historical, not a reason to activate, reinstall or repair it.
 
 ## SQL is queryable after wake but the worker is Ready with stale commits
 
@@ -1074,9 +1075,9 @@ The updated source waits within a 600-second startup budget and emits terminal
 failures. Scheduler restart settings are not evidence that a retry succeeded.
 
 Do not silently start/reset the worker as readiness or activation preparation.
-After diagnosis and separate scoped approval, the owned helper's `-Action Start`
-can start that task without SQL restart or installer replay; require subsequent
-fresh Status pass and actual commit evidence. Updating an installed worker is a separate operation; see
+After diagnosis, the owned helper's `-Action Start` can start that task without
+SQL restart or installer replay; require subsequent fresh Status pass and actual
+commit evidence. Updating an installed worker is a separate operation; see
 [updating an existing worker](sql-engine-workload.md#updating-an-existing-owned-worker).
 
 ## Compliance scorecards (MCSB/NIST) are empty
@@ -1091,8 +1092,8 @@ permissions, assignment and available evaluation results separately.
 
 **First check** - Read **Policy** > **Compliance** in the confirmed scope.
 See [current evaluation and compliance guidance](https://learn.microsoft.com/azure/governance/policy/how-to/get-compliance-data).
-Do not promise a score during a short rehearsal. A separately approved
-evaluation trigger can request a new scan:
+Do not promise a score during a short rehearsal. A manual evaluation trigger can
+request a new scan:
 
 ```powershell
 az policy state trigger-scan --subscription <SUB> --resource-group rg-arc-demo
@@ -1116,10 +1117,10 @@ Guest Configuration extension) can never deploy. The VMs are unaffected.
 
 **What to do** — Nothing; it is expected. Do not remove the assignment, change its
 enforcement mode or hand-grant roles to clear the rows: granting the roles would install
-Guest Configuration extensions on every VM, a visible change to confirm first, and
-[AGENTS.md](../AGENTS.md) keeps the existing policy as it is. Leaving the assignment
-audit-only (the demo as built) or granting the policy identities the roles named in each
-definition is an owner decision.
+Guest Configuration extensions on every VM, which is a visible change, and
+[AGENTS.md](../AGENTS.md) keeps the existing policy as it is. Decide whether to leave
+the assignment audit-only (the demo as built) or to grant the policy identities the
+roles named in each definition.
 
 ## Activity log noise on an idle or parked estate
 
@@ -1129,7 +1130,7 @@ writes on the Arc machines that end `Failed` with `HCRP400`, and Advisor recomme
 machine, database or disk names that are not in the subscription. Nothing is stuck and
 nothing notifies.
 
-**Cause** — All of it comes from the platform, not from this repo or the operator:
+**Cause** — All of it comes from the platform, not from this repo or anything you did:
 
 - `upgradeExtensions` ran about once an hour on one Linux machine at a time and failed
   within about a second with `HCRP404` ("The VM extension with publisher
@@ -1158,7 +1159,7 @@ observed. The related policy events after VM writes are in
 
 ## Hibernation blocked by unrelated preflight or monitoring health
 
-**Observed** - An added operator wrapper required deployment Graph/Owner checks,
+**Observed** - A wrapper added around parking required deployment Graph/Owner checks,
 a historical whole-group index match, and assumed attached disks must report
 `Attached`. Those were wrapper defects, not requirements of the normal parking
 script. A deallocated VM can have an attached disk reported as `Reserved`.
@@ -1198,8 +1199,8 @@ az network public-ip list --subscription <SUB> -g rg-arc-demo-infra -o table
 The script only deletes `natgw-<prefix>` and `pip-natgw-<prefix>` in the retained
 infra group: defaults are `natgw-arc-demo` and `pip-natgw-arc-demo`. It first
 verifies compute is parked and refuses to detach an unexpected subnet gateway.
-Do not delete other networking as a cost shortcut; inspect its owner/scope.
-An absent or foreign VM/manifest is an error, not permission for teardown.
+Do not delete other networking as a cost shortcut; inspect what it belongs to and its scope.
+An absent or foreign VM/manifest is an error, not a reason to tear anything down.
 
 ## Cost is higher than expected
 
@@ -1213,9 +1214,9 @@ See [`cost.md`](cost.md) for the full breakdown by state. The most common surpri
 
 If [`AGENTS.md`](../AGENTS.md), a procedure and the actual script conflict,
 stop before mutation and reconcile the discrepancy against code, current
-supported behavior and approved scope. Do not bypass a safety rule merely
+supported behavior and the scope of your request. Do not bypass a safety rule merely
 because a script permits an action. Update the affected canonical document
-and agent guidance together.
+and `AGENTS.md` together.
 
 ## Deployment refuses an existing OS disk tier mismatch
 
@@ -1223,8 +1224,8 @@ The requested `OsDiskStorageAccountType` differs from a targeted retained OS
 disk. Select its current tier using the CLI input or private
 `compute.osDiskStorageAccountType`; an existing HDD lab needs explicit
 `Standard_LRS`, while new OS disks default to `StandardSSD_LRS`.
-Do not bypass the check or run an implicit conversion. An approved disk-tier
-migration needs a maintenance window with stop/deallocate/restart; HDD OS
+Do not bypass the check or run an implicit conversion. A disk-tier
+migration needs a maintenance window you choose, with stop/deallocate/restart; HDD OS
 support retires on 8 September 2028. See [cost.md](cost.md). If the disks were
 Standard SSD when the lab was built and nobody changed them, read
 [the next entry](#the-os-disk-tier-changed-by-itself).
@@ -1243,7 +1244,7 @@ on 5-6 November 2026: about two hours after a Hibernate, every OS disk and the
 nested data disk in `rg-<prefix>-infra` was rewritten within about 15 seconds and
 read `Standard_LRS` afterwards, while every VM stayed deallocated. The activity log
 shows `Microsoft.Compute/disks/write` from an application identity, not from this
-repo or the operator. Whether a subscription does this depends on its tenant
+repo or from you. Whether a subscription does this depends on its tenant
 policy. No Hibernate, Activate or readiness check reads a disk tier, so the first
 sign is the Deploy guard, which reads each disk before it sends anything to Bicep.
 
@@ -1263,7 +1264,7 @@ automation. In the private skin:
 
 `-OsDiskStorageAccountType Standard_LRS` does the same for the OS disks on the command
 line; the data disk has only the skin key. The guard then passes for the tiers the
-disks have. Accepting HDD (cheaper, with OS disk support retiring on 8 September
-2028) or converting back to Standard SSD is the owner's decision. A conversion back is
-a separately approved window with the VMs deallocated, stop/deallocate/change
+disks have. Decide whether to accept HDD (cheaper, with OS disk support retiring on
+8 September 2028) or to convert back to Standard SSD. A conversion back needs a
+maintenance window you choose, with the VMs deallocated: stop/deallocate/change
 tier/restart, as [cost.md](cost.md) describes. Do not bypass the guard.

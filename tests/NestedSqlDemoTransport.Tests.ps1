@@ -19,7 +19,7 @@ Describe 'Nested demo noninteractive protected transport' {
             }
         }
     }
-    It 'propagates the approved noninteractive decision into the remote step' {
+    It 'passes the noninteractive -Confirm:$false into the remote step' {
         & $script:transport -SubscriptionId '11111111-1111-1111-1111-111111111111' `
             -TenantId '22222222-2222-2222-2222-222222222222' -ParentResourceGroup rg-demo -ParentVmName parent `
             -ParentVmId '33333333-3333-3333-3333-333333333333' -Step Remove `

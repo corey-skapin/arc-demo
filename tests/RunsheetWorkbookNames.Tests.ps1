@@ -83,7 +83,7 @@ Describe 'Every bold tile, section or tab name in a presenter chapter exists in 
     }
 
     It 'the rest of the guide (ground rules, prepared answers, fallbacks) bolds no unknown tile or section name' {
-        $rest = ($script:Sections | Where-Object { $_ -notmatch '^## (Chapter \d\.|Timing and cut lists|Operator notes)' }) -join "`n"
+        $rest = ($script:Sections | Where-Object { $_ -notmatch '^## (Chapter \d\.|Timing and cut lists|Notes)' }) -join "`n"
         foreach ($name in (Get-BoldPhrase $rest)) {
             if (Test-NotAWorkbookName $name) { continue }
             $script:AllWorkbookText.Contains($name) | Should -BeTrue -Because "the guide bolds **$name**, which is neither a workbook name nor a known portal or guide label"

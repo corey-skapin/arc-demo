@@ -419,7 +419,7 @@ Describe 'Offline private presenter guide' {
 Describe 'Presenter runsheet template' {
     BeforeAll {
         $template = Get-Content (Join-Path $repo 'docs\runsheet.md') -Raw
-        $split = $template -split '(?m)^## Operator notes'
+        $split = $template -split '(?m)^## Notes'
         $presenter = $split[0]
         $notes = $split[1]
         # Phrases wrap across lines and blockquote markers, so phrase assertions use flattened text.
@@ -505,14 +505,14 @@ Describe 'Presenter runsheet template' {
         }
     }
 
-    It 'bridges the opening and chapters 1 to 6 into the next with one short sentence, and chapter 7 into the hand-over' {
+    It 'bridges the opening and chapters 1 to 6 into the next with one short sentence, and chapter 7 into the SRE half' {
         $bridges = @([regex]::Matches($template, '(?m)^\*\*Bridge:\*\* (.+(?:\r?\n(?!\r?\n).+)*)'))
         $bridges.Count | Should -Be 7
         foreach ($bridge in $bridges) {
             $words = @(($bridge.Groups[1].Value -replace '\s+', ' ').Split(' ')).Count
             $words | Should -BeLessOrEqual 30 -Because $bridge.Groups[1].Value
         }
-        $template | Should -Match '(?m)^## Hand over to the SRE half'
+        $template | Should -Match '(?m)^## Continue with the SRE half'
     }
 
     It 'asks the room three or four times and gives each chapter one wow moment' {
@@ -521,7 +521,7 @@ Describe 'Presenter runsheet template' {
         [regex]::Matches($template, '(?m)^\*\*Wow:\*\* ').Count | Should -Be 7
     }
 
-    It 'follows one database from the opening to the alert and the hand-over' {
+    It 'follows one database from the opening to the alert and the SRE half' {
         $flat | Should -Match 'the orders database, from ''what is it\?'' to ''what wakes us at night\?'''
         foreach ($section in $chapters) { $section | Should -Match 'orders database|SQL host|lock-timeout rule' -Because (($section -split '\r?\n')[0]) }
         $flat | Should -Match 'The orders database we started with is about to have a bad night, on purpose, and you''ll watch what happens between the alert and a person making a decision'
@@ -554,17 +554,17 @@ Describe 'Presenter runsheet template' {
         $template | Should -Match '\{\{OptimisationWorkbookAvailability\}\}'
     }
 
-    It 'hands the SQL and application alert chapter to the SRE guide in neutral wording' {
+    It 'leads the SQL and application alert chapter into the SRE guide in neutral wording' {
         $template | Should -Match '(?m)^## Chapter 7\. What happens at 2 a\.m\.\?'
         $template | Should -Match '\{\{SqlIncidentAvailability\}\}'
         $template | Should -Match '\{\{LobIncidentAvailability\}\}'
-        $template | Should -Match '(?m)^## Hand over to the SRE half\r?\n\r?\n\{\{CompanionSection\}\}'
+        $template | Should -Match '(?m)^## Continue with the SRE half\r?\n\r?\n\{\{CompanionSection\}\}'
         $flat | Should -Match 'incidents are triggered, approved and read in the SRE half'
         $flat | Should -Match 'These alerts use the same action group\. When the SQL worker logs a lock timeout, or the application worker reports a degraded state, an alert fires and the SRE agent starts an investigation automatically\. The incidents we walk through next are the SRE agent''s own: any we trigger live are current, earlier ones are dated'
         $template | Should -Not -Match '(?i)\bprobe\b'
     }
 
-    It 'keeps operator mechanics out of the presenter path' {
+    It 'keeps command mechanics in the notes, out of the spoken path' {
         $notes | Should -Match 'bounded lock-timeout helper'
         $presenter | Should -Not -Match 'bounded lock-timeout helper|Test-ArcDemoReadiness|Test-ArcSqlDemoInventory|Invoke-SqlEngineOnArc'
     }
@@ -582,7 +582,7 @@ Describe 'Presenter runsheet template' {
         $stageFlat | Should -Match 'so a date such as 3/11/2026 is not misread'
         $stage[0] | Should -Match '\{\{workspaceUrl\}\}'
         $notes | Should -Match 'Workbooks gallery'
-        ($notes -replace '\s+', ' ') | Should -Match "Set the portal's regional format for the audience on the presenter's account too \(Settings, Language \+ region\)"
+        ($notes -replace '\s+', ' ') | Should -Match "Set the portal's regional format for the audience on your account too \(Settings, Language \+ region\)"
         $template.IndexOf('## Stage setup') | Should -BeLessThan $template.IndexOf('## Opening:')
     }
 

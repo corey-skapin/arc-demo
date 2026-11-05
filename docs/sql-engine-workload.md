@@ -6,7 +6,7 @@ This engine-only path does not install Arc SQL/BPA or change Defender pricing.
 Inherited estate automation may independently install Defender extensions;
 leave that protection intact. See [the support boundary](sql-arc-spike.md).
 
-## Approval, fit and media
+## Fit and media
 
 Use the retained tenant/subscription/skin and existing Windows host. Do not resize
 or redeploy the estate just to prepare SQL.
@@ -14,25 +14,25 @@ or redeploy the estate just to prepare SQL.
 The helper requires Windows Server 2016+, .NET Framework 4.7.2+, a member or
 standalone server, 4 GiB RAM, 2 GiB available RAM and 10 GiB free system disk.
 Existing MSSQL services, an active installer, pending reboot or file rename
-stop installation (the error lists what is pending; a routine leftover is cleared by one approved
-graceful restart, see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename)).
+stop installation (the error lists what is pending; to clear a routine leftover,
+restart the host once with `az vm restart` and rerun, see
+[the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename)).
 A host name alone does not establish available capacity.
 
-Obtain approved **SQL Server 2022 Developer ISO** media and accept its actual
-licence terms before installation. Developer is for development/test/demo, not
-production. Stage the pinned ISO on the selected guest with
-`scripts\Stage-DemoMedia.ps1`: [config\demo-media.json](../config/demo-media.json)
-holds the public Microsoft URL, size, SHA-256 and licence URL, staging needs the
-explicit `-AcceptSqlDeveloperTerms` switch and records that acceptance privately,
-and only a file that matches its pin takes its final name. The SQL helper still
-checks the hash, Microsoft signature and SQL major version 16 itself.
+Stage the pinned **SQL Server 2022 Developer ISO** on the selected guest with
+`scripts\Stage-DemoMedia.ps1 -AcceptSqlDeveloperTerms`; the switch accepts the
+Developer licence terms and records that acceptance privately. Developer is for
+development/test/demo, not production. [config\demo-media.json](../config/demo-media.json)
+holds the public Microsoft URL, size, SHA-256 and licence URL, and only a file that
+matches its pin takes its final name. The SQL helper still checks the hash,
+Microsoft signature and SQL major version 16 itself.
 It performs no download, paid-edition fallback, reboot or resize.
 
 Before installing, prevent automatic Arc SQL connection on this engine-only
 host. The helper's `ProtectArcSql` action adds only
 `Microsoft.AzureData/WindowsAgent.SqlServer` to the local blocklist and checks
 readback. It preserves other entries, agent mode and running services.
-This is a separate requested configuration change, not part of Status or wake.
+This is a separate configuration change, not part of Status or wake.
 The installation flag confirms this choice; the actual local block is also read.
 
 The documented `ArcSQLServerExtensionDeployment=Disabled` tag can take up to
@@ -48,7 +48,7 @@ The normal wrapper selects the host from retained deployment inventory.
 ```powershell
 .\scripts\Invoke-SqlEngineOnArc.ps1 @target -MachineName win-sql-01 `
   -Action ProtectArcSql -WhatIf
-# Run without WhatIf only when that host-specific change is requested.
+# Then run it without -WhatIf.
 
 # Stage the pinned ISO (about 1.1 GiB) on the running host and verify its size and SHA-256.
 $media = .\scripts\Stage-DemoMedia.ps1 @target -MachineName win-sql-01 `
@@ -61,7 +61,7 @@ $sql = $media.items[0]
   -MediaSha256 $sql.sha256 -AcceptDeveloperLicenseTerms `
   -ArcSqlAutoConnectOptOutConfirmed `
   -ResultPath .\.local\sql-engine-install.json -WhatIf
-# After installation is requested and terms accepted, run without WhatIf.
+# Then run it without -WhatIf.
 ```
 
 WhatIf checks context/inventory without guest execution.
@@ -106,7 +106,7 @@ clear reboot flags and no active installer.
 
 ### Updating an existing owned worker
 
-For an explicitly requested **incident-emitter-only** update, use
+To update only the **incident emitter**, use
 `Invoke-SqlEngineOnArc.ps1 -Action UpdateIncidentEmitter` with the same explicit
 subscription, tenant, machine and private skin, first with `-WhatIf`.
 This does not run an incident. It requires healthy owned SQL/task/hash evidence
@@ -133,8 +133,7 @@ The installation manifest and outer operation result remain schema v1; only
 the structured incident **event payload** moves to v2.
 
 For broader **normal-worker** changes, the emitter-only action is not an upgrade
-shortcut. After separate review/approval, back up the installed script, manifest
-and task definition/state first.
+shortcut: back up the installed script, manifest and task definition/state first.
 Verify the task belongs to this workload and no probe is active, then stop only
 that task. Stage and parse the replacement, verify its hash, update the script
 and the manifest's `scriptSha256`, and restore the task's original enabled/running
@@ -144,7 +143,7 @@ files can be restored consistently.
 
 ## Real lock-timeout incident
 
-The first two approved rehearsals each proved one real `1222`/`LCK_M_X`, bounded
+The first two live runs each proved one real `1222`/`LCK_M_X`, bounded
 rollback, ingested detection/recovery events, a Sev2 alert, Action Group execution
 and an automatic Review-only SRE investigation. Times are UTC.
 
@@ -155,33 +154,20 @@ and an automatic Review-only SRE investigation. Times are UTC.
 
 Neither run used a manual incident chat or SQL repair. Independent before/after
 checks verified healthy orders, an unchanged probe and zero owned sessions.
-The DCR preparation added only the source-specific `6000`/`6001` selectors,
-retaining existing sources and associations. The second run used a separately
-approved temporary alert and merge-window exception; it does not prove a default
-repeat would create a new incident inside the normal cooldown.
-After source-event expiry, the canonical alert was re-enabled, the temporary
-rule deleted and the normal three-hour merge window restored; readback was
-verified at 00:36:47Z on 2 November.
+The DCR change adds only the source-specific `6000`/`6001` selectors and keeps
+existing sources and associations. The second run used a temporary alert rule and
+merge window, so it does not prove a default repeat would create a new incident
+inside the normal three-hour cooldown.
 
 **Evidence limits:** Action Group execution does not prove email receipt.
-The first narrative's performance count and inference that no incident platform
-exists were incorrect. Instructions and that persisted claim were corrected
-before the repeat; its Event/Perf result headers matched the narrative's two
-events and 119 raw samples. Complete built-in query outputs were still truncated
-in the audit and absent from message results: full raw-query verification remains
-unproven. Do not equate aggregate rows with sample counts.
+Complete built-in query outputs were truncated in the audit and absent from
+message results, so full raw-query verification remains unproven. Do not equate
+aggregate rows with sample counts.
 This is self-recovery followed by investigation, not automatic SRE remediation.
 
-On 2 November, v2 preparation was independently verified without another fault:
-the installed source matched the repo, the renamed checkpoint was zero with no
-legacy table or owned incident sessions, and orders/`6000` activity continued.
-Canonical SQL and LOB descriptions were made operational and neutral; the SQL
-v2 predicate readback at 01:39:10Z retained its title, severity, schedule, scope
-and route. That preparation did not exercise a v2 incident.
-The LOB `4100` wording correction is source-only; no LOB worker redeployment or
-fault-mode change was part of this preparation.
-
-A separately approved single v2 run on 2 November then proved the deployed
+Before the v2 run on 2 November, the installed source matched the repo, the
+renamed checkpoint was zero with no legacy table or owned incident sessions, and
+orders/`6000` activity continued. The single v2 run then proved the deployed
 event-to-alert path:
 
 | Evidence | UTC |
@@ -193,18 +179,16 @@ event-to-alert path:
 | Action Group execution recorded | 01:51:40.557 |
 | Independent healthy guest/checkpoint/session check | 01:54:07 |
 
-Both incident payloads contained exactly the agreed twelve v2 fields, with no
+Both incident payloads contained exactly the twelve v2 fields listed below, with no
 `scenario` or `maxBlockSeconds`; the detected error was `1222`, wait `LCK_M_X`
 and observed session lock timeout `5000` ms. The exact deployed alert KQL matched
 one detection for this incident. Post-recovery checks found a fresh orders
 commit, the worker running/enabled, checkpoint value zero, no owned sessions,
 the legacy table absent and the installed source matching the repo.
-The run used another explicitly approved temporary rule/merge-window exception,
-not default repeated-alert behavior. Its retirement and canonical-route
-restoration belong to the companion procedure after source-event expiry.
-An alert remaining Fired during its lookback is not proof that blocking remains
-active. These checks prove v2 emission, ingestion and alert routing, not SRE
-narrative correctness, email receipt or automatic remediation.
+The run used a temporary rule and merge window, not default repeated-alert
+behavior. An alert remaining Fired during its lookback is not proof that blocking
+remains active. These checks prove v2 emission, ingestion and alert routing, not
+SRE narrative correctness, email receipt or automatic remediation.
 
 `-Action Incident` requires the healthy orders worker and owned probe table.
 One SQL transaction takes a row lock; another waits and actually returns
@@ -234,13 +218,19 @@ The helper reads `lockTimeoutMs` from the actual victim session's
 `@@LOCK_TIMEOUT` and takes the error number from the caught SQL exception;
 it does not emit configured scenario/duration or a promised cleanup outcome.
 Recovery is a separate observed event after the existing cleanup/health gates.
-A dated event does not establish a currently blocked session. The earlier
-rehearsals above used v1; they are not proof that a v2 incident has been fired.
+A dated event does not establish a currently blocked session. The two runs in the
+first table used the v1 payload; only the later v2 run exercised this field set.
 
-For a requested rehearsal: verify SQL Status and fresh `6000`, deploy only
-`Set-SqlIncidentAlert.ps1` with the existing workspace/Action Group, confirm the
-companion's Review-only SQL route, run one Incident, then inspect same-incident
-events, actual alert/investigation and post-incident Status.
+To run the incident:
+
+1. Verify SQL Status and a fresh `6000`.
+2. Deploy only `Set-SqlIncidentAlert.ps1` with the existing workspace and Action
+   Group.
+3. Confirm the companion's Review-only SQL route.
+4. Run one `-Action Incident`.
+5. Inspect the same-incident events, the actual alert and investigation, and
+   post-incident Status.
+
 The alert is `al-<prefix>-sql-lock-timeout`, **Sev2**, Count > 0,
 one-minute evaluation and a 15-minute window. It has ongoing alert costs.
 Its helper uses the same explicit nested-parent/keep-parked skin selection as
@@ -253,7 +243,7 @@ not an ongoing outage or automatic SRE remediation.
 The v2 alert requires the exact Arc ID, provider `ArcSqlEngineDemo`,
 event `6201`, `schemaVersion=2`, `state=detected` and actual error `1222`;
 there is no scenario-name predicate. Keep its title unchanged because the
-companion routes on it. For an approved description-only correction on an
+companion routes on it. To correct only the description of an
 existing canonical SQL/LOB rule, use `Set-ArcWorkloadAlertDescription.ps1`
 with explicit subscription/tenant, `-Workload Sql|Lob`, machine and prefix.
 Preview first. It sends only `properties.description`, verifies all other
@@ -276,9 +266,9 @@ Complete an active probe before parking. Hibernation retains alert/monitoring
 and their costs; normal full removal deletes the demo disks and SQL alert.
 There is no engine uninstall, DROP DATABASE or data-recovery shortcut.
 
-For presenter links, save passing `sql-engine-status.json` alongside
+To get SQL links in the runsheet, save the passing `sql-engine-status.json` alongside
 `.local/demo-context.json`, set its optional `sqlMachineResourceId`, and regenerate
-the [single presenter guide](runsheet.md). The generator checks host and evidence;
+the [runsheet](runsheet.md). The generator checks host and evidence;
 without that optional context the SQL beat is skipped.
 Event collection needs the narrow source-specific DCR selectors; repository
 source does not establish that a live DCR was updated or new events ingested.

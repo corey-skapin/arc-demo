@@ -2,7 +2,7 @@
 
 Show how Arc and Azure Monitor turn a Windows/Linux server estate into one
 operational view: identity, telemetry, application activity, alerts and posture.
-This repo owns the **Arc part**; the optional companion repo owns the SRE part.
+This repo covers the **Arc part**; the optional companion repo covers the SRE part.
 
 ## What you get
 
@@ -32,13 +32,23 @@ These screenshots come from a lab estate rebuilt from zero with this repo; each 
 
 **Optimisation opportunities.** Which machines are worth a conversation about cost or efficiency, why they were flagged, and what evidence is still missing? Candidates are not approved savings.
 
+## Quick start
+
+Open the repo in your AI tool and ask for what you want, for example: "Read
+AGENTS.md, then build the Arc demo in my subscription." The tool confirms your
+tenant and subscription with you once, then plans and builds it. To drive the
+scripts yourself, start with the
+[ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper)
+(it plans first, then builds with `-Execute`) and the [runbook](docs/runbook.md).
+The flow is: build, present, park and wake, remove.
+
 ## Present
 
 Open **`.local/presenter-runsheet.md`** in Markdown preview and go top to bottom.
 It contains the prepared lab's portal links and copyable KQL. No input cards,
 subscription-ID substitution, customer skins or second presentation guide.
 
-If that file is missing, ask the preparing assistant/operator to
+If that file is missing,
 [generate it from the saved setup context](docs/runbook.md#prepare-the-local-presenter-guide).
 The [tracked guide](docs/runsheet.md) is its source template.
 Generation is offline; it does not activate the lab or certify current readiness.
@@ -49,11 +59,11 @@ told in seven chapters that follow a single SQL database:
 Center) -> safe and up to date (Compliance) -> the database (SQL under one view) ->
 room for what is next (Capacity) -> where the money goes (Optimisation) -> what
 happens at 2 a.m. (the alert rules)**, then a close that maps each customer question
-to what they saw. The guide has cut lists for 20 and 15 minutes and a stage card for
-the presenter.
+to what they saw. The guide has cut lists for 20 and 15 minutes and a one-page stage
+card.
 The generated guide links to the optional SRE guide only when its local file
-exists; live faults and the Review approval belong to that SRE half. Leave the lab
-unchanged at the end.
+exists; live faults and the Review approval belong to that SRE half, where you
+click Approve in the SRE portal. Leave the lab unchanged at the end.
 
 ## What the lab contains
 
@@ -73,17 +83,17 @@ Linux dependency mapping is off.
 Monitor readiness does not establish active antivirus, full EDR, patch completion
 or application health. See [support boundaries](docs/lifecycle.md).
 
-## Operate, don't improvise
+## Build, park, wake and remove
 
 | Need | Reference |
 |---|---|
 | Build everything from zero, in order (plan first) | [Ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper) |
-| Build, prepare the presenter guide, or operate an existing lab | [Runbook](docs/runbook.md) |
+| Build, prepare the presenter guide, or run an existing lab | [Runbook](docs/runbook.md) |
 | Build, park, wake or remove the nested SQL guest | [Short nested SQL runbook](docs/nested-sql-demo.md) |
 | Activate, park, remove, retry or understand readiness | [Lifecycle contract](docs/lifecycle.md) |
 | Investigate a symptom | [Troubleshooting](docs/troubleshooting.md) |
 | Costs and retained charges | [Cost reference](docs/cost.md) |
-| Engineering/support/optional scenarios | [Documentation index](docs/README.md) |
+| Engineering, support and optional scenarios | [Documentation index](docs/README.md) |
 
 | State | Cost stance | Retained | Transition |
 |---|---|---|---|
@@ -91,15 +101,14 @@ or application health. See [support boundaries](docs/lifecycle.md).
 | **Hibernated** | Storage, monitoring and other retained charges remain | Disks, identities, Arc/Monitor configuration and data | Compute parked; NAT/PIP removed only when safe |
 | **Removed** | Verify final charges and exceptions | Shared/tenant/soft-deleted items as documented | Both demo groups and named policies/budget removed |
 
-Lifecycle changes require separate approval and explicit subscription/tenant.
+Every script takes an explicit subscription and tenant.
 Park the companion first; wake Arc to Ready before the companion.
 Do not reset faults or rotate retained credentials to make a tour look healthy.
-Deployment configuration remains supported in the operator references; presenters
-do not need to reskin or redeploy anything.
+You do not need to reskin or redeploy anything to present.
 
 ## Develop
 
-Agents read [AGENTS.md](AGENTS.md) first. Use
+AI tools read [AGENTS.md](AGENTS.md) first. Use
 [CONTRIBUTING.md](CONTRIBUTING.md) and [the module map](docs/module-map.md).
 Private context and generated guides belong only in the gitignored `.local/`
 folder; never store credentials or tokens there.

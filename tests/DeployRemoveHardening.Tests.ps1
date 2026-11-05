@@ -35,7 +35,7 @@ Describe 'AllowNotFound against Azure CLI 2.91 error text' {
         { Invoke-DemoAz -Arguments $Command } | Should -Throw '*failed (exit 3)*'
     }
     It 'never turns a denial or an unknown failure into absence' -ForEach @(
-        @{ Text = "ERROR: (AuthorizationFailed) The client 'operator' with object id '00000000-0000-0000-0000-000000000000' does not have authorization to perform action 'Microsoft.Consumption/budgets/read' over scope '/subscriptions/11111111-1111-1111-1111-111111111111'." }
+        @{ Text = "ERROR: (AuthorizationFailed) The client 'user@example.com' with object id '00000000-0000-0000-0000-000000000000' does not have authorization to perform action 'Microsoft.Consumption/budgets/read' over scope '/subscriptions/11111111-1111-1111-1111-111111111111'." }
         @{ Text = 'ERROR: (Forbidden) Caller is not authorized to perform action on resource.' }
         @{ Text = 'ERROR: (InternalServerError) The server encountered an internal error.' }
     ) {
@@ -114,7 +114,7 @@ Describe 'Microsoft Graph continuous access evaluation challenge' {
             $env:AZURE_IDENTITY_DISABLE_CP1 | Should -BeNullOrEmpty
         }
     }
-    It 'never retries ARM calls or other Graph errors, and never overrides the operator''s own setting' {
+    It 'never retries ARM calls or other Graph errors, and never overrides a setting you already made' {
         InModuleScope Common {
             Mock Write-Warn {}
             $script:DemoGraphWithoutCae = $null
@@ -127,9 +127,9 @@ Describe 'Microsoft Graph continuous access evaluation challenge' {
             @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
             Should -Invoke Write-Warn -Times 0
             Remove-Item -LiteralPath $global:CaeFixture.Log
-            $env:AZURE_IDENTITY_DISABLE_CP1 = 'operator'
+            $env:AZURE_IDENTITY_DISABLE_CP1 = 'custom'
             Invoke-DemoAz -Arguments @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me') | Should -Be '[]'
-            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -Be 'operator'
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -Be 'custom'
             @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
         }
     }
@@ -296,7 +296,7 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
             }
             Mock Invoke-DemoAz {
                 param($Arguments)
-                if ($Arguments[0] -eq 'account') { return '{"id":"11111111-1111-1111-1111-111111111111","tenantId":"22222222-2222-2222-2222-222222222222","user":"operator@example.com"}' }
+                if ($Arguments[0] -eq 'account') { return '{"id":"11111111-1111-1111-1111-111111111111","tenantId":"22222222-2222-2222-2222-222222222222","user":"user@example.com"}' }
                 if ($Arguments[0] -eq 'role') { return 'Owner' }
                 if ($Arguments[0] -eq 'provider') {
                     $state = $script:providerStates[$Arguments[3]]

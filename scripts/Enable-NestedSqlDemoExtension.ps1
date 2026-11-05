@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Allows only the separately approved Arc SQL extension on a nested guest.
+    Allows only the Arc SQL extension on a nested guest.
 .DESCRIPTION
     Run on the parent. Verifies existing SYSTEM CONNECT SQL, then removes only
     the SQL extension block entry. Does not grant SQL rights or install extensions.
@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory)][pscredential]$GuestCredential
 )
 $ErrorActionPreference = 'Stop'
-if (-not $PSCmdlet.ShouldProcess($VmName, 'Allow the approved Arc SQL extension without manual SQL grants')) { return }
+if (-not $PSCmdlet.ShouldProcess($VmName, 'Allow the Arc SQL extension without manual SQL grants')) { return }
 Invoke-Command -VMName $VmName -Credential $GuestCredential -ScriptBlock {
     $ErrorActionPreference = 'Stop'
     $connection = [Data.SqlClient.SqlConnection]::new('Server=localhost;Database=master;Integrated Security=True;Connect Timeout=15')

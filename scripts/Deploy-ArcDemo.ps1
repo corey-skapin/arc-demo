@@ -21,7 +21,7 @@
          workarounds" in AGENTS.md)
       7. Dependency Agent for VM Insights-supported Windows entries only
       8. Change Tracking extension for Change Tracking-supported entries only
-      9. SQL engine preparation is a separate, explicitly approved operation
+      9. SQL engine preparation is a separate, optional operation
          (see docs/nested-sql-demo.md and Prepare-NestedSqlParent.ps1)
      11. Workbooks (six published here; the two capacity/optimisation workbooks
          are published by Set-OperationalWorkbook.ps1, steps P6.2/P6.3 of the
@@ -74,7 +74,7 @@
     afterwards (a first creation of the SP removes the one-year credential that
     creation adds, after it has been used). Existing credentials are never read,
     reset or changed. Supply it
-    only if the operator cannot manage the application's credentials.
+    only if you cannot manage the application's credentials.
 
 .PARAMETER Location
     Azure region. Default: australiaeast.
@@ -113,7 +113,7 @@
 .PARAMETER VmSize
     VM SKU. Default Standard_B2as_v2 (2 vCPU / 8 GiB AMD burstable). Check
     regional restrictions/quota; listings and ARM validation do not guarantee
-    physical capacity. Do not create probe resources without approval.
+    physical capacity. Do not create probe resources to test capacity.
 
 .PARAMETER AutoShutdownTime
     HHmm in AutoShutdownTimezone. Default 1900.
@@ -193,7 +193,7 @@ if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
     throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
 }
 if ($AdminEmail -in @('you@contoso.com', 'operator@example.com')) {
-    throw "AdminEmail is still the placeholder '$AdminEmail'. Pass -AdminEmail with a real operator email or update notifications.email in the skin file before deploying."
+    throw "AdminEmail is still the placeholder '$AdminEmail'. Pass -AdminEmail with your real email address or update notifications.email in the skin file before deploying."
 }
 
 $demoTags = Get-DemoResourceTags -Skin $skin
@@ -728,7 +728,7 @@ if ($DeployAks) {
     $clusterOutput = Invoke-DemoAz -Arguments @('aks', 'show', '-g', $infraRg, '-n', "$NamePrefix-aks", '-o', 'json') -AllowNotFound
     $existingCluster = if ($null -ne $clusterOutput) { $clusterOutput | ConvertFrom-Json }
     if ($existingCluster) {
-        if ($existingCluster.powerState.code -ne 'Running' -or $existingCluster.provisioningState -ne 'Succeeded') { throw 'Existing AKS must be Running/Succeeded before deployment. Use approved activation first; deploy never starts a parked cluster incidentally.' }
+        if ($existingCluster.powerState.code -ne 'Running' -or $existingCluster.provisioningState -ne 'Succeeded') { throw 'Existing AKS must be Running/Succeeded before deployment. Run Activate first; deploy never starts a parked cluster incidentally.' }
         $initializeAksWorkload = $false
     }
     Test-DemoComputeCapacity -Location $Location -VmSize 'Standard_B2as_v2' -AdditionalVmCount $(if ($existingCluster) { 0 } else { 1 })
@@ -1264,7 +1264,7 @@ Write-Host "  Infra RG:  https://portal.azure.com/#@$TenantId/resource/subscript
 Write-Host ''
 Write-Host "  Next steps:"
 Write-Host "    - Wait ~12h for MCSB/NIST compliance scores to populate."
-Write-Host "    - Optional nested SQL guest: docs/nested-sql-demo.md (Prepare-NestedSqlParent.ps1, then New-NestedSqlDemo.ps1). Real SQL: Invoke-SqlEngineOnArc.ps1, only with approved media/licence consent. No Arc SQL/BPA on the base simulation."
+Write-Host "    - Optional nested SQL guest: docs/nested-sql-demo.md (Prepare-NestedSqlParent.ps1, then New-NestedSqlDemo.ps1). Real SQL: Invoke-SqlEngineOnArc.ps1, once you accept the licence terms and have the media staged. No Arc SQL/BPA on the base simulation."
 Write-Host "    - Presenter guide: docs/runbook.md#prepare-the-local-presenter-guide (offline; not a health check)."
-Write-Host "    - After operator approval, use Hibernate-ArcDemo.ps1 with the same subscription, tenant and skin; retained services still incur costs."
+Write-Host "    - When you are finished, use Hibernate-ArcDemo.ps1 with the same subscription, tenant and skin; retained services still incur costs."
 Write-Host ''
