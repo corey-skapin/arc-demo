@@ -229,7 +229,7 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 | Step | What runs | Needs |
 | --- | --- | --- |
 | P0, P1 | Read-only preflight (tools, access, providers, repo state, soft-deleted workspace name, build window against the VM auto-shutdown) and onboarding-identity check | |
-| P2 | `Deploy-ArcDemo.ps1` with the private skin | `-ApproveCostStart` |
+| P2 | `Deploy-ArcDemo.ps1` with the private skin. It saves the generated VM admin password to `vm-admin-credential.clixml` in the private folder before any Azure write, so a failed P2 reruns with the same password even when a tenant policy made the vault unreadable | `-ApproveCostStart` |
 | P3 | `Prepare-NestedSqlParent.ps1`: the Hyper-V parent for the nested guest. Runs after Deploy with the lab Active (it refuses a parked lab) and writes the nested build input into the private folder. A reported `status` of `pending` or `fail` is not recorded as done, and it is safe to re-run | `-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms` |
 | P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is requested at the start of `-Execute` (pass `-GuestCredential` to run unattended) and is never stored | |
 | P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status` | `-AcceptSqlDeveloperTerms` |
@@ -366,8 +366,11 @@ the stale manifest and builds a fresh Key Vault; `Remove-ArcDemo.ps1
 Incremental optional-only deployments do not delete earlier Arc hosts.
 
 `Deploy-ArcDemo.ps1` does not regenerate VM credentials on a routine redeploy. Reuse the existing
-Key Vault secret; old labs without it must supply their **current**
-`-AdminPassword` as a SecureString. New Arc onboarding needs no supplied secret:
+Key Vault secret; old labs without it, and labs whose vault a tenant policy made private-only,
+must supply their **current** `-AdminPassword` as a SecureString or the file an earlier run saved
+with `-AdminPasswordPath` (a fresh build saves one before any Azure write, so a build that fails part way
+resumes with the same command; the wrapper always passes it, see
+[the private folder](private-config.md)). New Arc onboarding needs no supplied secret:
 Deploy ensures an existing SP's Arc-group role and uses a one-day credential it
 removes afterwards (see [credentials](lifecycle.md#credentials-and-partial-deployments));
 no routine SP credential reset. Resolve missing VM credentials with the

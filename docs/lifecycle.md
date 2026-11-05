@@ -314,9 +314,12 @@ Review these exclusions/delayed billing separately; do not promise a zero bill.
 
 Routine redeployment never resets the onboarding SP credential. Existing VMs
 reuse `vm-admin-password` from their existing Key Vault; if that secret was never
-stored, supply the **current** password as `-AdminPassword` (SecureString).
-Do not supply a new password as a convenience: credential rotation is a separate
-approved operation. Fresh deployments save the generated password to Key Vault.
+stored or the vault cannot be read from the workstation, supply the **current**
+password as `-AdminPassword` (SecureString) or as the file an earlier run saved
+with `-AdminPasswordPath` (below). Do not supply a new password as a convenience:
+credential rotation is a separate approved operation. Fresh deployments generate
+the password, save it to Key Vault through Azure Resource Manager and, when
+`-AdminPasswordPath` is given, to that file first.
 For `Deploy-ArcDemo.ps1`, new Arc onboarding runs through
 `Initialize-DemoOnboardingIdentity` once the Arc resource group exists. An
 existing `sp-<prefix>-onboard` keeps its credentials: they are never read,
@@ -330,8 +333,22 @@ cannot manage the application's credentials; it skips the one-day credential.
 Never commit or log either secret.
 
 Deploy selects a retained vault using the saved `keyVaultName` deployment output
-and preserves its public-network-access mode. A private-only vault requires the
-current `-AdminPassword`; Deploy does not open it for workstation secret reads.
+and preserves its public-network-access mode. After a fresh build that stopped part
+way (no Succeeded manifest yet) it adopts only the vault named by its own Failed or
+Canceled `arc-demo-<timestamp>` deployment, never another one, and it refuses to start
+while one of its own deployments is still Running. A private-only vault requires the
+current password (`-AdminPassword` or the `-AdminPasswordPath` file); Deploy does
+not open it for workstation secret reads. A tenant policy can make every new vault
+private-only seconds after creation (see
+[troubleshooting](troubleshooting.md#the-key-vault-is-private-only-and-az-keyvault-secret-is-refused-forbiddenbyconnection)),
+which is why the first save goes through Azure Resource Manager and why the file exists.
+**`-AdminPasswordPath`**: the file lives outside the git worktree, in an existing
+folder (the build wrapper passes `vm-admin-credential.clixml` in its
+[private folder](private-config.md)). A fresh build writes it before any Azure write;
+on Windows it is a DPAPI-protected export that only the same user on the same PC can read
+(elsewhere PowerShell does not encrypt it). A later run uses it only when
+`-AdminPassword` is absent and the vault is not readable or holds no secret; a readable vault
+wins, and a fresh build replaces a stale file. It is never printed or logged.
 This protects the existing estate, not a nested-build prerequisite. The
 [nested build](nested-sql-demo.md) needs no vault and, like Deploy, no supplied
 onboarding secret: it uses the same one-day credential flow.
@@ -339,8 +356,9 @@ onboarding secret: it uses the same one-day credential flow.
 Mandatory compute/Arc waits throw on timeout; inspection errors terminate. Native CLI
 failures terminate; authentication/authorization errors are never interpreted as
 resource absence. The one retried write is the first Key Vault save of the generated
-password: it retries `Forbidden`/transient errors for up to ten minutes while the
-deployer's new role assignment propagates, and any other error stops at once.
+password: it goes through Azure Resource Manager (no data-plane role has to propagate) and
+retries only throttling, 5xx and connection errors, with a bounded backoff; any other
+error stops at once.
 Extension jobs must complete successfully; guest commands need
 an exact completion marker as well as a nonfailed provisioning result. Only the
 activation AMA wait permits the explicit `ARC_DEMO_PENDING` stdout marker;

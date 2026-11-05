@@ -379,7 +379,8 @@ registers nothing.
 Quota/listing checks are not capacity guarantees.
 `Deploy-ArcDemo.ps1` does not reset SP credentials or generate a new password for
 existing VMs. Old labs without the saved Key Vault secret need their **current**
-password as `-AdminPassword` (SecureString); obtain it from the operator and
+password as `-AdminPassword` (SecureString), or the file an earlier run saved with
+`-AdminPasswordPath`; obtain it from the operator and
 do not rotate it as a shortcut. Arc onboarding needs no supplied secret: it adds
 and removes its own one-day SP credential (see the next entry).
 See [lifecycle semantics](lifecycle.md).
@@ -456,7 +457,9 @@ SkuNotAvailable: The requested VM size for resource 'Following SKUs have failed 
 **Fix** — Deploy now catches this (and `AllocationFailed`, `ZonalAllocationFailed`,
 `OverconstrainedAllocationRequest` and quota errors) and prints the options with
 the exact commands. It never switches VM size or region on its own: retry later
-with the same command (it resumes), or choose another size/region explicitly for
+with the same command (it resumes when the first run saved its password with
+`-AdminPasswordPath`, as the build wrapper does; see
+[A fresh Deploy failed part way](#a-fresh-deploy-failed-part-way)), or choose another size/region explicitly for
 a new lab. Inspect restrictions and quota in the confirmed target:
 
 ```powershell
@@ -500,15 +503,57 @@ days and re-creating the same name recovers it with its data. Use
 `Remove-ArcDemo.ps1 -ForceDeleteWorkspace` (irreversible) before the group delete
 when a clean workspace is wanted.
 
-## The Key Vault secret write is Forbidden right after deployment
+## The Key Vault is private-only and `az keyvault secret` is refused (`ForbiddenByConnection`)
 
-A role assignment created by the same deployment can take minutes to reach the Key
-Vault data plane. The write of `vm-admin-password` retries `Forbidden` and
-transient errors for up to ten minutes and stops immediately on anything else.
-If it finally fails, the VMs already exist with a generated password that was not
-saved: do not redeploy over them. Fix the vault access, then either remove and
-rebuild the lab or, with approval, reset the VM administrator password and rerun
-Deploy with that value as `-AdminPassword`.
+**Symptom** — an older Deploy retried the first `vm-admin-password` write for about ten
+minutes after Bicep succeeded and then failed, warning about "role propagation":
+
+```text
+(ForbiddenByConnection) Public network access is disabled and request is not from a trusted service nor via an approved private link.
+```
+
+The vault reads `publicNetworkAccess=Disabled` although Deploy asked for `Enabled`.
+
+**Cause** — Not role propagation. A tenant or management-group policy with a `modify` effect on
+`Microsoft.KeyVault/vaults/publicNetworkAccess` (in the rebuild that found this, a tenant-root
+assignment) flips every new vault to private-only seconds after it is created; the vault's
+activity log shows `Microsoft.Authorization/policies/modify/action`. The policy cannot be undone
+from the demo, and a rebuild fails the same way. Only the data plane (`az keyvault secret
+set/show` from a workstation) is blocked; Azure Resource Manager is not.
+
+**Fix** — Current Deploy writes the secret through Azure Resource Manager
+(`Microsoft.KeyVault/vaults/secrets`), warns once that a policy made the vault private-only and does not
+retry what cannot clear. Nothing to do for a new build. Because the vault can then never be read from
+a workstation, every later Deploy needs the current password from somewhere else: pass
+`-AdminPasswordPath <private folder>\vm-admin-credential.clixml` (the build wrapper always does), which a
+fresh build fills before any Azure write, or `-AdminPassword`. Do not open the vault, add network
+exceptions or reset a VM password to get around this.
+
+## A fresh Deploy failed part way
+
+**Symptom** — the console ends with an error after some VMs, the vault or the monitoring were
+created: a platform error, a lost connection (`ConnectionResetError`), a missing subscription feature, a
+slow Container Apps environment. The estate is partial.
+
+**Recovery** — a fresh Deploy saves the generated VM admin password before it changes anything,
+when `-AdminPasswordPath` is given (the build wrapper's P2 always gives it), and a rerun reads it
+back, so the same command resumes. Check what Azure has first:
+
+```powershell
+az deployment sub show --name <arc-demo-timestamp from the console log> --query "{state:properties.provisioningState,error:properties.error}" -o json
+```
+
+| The deployment is | Do |
+| --- | --- |
+| Not found (`DeploymentNotFound`) | Nothing was created; rerun the same command. |
+| `Running` | Wait. Deploy refuses to start a second deployment over it (it would race the VM and vault creation). |
+| `Failed` | Read `error` (and the troubleshooting entry that matches it), fix the cause, rerun the same command. Deploy adopts the vault named by its own failed deployment and reuses the saved password; it never adopts another vault. |
+| `Succeeded` | Rerun the same command; it is a normal idempotent redeploy. |
+
+If VMs exist and the saved file is missing (a build started without `-AdminPasswordPath` on an older
+checkout), the password is unknown and routine redeploy must not generate or rotate one. The only
+recovery that needs no credential change is `Remove-ArcDemo.ps1` for both groups and a fresh Deploy;
+resetting the VM password is a separate approved credential change.
 
 ## What-if lists the Defender plan with `Delete properties.extensions`
 

@@ -2,9 +2,14 @@
 
 Everything private to one lab lives in **one folder outside git, outside every
 worktree and outside assistant session folders**. A worktree or session can be
-deleted; this folder is what lets a rebuild start from zero. It holds no secret:
-passwords, client secrets and tokens are never stored. The guest credential is
-prompted for, and the onboarding credential is minted for one day and removed.
+deleted; this folder is what lets a rebuild start from zero. Passwords, client
+secrets and tokens are never written in plain text: the onboarding credential is
+minted for one day and removed, and the one password the estate cannot do without,
+the generated VM admin password, is saved only as a DPAPI-protected
+`vm-admin-credential.clixml` (readable by the same Windows user on the same PC;
+elsewhere PowerShell does not encrypt it, so keep the folder user-only). Do not
+copy it to another machine: a hand-over needs `-AdminPassword` from whoever holds
+the password, or a rebuild.
 
 | File or folder | What it is | Written by |
 | --- | --- | --- |
@@ -13,6 +18,7 @@ prompted for, and the onboarding credential is minted for one day and removed.
 | `arc-fleet.json` | Optional private fleet named by the skin's `workloads.onPremFleetPath` | you |
 | `sre-skin.json` | Private skin for the companion SRE repo | you |
 | `nested-sql-build.json` | Nonsecret inputs of the nested guest build (see [nested-sql-demo.md](nested-sql-demo.md)) | you, or the parent preparation step |
+| `vm-admin-credential.clixml` | The generated VM admin password (DPAPI-protected SecureString), for reruns of P2 when the Key Vault cannot be read from this PC or a build failed part way | `Deploy-ArcDemo.ps1` at P2, before any Azure write |
 | `build-state.json` | Which steps are done, with attempts and evidence paths | the wrapper |
 | `evidence/` | One JSON file per step, readiness results, inventory snapshots and `media-acceptance.json`, the recorded licence acceptance for the installer media | the wrapper, `Export-ArcDemoInventory.ps1`, the media scripts |
 | `sre-backups/` | One new SRE configuration backup per SRE deployment | the wrapper, for the SRE deploy script |

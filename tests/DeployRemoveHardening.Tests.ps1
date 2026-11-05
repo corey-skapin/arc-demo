@@ -315,49 +315,80 @@ Describe 'Which deployments need the Standard security type feature' {
     }
 }
 
-Describe 'Key Vault secret write rides out RBAC propagation' {
+Describe 'Key Vault secret write goes through Azure Resource Manager' {
     InModuleScope Common {
         BeforeEach {
             $script:attempts = 0
+            $script:previousSubscription = $script:DemoSubscription
+            $script:DemoSubscription = '11111111-1111-1111-1111-111111111111'
             Mock Write-Warn {}
             Mock Start-Sleep {}
         }
-        It 'writes once with the checked CLI wrapper on the happy path' {
-            Mock Invoke-DemoAz { $script:attempts++ }
-            Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1'
+        AfterEach { $script:DemoSubscription = $script:previousSubscription }
+        It 'writes once with an ARM PUT on the vault secret resource and never touches the data plane' {
+            Mock Invoke-AzRest { $script:attempts++ }
+            Mock Invoke-DemoAz { throw 'fixture: the data plane must not be used' }
+            Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1'
             $script:attempts | Should -Be 1
-            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter {
-                $Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'secret' -and $Arguments[2] -eq 'set' -and
-                $Arguments[[Array]::IndexOf($Arguments, '--vault-name') + 1] -eq 'kv-fixture-abc123'
+            Should -Invoke Invoke-AzRest -Times 1 -Exactly -ParameterFilter {
+                $Method -eq 'Put' -and
+                $Url -eq 'https://management.azure.com/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.KeyVault/vaults/kv-fixture-abc123/secrets/vm-admin-password?api-version=2024-11-01' -and
+                $Body.properties.value -eq 'Synthetic-Value-1'
             }
+            Should -Invoke Invoke-DemoAz -Times 0
             Should -Invoke Start-Sleep -Times 0
         }
-        It 'retries Forbidden while the new role assignment propagates, with increasing waits' {
-            Mock Invoke-DemoAz {
+        It 'retries throttling and 5xx with increasing waits' {
+            Mock Invoke-AzRest {
                 $script:attempts++
-                if ($script:attempts -lt 3) { throw 'Azure CLI keyvault secret failed (exit 1): (Forbidden) Caller is not authorized to perform action on resource. If role assignments, deny assignments or role definitions were changed recently, please observe propagation time.' }
+                if ($script:attempts -lt 3) { throw 'Response status code does not indicate success: 503 (Service Unavailable).' }
             }
-            Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(5, 7, 9)
+            Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(5, 7, 9)
             $script:attempts | Should -Be 3
             Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 5 }
             Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 7 }
             Should -Invoke Start-Sleep -Times 0 -ParameterFilter { $Seconds -eq 9 }
         }
-        It 'does not retry an error that will not clear by itself' {
-            Mock Invoke-DemoAz { $script:attempts++; throw 'Azure CLI keyvault secret failed (exit 1): (VaultNotFound) The Vault ''kv-fixture-abc123'' was not found.' }
-            { Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' } | Should -Throw '*VaultNotFound*'
+        It 'does not retry a refusal that will not clear by itself, such as 403' {
+            Mock Invoke-AzRest { $script:attempts++; throw 'Response status code does not indicate success: 403 (Forbidden).' }
+            { Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' } |
+                Should -Throw '*could not be written to kv-fixture-abc123 through Azure Resource Manager*403*'
             $script:attempts | Should -Be 1
             Should -Invoke Start-Sleep -Times 0
         }
         It 'gives up after the bounded backoff and never prints the secret' {
-            Mock Invoke-DemoAz { $script:attempts++; throw 'Azure CLI keyvault secret failed (exit 1): (Forbidden) Caller is not authorized to perform action on resource.' }
+            Mock Invoke-AzRest { $script:attempts++; throw 'Response status code does not indicate success: 429 (Too Many Requests).' }
             $thrown = $null
-            try { Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(1, 2) }
+            try { Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(1, 2) }
             catch { $thrown = $_.Exception.Message }
             $thrown | Should -BeLike '*vm-admin-password could not be written to kv-fixture-abc123 after 3 attempts*'
             $thrown | Should -Not -BeLike '*Synthetic-Value-1*'
             $script:attempts | Should -Be 3
         }
+        It 'needs the explicit demo context' {
+            $script:DemoSubscription = $null
+            { Set-DemoKeyVaultSecret -ResourceGroup rg -VaultName kv -Name n -Value v } | Should -Throw '*Initialize the explicit demo context*'
+        }
+    }
+}
+
+Describe 'Saved secret files' {
+    It 'round-trips a secret as a SecureString and returns null when the file is absent' {
+        $path = Join-Path $TestDrive 'secret.clixml'
+        Read-DemoSecretFile -Path $path | Should -BeNullOrEmpty
+        Save-DemoSecretFile -Path $path -Value 'Synthetic-Value-1' 3>$null
+        $read = Read-DemoSecretFile -Path $path
+        $read | Should -BeOfType [securestring]
+        [System.Net.NetworkCredential]::new('', $read).Password | Should -Be 'Synthetic-Value-1'
+        (Get-Content -LiteralPath $path -Raw) | Should -Not -BeLike '*Synthetic-Value-1*'
+    }
+    It 'also reads a credential export and refuses other content or a missing folder' {
+        $path = Join-Path $TestDrive 'credential.clixml'
+        [pscredential]::new('azureuser', (ConvertTo-SecureString 'Synthetic-Value-2' -AsPlainText -Force)) | Export-Clixml -LiteralPath $path
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $path)).Password | Should -Be 'Synthetic-Value-2'
+        Set-Content -LiteralPath (Join-Path $TestDrive 'text.clixml') -Value 'plain text'
+        { Read-DemoSecretFile -Path (Join-Path $TestDrive 'text.clixml') } | Should -Throw '*could not be read*'
+        { Save-DemoSecretFile -Path (Join-Path $TestDrive 'no-such-folder\secret.clixml') -Value 'x' } | Should -Throw '*folder for the saved secret does not exist*'
     }
 }
 
@@ -521,10 +552,10 @@ Describe 'Deploy hardening wiring' {
             @($Providers) -contains 'Microsoft.ContainerService' -and @($Providers) -notcontains 'Microsoft.App' -and @($RequiredExtensions) -notcontains 'containerapp'
         }
     }
-    It 'saves the generated password through the retrying Key Vault helper right after the deployment' {
+    It 'saves the generated password through Azure Resource Manager right after the deployment' {
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -Confirm:$false } | Should -Throw '*stop after the secret write*'
         Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly -ParameterFilter {
-            $VaultName -match '^kv-fixture-[a-z0-9]{6}$' -and $Name -eq 'vm-admin-password' -and $Value.Length -eq 24
+            $ResourceGroup -eq 'rg-fixture-infra' -and $VaultName -match '^kv-fixture-[a-z0-9]{6}$' -and $Name -eq 'vm-admin-password' -and $Value.Length -eq 24
         }
         $state.createCalls | Should -Be 1
     }
@@ -543,6 +574,154 @@ Describe 'Deploy hardening wiring' {
     It 'passes any other deployment failure through unchanged' {
         $state.createError = 'Azure CLI deployment sub failed (exit 1): ERROR: {"code":"InvalidTemplateDeployment","message":"fixture template problem"}'
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -Confirm:$false } | Should -Throw '*fixture template problem*'
+    }
+}
+
+Describe 'Deploy admin password, saved copy and resume of an unfinished build' {
+    BeforeEach {
+        Mock Import-Module {}
+        Mock Write-Step {}
+        Mock Write-Header {}
+        Mock Write-Ok {}
+        Mock Write-Warn {}
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
+        Mock Test-DemoComputeCapacity {}
+        Mock Set-DemoKeyVaultSecret { throw 'fixture: stop after the secret write' }
+        Mock Invoke-AzRest { throw 'fixture: no ARM REST call expected' }
+        $script:pwFile = Join-Path $TestDrive 'vm-admin-credential.clixml'
+        Remove-Item -LiteralPath $script:pwFile -ErrorAction SilentlyContinue
+        $vaultId = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.KeyVault/vaults'
+        $script:s = @{
+            vaults = $null; vms = $null; secret = $null; liveAccess = $null; bicepPassword = $null; fileAtCreate = $false; createCalls = 0; secretReads = 0
+            deployments = '[]'; vaultShow = $null; vaultId = $vaultId
+            retainedManifest = '{"name":"arc-demo-20261009-181623","properties":{"provisioningState":"Succeeded","timestamp":"2026-10-09T08:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-stale"}}}}'
+            failedBuild = '{"name":"arc-demo-20261105-100000","properties":{"provisioningState":"Failed","timestamp":"2026-11-05T00:00:00Z","parameters":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-abc123"}}}}'
+            vm = '{"name":"keep-vm","location":"australiaeast","hardwareProfile":{"vmSize":"Standard_B2as_v2"}}'
+        }
+        # Mock bodies run outside the test file's script scope, so they share the state through globals (as FleetVmShape.Tests does).
+        $global:ArcPw = $script:s
+        $global:ArcPwFile = $script:pwFile
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'list') { return $global:ArcPw.vaults }
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'show') { return $(if ('--query' -in $Arguments) { $global:ArcPw.liveAccess } else { $global:ArcPw.vaultShow }) }
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'secret') { $global:ArcPw.secretReads++; return $global:ArcPw.secret }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return $global:ArcPw.deployments }
+            if ($Arguments[0] -eq 'group') { return 'true' }
+            if ($Arguments[0] -eq 'vm') { return $global:ArcPw.vms }
+            if ($Arguments[0] -in @('network', 'consumption', 'aks', 'containerapp')) { return $null }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
+            if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'create') {
+                $global:ArcPw.createCalls++
+                $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
+                $global:ArcPw.bicepPassword = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).parameters.adminPassword.value
+                $global:ArcPw.fileAtCreate = Test-Path -LiteralPath $global:ArcPwFile
+                return
+            }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'show') { return '{"workspaceId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.OperationalInsights/workspaces/law-fixture"},"dcrCoreId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.Insights/dataCollectionRules/dcr-fixture"},"dcrVmiId":{"value":"/x/dcr-vminsights"},"dcrCtId":{"value":"/x/dcr-changetracking"}}' }
+            throw "Unexpected operation: $($Arguments -join ' ')"
+        }
+        function Invoke-FixtureDeploy {
+            param([switch]$WithPath, [switch]$WhatIf, [string]$Path = $script:pwFile)
+            $extra = @{}
+            if ($WithPath) { $extra.AdminPasswordPath = $Path }
+            if ($WhatIf) { $extra.WhatIf = $true } else { $extra.Confirm = $false }
+            & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' @extra
+        }
+        function Set-RetainedEstate {
+            param([string]$Access)
+            $script:s.vaults = '[{"name":"kv-fixture-stale"}]'
+            $script:s.deployments = "[$($script:s.retainedManifest)]"
+            $script:s.vaultShow = '{"id":"' + $script:s.vaultId + '/kv-fixture-stale","properties":{"publicNetworkAccess":"' + $Access + '"}}'
+            $script:s.vms = "[$($script:s.vm)]"
+        }
+    }
+
+    AfterEach { Remove-Variable ArcPw, ArcPwFile -Scope Global -ErrorAction SilentlyContinue }
+
+    It 'saves a fresh password before the deployment starts and passes the same value to Bicep and the vault' {
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.fileAtCreate | Should -BeTrue
+        $script:s.bicepPassword.Length | Should -Be 24
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $script:pwFile)).Password | Should -Be $script:s.bicepPassword
+        Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly -ParameterFilter { $Value -eq $global:ArcPw.bicepPassword }
+    }
+    It 'saves nothing during a preview, and nothing when no path is given' {
+        Invoke-FixtureDeploy -WithPath -WhatIf
+        Test-Path -LiteralPath $script:pwFile | Should -BeFalse
+        { Invoke-FixtureDeploy } | Should -Throw '*stop after the secret write*'
+        Test-Path -LiteralPath $script:pwFile | Should -BeFalse
+    }
+    It 'refuses a password file inside the git worktree' {
+        { Invoke-FixtureDeploy -WithPath -Path (Join-Path $repo '.local\vm-admin-credential.clixml') } | Should -Throw '*outside the git worktree*'
+        Should -Invoke Invoke-DemoAz -Times 0
+    }
+    It 'warns that a policy made the vault private-only, and still writes the secret through ARM' {
+        $script:s.liveAccess = 'Disabled'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*publicNetworkAccess=Disabled although this deployment asked for Enabled*not a role-propagation delay*' }
+        Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly
+    }
+    It 'reuses the saved password for a retained estate whose vault is private-only, without reading the vault' {
+        Set-RetainedEstate -Access 'Disabled'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+        $script:s.secretReads | Should -Be 0
+        Should -Invoke Set-DemoKeyVaultSecret -Times 0
+    }
+    It 'prefers the vault secret over the saved file when the vault is public, and the file when it holds no secret' {
+        Set-RetainedEstate -Access 'Enabled'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        $script:s.secret = 'Vault-Value-1'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Vault-Value-1'
+        $script:s.secret = $null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+        Should -Invoke Set-DemoKeyVaultSecret -Times 0
+    }
+    It 'lets an explicit -AdminPassword win over everything and refuses a private-only vault with no password at all' {
+        Set-RetainedEstate -Access 'Disabled'
+        { Invoke-FixtureDeploy } | Should -Throw '*private-only*AdminPasswordPath*'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        $explicit = ConvertTo-SecureString 'Explicit-Value-1' -AsPlainText -Force
+        { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -AdminPasswordPath $script:pwFile -AdminPassword $explicit -Confirm:$false } |
+            Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Explicit-Value-1'
+    }
+    It 'resumes an unfinished build: adopts the vault named by its own Failed deployment, reuses the saved password and stores the vault copy' {
+        $script:s.vaults = '[{"name":"kv-fixture-abc123"}]'
+        $script:s.deployments = "[$($script:s.failedBuild)]"
+        $script:s.vaultShow = '{"id":"' + $script:s.vaultId + '/kv-fixture-abc123","properties":{"publicNetworkAccess":"Disabled"}}'
+        $script:s.vms = "[$($script:s.vm)]"
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+        Should -Invoke Write-Step -ParameterFilter { $Message -like '*Resuming the unfinished build arc-demo-20261105-100000*kv-fixture-abc123*' }
+        Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly -ParameterFilter { $VaultName -eq 'kv-fixture-abc123' -and $Value -eq 'Saved-Value-1' }
+    }
+    It 'resumes the same way when the failed build had not created a VM yet' {
+        $script:s.vaults = '[{"name":"kv-fixture-abc123"}]'
+        $script:s.deployments = "[$($script:s.failedBuild)]"
+        $script:s.vaultShow = '{"id":"' + $script:s.vaultId + '/kv-fixture-abc123","properties":{"publicNetworkAccess":"Enabled"}}'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+    }
+    It 'never adopts a vault that no deployment of this demo names' {
+        $script:s.vaults = '[{"name":"kv-fixture-unrelated"}]'
+        $script:s.deployments = "[$($script:s.failedBuild)]"
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no canonical retained deployment output*'
+        $script:s.createCalls | Should -Be 0
+    }
+    It 'does not start a second deployment while this demo has one running' {
+        $script:s.deployments = '[{"name":"arc-demo-20261105-110000","properties":{"provisioningState":"Running","timestamp":"2026-11-05T01:00:00Z","parameters":{"arcResourceGroup":{"value":"rg-fixture"}}}}]'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*arc-demo-20261105-110000*is still Running*'
+        $script:s.createCalls | Should -Be 0
+        { Invoke-FixtureDeploy -WithPath -WhatIf } | Should -Not -Throw
     }
 }
 

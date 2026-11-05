@@ -472,7 +472,7 @@ function Get-ArcDemoBuildSteps {
         New-BuildStep -Id 'P2' -Title 'Base estate: Bicep, Arc, Monitor, DCRs, workbooks' -Script 'scripts\Deploy-ArcDemo.ps1' -Minutes 70 -Mutating `
             -Approvals CostStart -Arguments {
                 param($c)
-                $extra = @{}
+                $extra = @{ AdminPasswordPath = (Join-Path $c.Config.Root 'vm-admin-credential.clixml') }
                 if ($c.Config.AutoShutdownTime) { $extra['AutoShutdownTime'] = $c.Config.AutoShutdownTime }
                 if ($c.Config.DeployerPrincipalId) { $extra['DeployerPrincipalId'] = $c.Config.DeployerPrincipalId }
                 New-BuildArguments $c $c.Config.ArcSkinPath $extra

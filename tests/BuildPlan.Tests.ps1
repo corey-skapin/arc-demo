@@ -19,7 +19,7 @@ exit $codes[[Math]::Min($index, $codes.Count - 1)]
 '@
     # name -> parameters, whether it supports ShouldProcess (and so -Confirm), optional body
     $script:ArcStubs = [ordered]@{
-        'Deploy-ArcDemo.ps1' = @{ Params = $target + 'AutoShutdownTime', 'DeployerPrincipalId'; Process = $true }
+        'Deploy-ArcDemo.ps1' = @{ Params = $target + 'AutoShutdownTime', 'DeployerPrincipalId', 'AdminPasswordPath'; Process = $true }
         'Prepare-NestedSqlParent.ps1' = @{ Params = $target + 'NamePrefix', 'Phase', 'MediaManifestPath', 'AcceptWindowsEvaluationTerms', 'AcceptSqlDeveloperTerms', 'AcceptanceRecordPath', 'ResultPath', 'BuildInputPath'; Process = $true }
         'New-NestedSqlDemo.ps1' = @{ Params = $nested; Process = $true }
         'Stage-DemoMedia.ps1' = @{ Params = $target + 'MachineName', 'Media', 'Destination', 'AcceptWindowsEvaluationTerms', 'AcceptSqlDeveloperTerms', 'ManifestPath', 'AcceptanceRecordPath', 'ResultPath'; Process = $true }
@@ -487,6 +487,7 @@ Describe 'Step runner' {
         $calls[0].v_SkinPath | Should -Be $t.Context.Config.ArcSkinPath
         $calls[0].v_Confirm | Should -Be 'False'
         $calls[0].keys | Should -Not -Contain 'AutoShutdownTime'
+        $calls[0].v_AdminPasswordPath | Should -Be (Join-Path $f.Private 'vm-admin-credential.clixml')
         $calls[1].script | Should -Be 'Test-ArcDemoReadiness.ps1'
         $calls[1].keys | Should -Not -Contain 'Confirm'
         $calls[1].v_DesiredState | Should -Be 'Active'

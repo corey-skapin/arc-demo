@@ -31,7 +31,7 @@ param deployerPrincipalId string
 @description('Globally-unique Key Vault name (e.g. kv-arcdemo-xxxxxx)')
 param keyVaultName string
 
-@description('Preserve the exact retained vault network mode on reconcile; private bootstrap is an explicit separate phase.')
+@description('Preserve the exact retained vault network mode on reconcile. A vault forced to Disabled by policy still gets its first secret through Azure Resource Manager.')
 @allowed(['Enabled', 'Disabled'])
 param keyVaultPublicNetworkAccess string = 'Enabled'
 

@@ -367,33 +367,76 @@ function New-KeyVaultName {
 function Set-DemoKeyVaultSecret {
     <#
     .SYNOPSIS
-        Writes a Key Vault secret, retrying only errors that clear by themselves.
+        Writes a Key Vault secret through Azure Resource Manager, retrying only errors that clear by themselves.
     .DESCRIPTION
-        A role assignment created by the same deployment can take minutes to reach the Key Vault data
-        plane, so a first write may return Forbidden. Other errors fail immediately. The value is never
-        written to output or error text.
+        Uses the management plane (Microsoft.KeyVault/vaults/secrets), so it works whatever the vault's network
+        setting is. A tenant policy can force a new vault to publicNetworkAccess=Disabled seconds after creation;
+        az keyvault secret set from a workstation then fails with ForbiddenByConnection however long it retries,
+        and that error is not a role-propagation delay. The deployer already holds Owner (or Contributor), so no
+        data-plane role has to propagate first. Only throttling, 5xx and connection errors are retried. The value
+        is never written to output or error text.
     #>
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory)][string]$ResourceGroup,
         [Parameter(Mandatory)][string]$VaultName,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Value,
-        [int[]]$RetryDelaySeconds = @(10, 20, 30, 60, 60, 60, 120, 120, 120)
+        [int[]]$RetryDelaySeconds = @(5, 15, 30, 60)
     )
-    $transient = 'Forbidden|Unauthorized|not authorized|propagat|AccessDenied|TooManyRequests|Too Many Requests|ServiceUnavailable|timed out|Connection (reset|aborted)'
+    if (-not $script:DemoSubscription) { throw 'Initialize the explicit demo context before writing a Key Vault secret.' }
+    $url = "https://management.azure.com/subscriptions/$script:DemoSubscription/resourceGroups/$ResourceGroup/providers/Microsoft.KeyVault/vaults/$VaultName/secrets/${Name}?api-version=2024-11-01"
+    $transient = '\b(408|429|500|502|503|504)\b|TooManyRequests|Too Many Requests|ServiceUnavailable|timed out|timeout|Connection (reset|aborted)|connection was closed|error occurred while sending the request'
     for ($attempt = 0; ; $attempt++) {
         try {
-            Invoke-DemoAz -Arguments @('keyvault', 'secret', 'set', '--vault-name', $VaultName, '-n', $Name, '--value', $Value, '-o', 'none', '--only-show-errors') | Out-Null
+            Invoke-AzRest -Method Put -Url $url -Body @{ properties = @{ value = $Value } } | Out-Null
             return
         } catch {
-            if ($_.Exception.Message -notmatch $transient) { throw }
-            if ($attempt -ge $RetryDelaySeconds.Count) {
-                throw "Key Vault secret $Name could not be written to $VaultName after $($attempt + 1) attempts: $($_.Exception.Message)"
+            $problem = $_.Exception.Message
+            $detail = @($_.ErrorDetails.Message, $problem) | Where-Object { $_ } | Select-Object -First 1
+            if ($problem -notmatch $transient) {
+                throw "Key Vault secret $Name could not be written to $VaultName through Azure Resource Manager: $detail"
             }
-            Write-Warn "Key Vault secret write attempt $($attempt + 1) was refused; role assignments can take several minutes to propagate. Retrying in $($RetryDelaySeconds[$attempt]) seconds."
+            if ($attempt -ge $RetryDelaySeconds.Count) {
+                throw "Key Vault secret $Name could not be written to $VaultName after $($attempt + 1) attempts: $detail"
+            }
+            Write-Warn "Key Vault secret write attempt $($attempt + 1) hit a transient Azure Resource Manager error; retrying in $($RetryDelaySeconds[$attempt]) seconds."
             Start-Sleep -Seconds $RetryDelaySeconds[$attempt]
         }
     }
+}
+
+function Save-DemoSecretFile {
+    <#
+    .SYNOPSIS
+        Saves a secret as a SecureString export (Export-Clixml) so a later run can reuse it.
+    .DESCRIPTION
+        On Windows the export is DPAPI-protected: only the same Windows user on the same PC can read it back. Elsewhere
+        PowerShell does not encrypt it, so keep the file in a user-only folder. The folder must already exist and, like
+        every credential, live outside the git worktree. The value is never written to output.
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The secret is converted in memory and written only as a protected SecureString export.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Value)
+    $folder = Split-Path -Parent $Path
+    if ($folder -and -not (Test-Path -LiteralPath $folder -PathType Container)) { throw "The folder for the saved secret does not exist: $folder" }
+    ConvertTo-SecureString -String $Value -AsPlainText -Force | Export-Clixml -LiteralPath $Path
+    if (-not $IsWindows) { Write-Warn "Saved the secret to $Path without encryption (DPAPI is Windows-only); keep it in a user-only folder." }
+}
+
+function Read-DemoSecretFile {
+    <#
+    .SYNOPSIS
+        Reads a file written by Save-DemoSecretFile (or a credential export) back as a SecureString; $null when the file does not exist.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try { $saved = Import-Clixml -LiteralPath $Path }
+    catch { throw "The saved secret file $Path could not be read (a Windows export only opens for the user and PC that wrote it): $($_.Exception.Message)" }
+    if ($saved -is [pscredential]) { return $saved.Password }
+    if ($saved -is [securestring]) { return $saved }
+    throw "The saved secret file $Path is not a SecureString or credential export."
 }
 
 function Assert-DemoName {

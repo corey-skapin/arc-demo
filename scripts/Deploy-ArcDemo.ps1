@@ -48,6 +48,14 @@
     Current VM admin password as a SecureString for existing labs without the
     saved Key Vault secret. Never pass a new password for routine reconciliation.
 
+.PARAMETER AdminPasswordPath
+    Optional file (outside the git worktree, in an existing folder) that keeps the VM admin password for
+    reruns. A fresh build saves the generated password there, protected for the current Windows user and PC,
+    before any Azure write, so a Deploy that fails part way can be rerun with the password its VMs were created
+    with. A later run falls back to it when the Key Vault cannot be read from this workstation (a tenant policy
+    can make new vaults private-only) or never received the secret. -AdminPassword and a readable vault win over
+    it. The build wrapper passes vm-admin-credential.clixml from its private folder.
+
 .PARAMETER OsDiskStorageAccountType
     StandardSSD_LRS for new OS disks; Standard_LRS is an explicit retained-lab
     choice. Existing disk tiers must already match; deployment never performs
@@ -115,6 +123,7 @@
     .\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> `
         -AdminEmail demo@contoso.com
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'AdminPasswordPath', Justification = 'It is a file path, not a password: the file holds a protected SecureString export.')]
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [Parameter(Mandatory)][string]$SubscriptionId,
@@ -137,6 +146,7 @@ param(
     [int]$BudgetAmount = 200,
     [string]$SkinPath = '',
     [securestring]$AdminPassword,
+    [string]$AdminPasswordPath = '',
     [securestring]$OnboardingSecret
 )
 
@@ -165,6 +175,12 @@ Assert-DemoName $NamePrefix
 if ($Location -notmatch '^[a-z0-9]+$') { throw 'Location must be an Azure region name.' }
 if ($AutoShutdownTime -notmatch '^([01][0-9]|2[0-3])[0-5][0-9]$') { throw 'AutoShutdownTime must be HHmm.' }
 if ($BudgetAmount -lt 1) { throw 'BudgetAmount must be positive.' }
+if ($AdminPasswordPath) {
+    $AdminPasswordPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($AdminPasswordPath)
+    if ($AdminPasswordPath.StartsWith($repoRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'AdminPasswordPath must be outside the git worktree: keep it in the private build folder.'
+    }
+}
 if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
     throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
 }
@@ -544,14 +560,31 @@ $infraRg = "rg-$NamePrefix-infra"
 $kvPrefix = "kv-$($NamePrefix -replace '-','')"
 $vaultOutput = Invoke-DemoAz -Arguments @('keyvault', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
 $vaultRecords = @(if ($null -ne $vaultOutput) { $vaultOutput | ConvertFrom-Json })
-$vaultManifests = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '-o', 'json') | ConvertFrom-Json |
+$subscriptionDeployments = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '-o', 'json') | ConvertFrom-Json)
+$vaultManifests = @($subscriptionDeployments |
     Where-Object { $_.properties.provisioningState -eq 'Succeeded' -and $_.properties.outputs.arcResourceGroup.value -eq $arcRg -and $_.properties.outputs.keyVaultName.value } |
     Sort-Object { $_.properties.timestamp } -Descending)
 if ($vaultManifests.Count -and -not (Invoke-DemoAz -Arguments @('group', 'exists', '-n', $infraRg, '-o', 'json') | ConvertFrom-Json)) {
     Write-Step "Ignoring $($vaultManifests.Count) retained deployment manifest(s) for ${arcRg}: $infraRg no longer exists, so this is a fresh build with a new Key Vault. Remove-ArcDemo -PruneDeploymentHistory deletes such stale records."
     $vaultManifests = @()
 }
+$runningDeployments = @($subscriptionDeployments | Where-Object {
+    $_.name -cmatch '^arc-demo-\d{8}-\d{6}$' -and $_.properties.provisioningState -in @('Accepted', 'Running') -and $_.properties.parameters.arcResourceGroup.value -eq $arcRg })
+if ($runningDeployments.Count -and -not $WhatIfPreference) {
+    throw "Deployment $($runningDeployments[0].name) for $arcRg is still $($runningDeployments[0].properties.provisioningState). A second deployment over it would race its VM and vault creation: wait until 'az deployment sub show --name $($runningDeployments[0].name) --query properties.provisioningState -o tsv' is Succeeded or Failed, then rerun this command."
+}
 $kvName = if ($vaultManifests.Count) { $vaultManifests[0].properties.outputs.keyVaultName.value } else { '' }
+$resumedBuild = $null
+if (-not $kvName -and $vaultRecords.Count) {
+    # A fresh build that stopped part way leaves its vault behind and has no Succeeded manifest. The vault named by this
+    # demo's own Failed/Canceled deployment record is that build's own: an exact match, never a prefix guess.
+    foreach ($record in @(Get-DemoStaleManifestDeployments -Deployments $subscriptionDeployments -ArcResourceGroup $arcRg |
+            Where-Object { $_.properties.provisioningState -in @('Failed', 'Canceled') -and $_.properties.parameters.keyVaultName.value } |
+            Sort-Object { $_.properties.timestamp } -Descending)) {
+        $candidate = [string]$record.properties.parameters.keyVaultName.value
+        if (@($vaultRecords | Where-Object name -eq $candidate).Count -eq 1) { $resumedBuild = $record; $kvName = $candidate; break }
+    }
+}
 $freshVault = -not $kvName -and -not $vaultRecords.Count
 $vaultPublicAccess = 'Enabled'
 if ($kvName) {
@@ -561,35 +594,52 @@ if ($kvName) {
     if ($selectedVault.id -ne "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.KeyVault/vaults/$kvName" -or
         $selectedVault.properties.publicNetworkAccess -notin @('Enabled', 'Disabled')) { throw 'Retained vault identity/network mode is unknown.' }
     $vaultPublicAccess = $selectedVault.properties.publicNetworkAccess
-    Write-Step "Found existing Key Vault $kvName — preserving for idempotent redeploy"
+    if ($resumedBuild) { Write-Step "Resuming the unfinished build $($resumedBuild.name): preserving its Key Vault $kvName" }
+    else { Write-Step "Found existing Key Vault $kvName — preserving for idempotent redeploy" }
 } else {
     if ($vaultRecords.Count) { throw 'Existing vaults have no canonical retained deployment output; explicit ownership review is required, not first-prefix selection.' }
     $kvName  = New-KeyVaultName -Prefix $kvPrefix
     $kvName  = $kvName.Substring(0, [Math]::Min(24, $kvName.Length))
 }
 
-# Phase 2: generate password, deploy Bicep
-Write-Header 'Generating admin password + deploying Bicep'
+# Phase 2: resolve the admin password, deploy Bicep
+Write-Header 'Deploying main.bicep'
 $vmOutput = Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
 $existingVms = @(if ($null -ne $vmOutput) { $vmOutput | ConvertFrom-Json })
-if (-not $freshVault -and -not $existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
-    throw 'Retained vault without current compute: supply the retained CURRENT AdminPassword; do not generate or overwrite a retained administrator credential.'
+# The password saved by an earlier run (-AdminPasswordPath) is the way back in when the vault cannot be read from here,
+# for example a vault that a tenant policy made private-only, or a build that stopped before the vault copy was written.
+$savedPassword = if ($AdminPasswordPath -and -not $AdminPassword) { Read-DemoSecretFile -Path $AdminPasswordPath }
+if (-not $freshVault -and -not $existingVms.Count -and -not $AdminPassword -and -not $savedPassword -and -not $WhatIfPreference) {
+    throw 'Retained vault without current compute: supply the retained CURRENT AdminPassword (or the saved -AdminPasswordPath file); do not generate or overwrite a retained administrator credential.'
 }
-if ($vaultPublicAccess -eq 'Disabled' -and -not $AdminPassword -and -not $WhatIfPreference) {
-    throw 'Retained vault is private-only. Supply the CURRENT AdminPassword as SecureString; no workstation secret read, public access change or credential rotation.'
+if ($vaultPublicAccess -eq 'Disabled' -and -not $AdminPassword -and -not $savedPassword -and -not $WhatIfPreference) {
+    throw 'Retained vault is private-only (a tenant policy can force that; see docs/troubleshooting.md). Supply the CURRENT AdminPassword as SecureString, or the file an earlier run saved with -AdminPasswordPath; no workstation secret read, public access change or credential rotation.'
 }
-$existingSecret = if ($existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
+$existingSecret = if ($existingVms.Count -and -not $AdminPassword -and $vaultPublicAccess -eq 'Enabled' -and -not $WhatIfPreference) {
     Invoke-DemoAz -Arguments @('keyvault', 'secret', 'show', '--vault-name', $kvName, '-n', 'vm-admin-password', '--query', 'value', '-o', 'tsv') -AllowNotFound
 }
+$passwordSource = 'generated'
 if ($AdminPassword) {
     $adminPwd = [System.Net.NetworkCredential]::new('', $AdminPassword).Password
+    $passwordSource = 'supplied'
 } elseif ($existingSecret) {
     $adminPwd = $existingSecret
+    $passwordSource = 'vault'
+} elseif ($savedPassword) {
+    $adminPwd = [System.Net.NetworkCredential]::new('', $savedPassword).Password
+    $passwordSource = 'saved file'
 } elseif ($existingVms.Count -gt 0 -and -not $WhatIfPreference) {
-    throw 'Existing VMs found but no saved admin credential. Supply the CURRENT password as -AdminPassword (SecureString); routine redeploy must not generate or rotate it.'
+    throw 'Existing VMs found but no saved admin credential. Supply the CURRENT password as -AdminPassword (SecureString) or as the file saved with -AdminPasswordPath; routine redeploy must not generate or rotate it.'
 } else {
     $adminPwd = New-StrongPassword -Length 24
 }
+Write-Step "VM admin password: $passwordSource"
+if ($AdminPasswordPath -and $freshVault -and -not $existingVms.Count -and -not $WhatIfPreference) {
+    # Saved before any Azure write, so a build that fails part way can be rerun with the password its VMs were created with.
+    Save-DemoSecretFile -Path $AdminPasswordPath -Value $adminPwd
+    Write-Ok "Saved the VM admin password to $AdminPasswordPath (protected for this user on this PC); it is never printed."
+}
+$storeAdminSecret = ($freshVault -and -not $existingVms.Count) -or ($resumedBuild -and $passwordSource -eq 'saved file')
 
 $paramFile = Join-Path ([System.IO.Path]::GetTempPath()) "arc-demo-params-$(Get-Random).json"
 
@@ -757,8 +807,13 @@ $outputs = az deployment sub show --name $deploymentName --query properties.outp
     [System.IO.File]::Delete($paramFile)
 }
 Write-Ok 'Bicep deployment complete'
-if ($freshVault -and -not $existingVms.Count) {
-    Set-DemoKeyVaultSecret -VaultName $kvName -Name 'vm-admin-password' -Value $adminPwd
+if ($storeAdminSecret) {
+    $liveAccess = Invoke-DemoAz -Arguments @('keyvault', 'show', '-g', $infraRg, '-n', $kvName, '--query', 'properties.publicNetworkAccess', '-o', 'tsv') -AllowNotFound
+    if ($liveAccess -eq 'Disabled' -and $vaultPublicAccess -ne 'Disabled') {
+        Write-Warn "Key Vault $kvName reads publicNetworkAccess=Disabled although this deployment asked for Enabled: a tenant or subscription policy changed it after creation (see the vault's activity log: Microsoft.Authorization/policies/modify/action). That is not a role-propagation delay and cannot be fixed from here. The password is saved through Azure Resource Manager, which that setting does not block; reading it back from a workstation will keep failing, so reruns use the file saved with -AdminPasswordPath, or -AdminPassword."
+    }
+    Set-DemoKeyVaultSecret -ResourceGroup $infraRg -VaultName $kvName -Name 'vm-admin-password' -Value $adminPwd
+    Write-Ok "VM admin password saved to Key Vault $kvName"
 }
 
 $workspaceId = $outputs.workspaceId.value

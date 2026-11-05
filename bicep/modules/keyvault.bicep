@@ -15,7 +15,7 @@ param tenantId string
 @description('Principal ID of the deploying user (for RBAC role assignment)')
 param deployerPrincipalId string
 
-@description('The wrapper preserves the existing vault mode. Disabled requires a separately approved private bootstrap for fresh credentials.')
+@description('Deploy preserves the existing vault mode. A vault that is Disabled (for example forced by a tenant policy) still gets its first secret through Azure Resource Manager, which this setting does not block.')
 @allowed(['Enabled', 'Disabled'])
 param publicNetworkAccess string = 'Enabled'
 

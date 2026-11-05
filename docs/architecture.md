@@ -126,7 +126,7 @@ The fleet schema and legacy OS treatment are documented in
 
 - Backing VMs have system-assigned managed identities. Arc agent identity and Arc-scoped DCR associations remain distinct; do not move Linux DCRAs to a VM ID merely because that VM has a managed identity.
 - A service principal **`sp-arc-demo-onboard`** with the *Azure Connected Machine Onboarding* role on `rg-arc-demo` is created once and reused — its only job is for the Arc agent to register on first install.
-- Key Vault stores the local-admin password (single secret `vm-admin-password`).
+- Key Vault stores the local-admin password (single secret `vm-admin-password`), written through Azure Resource Manager so a tenant policy that makes the vault private-only does not block it.
 
 ## Cost notes
 
