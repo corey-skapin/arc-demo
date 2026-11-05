@@ -95,5 +95,5 @@ try {
 } finally {
     $answer = $null
     if ($vhdMounted) { Dismount-VHD -Path $osPath }
-    if ($isoMounted) { Dismount-DiskImage -ImagePath $WindowsIsoPath }
+    if ($isoMounted) { Dismount-DiskImage -ImagePath $WindowsIsoPath | Out-Null }
 }

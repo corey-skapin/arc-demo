@@ -134,6 +134,7 @@ Describe 'Nested SQL wiring in the normal entry points' {
             [pscustomobject]@{ Name = 'nested-start'; State = 'Completed' }
         }
         Mock Wait-DemoNestedSqlArcConnected {}
+        Mock Set-DemoResourceTags { $true }
         Mock Wait-DemoHostsReady {
             $fixture.nestedGuestRequest = $NestedGuest
             [pscustomobject]@{ Status = 'pass'; Hosts = @(); NestedGuest = [ordered]@{ status = 'pass'; startCommand = 'pass' }; ElapsedSeconds = 1 }
@@ -211,15 +212,39 @@ Describe 'Nested SQL wiring in the normal entry points' {
         Mock Invoke-DemoNestedSqlGuest { throw 'shutdown failed' }
         Mock Write-Warn {}
         & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false
-        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $Action -eq 'Stop' -and $TimeoutSeconds -eq 600 }
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $Action -eq 'Stop' -and $TimeoutSeconds -eq 600 -and $AllowAbsent }
         Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*did not stop gracefully (shutdown failed)*deleted with rg-fixture-infra anyway*' }
         Should -Invoke Get-DemoRemovalChecks -Times 1
+    }
+
+    It 'skips the guest command, with an info line and no warning, when the guest never became an Arc machine' {
+        Mock Invoke-DemoAz { $null } -ParameterFilter { $Arguments[0] -eq 'connectedmachine' }
+        Mock Write-Warn {}
+        Mock Write-Step {}
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 0
+        Should -Invoke Write-Warn -Times 0
+        Should -Invoke Write-Step -Times 1 -ParameterFilter { $Message -like 'The nested guest arc-guest was never an Arc machine, so there is nothing to stop gracefully*' }
+        Should -Invoke Get-DemoRemovalChecks -Times 1
+    }
+
+    It 'never lets Hibernate treat a missing guest as stopped: only Remove passes -AllowAbsent' {
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') @target
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $Action -eq 'Stop' -and -not $AllowAbsent }
     }
 
     It 'still refuses removal when the parent is in a transitional power state' {
         $fixture.parent.Actual.powerState = 'VM starting'
         { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false } | Should -Throw '*retry removal after the transition settles*'
         Should -Invoke Invoke-DemoNestedSqlGuest -Times 0
+    }
+
+    It 'leaves the nested Arc row out of the base estate validation Deploy runs before the guest exists' {
+        Mock Invoke-DemoAz { throw 'no guest Arc machine exists yet' } -ParameterFilter { $Arguments[0] -eq 'connectedmachine' -and $Arguments[1] -eq 'show' }
+        $result = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') @target -OutputFormat Json -SkipNestedGuest | ConvertFrom-Json
+        $result.checks | Where-Object id -eq 'nested/arc' | Should -BeNullOrEmpty
+        $result.status | Should -Not -Be 'fail'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'connectedmachine' -and $Arguments[1] -eq 'show' }
     }
 
     It 'checks nested Arc readiness without a guest command' -ForEach @(

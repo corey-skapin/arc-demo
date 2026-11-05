@@ -44,6 +44,111 @@ Describe 'AllowNotFound against Azure CLI 2.91 error text' {
     }
 }
 
+Describe 'Microsoft Graph continuous access evaluation challenge' {
+    BeforeAll {
+        # A real process stands in for az: it fails with the CAE challenge unless AZURE_IDENTITY_DISABLE_CP1 is set (or fails always in that mode).
+        $fakeBin = Join-Path $TestDrive 'cae-bin'
+        $null = New-Item -ItemType Directory -Path $fakeBin
+        $global:CaeFixture = @{
+            Stderr = Join-Path $TestDrive 'cae-stderr.txt'; Log = Join-Path $TestDrive 'cae-calls.log'; Mode = Join-Path $TestDrive 'cae-mode.txt'
+        }
+        if ($IsWindows) {
+            Set-Content -Path (Join-Path $fakeBin 'az.cmd') -Value @(
+                '@echo off'
+                "echo cp1=%AZURE_IDENTITY_DISABLE_CP1% args=%*>> `"$($global:CaeFixture.Log)`""
+                'if "%1"=="account" (echo 22222222-2222-2222-2222-222222222222& exit /b 0)'
+                "set /p mode=<`"$($global:CaeFixture.Mode)`""
+                'if "%mode%"=="always-fail" goto fail'
+                'if defined AZURE_IDENTITY_DISABLE_CP1 (echo []& exit /b 0)'
+                ':fail'
+                "type `"$($global:CaeFixture.Stderr)`" 1>&2"
+                'exit /b 3'
+            )
+        } else {
+            $log = $global:CaeFixture.Log; $mode = $global:CaeFixture.Mode; $err = $global:CaeFixture.Stderr
+            Set-Content -Path (Join-Path $fakeBin 'az') -Value @(
+                '#!/bin/sh'
+                ('echo "cp1=$AZURE_IDENTITY_DISABLE_CP1 args=$*" >> ''{0}''' -f $log)
+                'if [ "$1" = "account" ]; then echo 22222222-2222-2222-2222-222222222222; exit 0; fi'
+                ('if [ "$(cat ''{0}'')" = "always-fail" ]; then cat ''{1}'' >&2; exit 3; fi' -f $mode, $err)
+                'if [ -n "$AZURE_IDENTITY_DISABLE_CP1" ]; then echo "[]"; exit 0; fi'
+                ('cat ''{0}'' >&2' -f $err)
+                'exit 3'
+            )
+            chmod +x (Join-Path $fakeBin 'az')
+        }
+        $script:caeOriginalPath = $env:PATH
+        $script:caeOriginalCp1 = $env:AZURE_IDENTITY_DISABLE_CP1
+        $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
+    }
+    AfterAll {
+        $env:PATH = $script:caeOriginalPath
+        $env:AZURE_IDENTITY_DISABLE_CP1 = $script:caeOriginalCp1
+        Remove-Variable CaeFixture -Scope Global -ErrorAction SilentlyContinue
+    }
+    BeforeEach {
+        Set-Content -Path $global:CaeFixture.Stderr -Value 'ERROR: Continuous access evaluation resulted in challenge with result: InteractionRequired and code: TokenCreatedWithOutdatedPolicies'
+        Set-Content -Path $global:CaeFixture.Mode -Value 'cp1-fixes-it'
+        Remove-Item -LiteralPath $global:CaeFixture.Log -ErrorAction SilentlyContinue
+        $env:AZURE_IDENTITY_DISABLE_CP1 = $null
+    }
+    It 'retries a Graph call once with CAE disabled for that child process only, and keeps doing so for later Graph calls' {
+        InModuleScope Common {
+            Mock Write-Warn {}
+            $script:DemoGraphWithoutCae = $null
+            $script:DemoSubscription = $null
+            $script:DemoTenant = '22222222-2222-2222-2222-222222222222'
+            $graph = @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me')
+            Invoke-DemoAz -Arguments $graph | Should -Be '[]'
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -BeNullOrEmpty
+            @(Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=rest*' }).Count | Should -Be 2
+            (Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=rest*' })[0] | Should -BeLike 'cp1= *'
+            (Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=rest*' })[1] | Should -BeLike 'cp1=1 *'
+            Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*continuous access evaluation (CAE) challenge*AZURE_IDENTITY_DISABLE_CP1=1*' }
+            # Later Graph calls in the process go straight through with the variable set, and directory calls use it too.
+            Remove-Item -LiteralPath $global:CaeFixture.Log
+            Invoke-DemoAz -Arguments @('ad', 'sp', 'list', '--display-name', 'x') | Should -Be '[]'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=ad*' }).Count | Should -Be 1
+            @(Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=ad*' })[0] | Should -BeLike 'cp1=1 *'
+            Should -Invoke Write-Warn -Times 1 -Exactly
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -BeNullOrEmpty
+        }
+    }
+    It 'never retries ARM calls or other Graph errors, and never overrides the operator''s own setting' {
+        InModuleScope Common {
+            Mock Write-Warn {}
+            $script:DemoGraphWithoutCae = $null
+            $script:DemoSubscription = $null
+            { Invoke-DemoAz -Arguments @('vm', 'list', '-g', 'rg-x') } | Should -Throw '*Continuous access evaluation*'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
+            Remove-Item -LiteralPath $global:CaeFixture.Log
+            Set-Content -Path $global:CaeFixture.Stderr -Value 'ERROR: (Forbidden) Insufficient privileges to complete the operation.'
+            { Invoke-DemoAz -Arguments @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me') } | Should -Throw '*Insufficient privileges*'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
+            Should -Invoke Write-Warn -Times 0
+            Remove-Item -LiteralPath $global:CaeFixture.Log
+            $env:AZURE_IDENTITY_DISABLE_CP1 = 'operator'
+            Invoke-DemoAz -Arguments @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me') | Should -Be '[]'
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -Be 'operator'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
+        }
+    }
+    It 'names the workaround when the challenge survives the retry' {
+        InModuleScope Common {
+            Mock Write-Warn {}
+            $script:DemoGraphWithoutCae = $null
+            $script:DemoSubscription = $null
+            Set-Content -Path $global:CaeFixture.Mode -Value 'always-fail'
+            $thrown = $null
+            try { Invoke-DemoAz -Arguments @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me') } catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*TokenCreatedWithOutdatedPolicies*AZURE_IDENTITY_DISABLE_CP1*az logout then az login --tenant*'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 2
+            $script:DemoGraphWithoutCae | Should -BeNullOrEmpty
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Compute capacity preflight with Azure CLI 2.91 string quotas' {
     InModuleScope Common {
         BeforeEach {
@@ -82,6 +187,11 @@ Describe 'Compute capacity preflight with Azure CLI 2.91 string quotas' {
         It 'adds two to 22 instead of concatenating to 222' {
             Test-DemoComputeCapacity -Location australiaeast -VmSize Standard_B2as_v2 -AdditionalVmCount 1
             Should -Invoke Write-Ok -Times 1 -ParameterFilter { $Message -eq 'cores vCPU quota: 22 in use + 2 needed of 100' }
+        }
+        It 'says up front that the slow regional SKU listing takes about four minutes and creates nothing' {
+            Mock Write-Step {}
+            Test-DemoComputeCapacity -Location australiaeast -VmSize Standard_B2as_v2 -AdditionalVmCount 1
+            Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -like '*SKU restrictions and vCPU quota in australiaeast*about 4 minutes*creates nothing*' }
         }
         It 'still reads numeric quota values from older CLI versions' {
             $script:usageAsNumbers = $true
@@ -174,6 +284,7 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
         BeforeEach {
             $script:versionJson = '{"azure-cli":"2.91.0","azure-cli-core":"2.91.0","azure-cli-telemetry":"1.1.0","extensions":{"connectedmachine":"3.0.0","monitor-control-service":"1.2.0"}}'
             $script:providerStates = @{}
+            $script:featureStates = @{}
             Mock Write-Header {}
             Mock Write-Ok {}
             Mock Initialize-DemoContext {}
@@ -189,6 +300,11 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
                 if ($Arguments[0] -eq 'role') { return 'Owner' }
                 if ($Arguments[0] -eq 'provider') {
                     $state = $script:providerStates[$Arguments[3]]
+                    return $(if ($state) { $state } else { 'Registered' })
+                }
+                if ($Arguments[0] -eq 'feature') {
+                    $state = $script:featureStates["$($Arguments[3])/$($Arguments[5])"]
+                    if ($state -eq 'absent') { return $null }
                     return $(if ($state) { $state } else { 'Registered' })
                 }
                 throw "Unexpected Azure CLI call: $($Arguments -join ' ')"
@@ -237,53 +353,290 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
             $aks.Extensions | Should -Be @('connectedmachine')
             $aks.Providers | Should -Contain 'Microsoft.ContainerService'
             $aks.Providers | Should -Not -Contain 'Microsoft.App'
+            $aks.Features.Count | Should -Be 0
+            $base.Features.Count | Should -Be 0
+        }
+        It 'adds the Standard security type feature only when asked' {
+            (Get-DemoPrerequisiteSet -StandardSecurityType).Features | Should -Be @('Microsoft.Compute/UseStandardSecurityType')
+            (Get-DemoPrerequisiteSet -ContainerApps -StandardSecurityType).Extensions | Should -Be @('connectedmachine', 'containerapp')
+        }
+        It 'passes when the required subscription feature is Registered, checking it read-only' {
+            $preflight = $script:preflight
+            Test-Prerequisites @preflight -Features @('Microsoft.Compute/UseStandardSecurityType') | Should -Be '33333333-3333-3333-3333-333333333333'
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter {
+                $Arguments[0] -eq 'feature' -and $Arguments[1] -eq 'show' -and $Arguments[3] -eq 'Microsoft.Compute' -and $Arguments[5] -eq 'UseStandardSecurityType'
+            }
+        }
+        It 'names an unregistered feature with the exact commands and never registers it' {
+            $script:featureStates['Microsoft.Compute/UseStandardSecurityType'] = 'NotRegistered'
+            $preflight = $script:preflight
+            $thrown = $null
+            try { Test-Prerequisites @preflight -Features @('Microsoft.Compute/UseStandardSecurityType') }
+            catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*feature(s) not registered: Microsoft.Compute/UseStandardSecurityType (NotRegistered)*'
+            $thrown | Should -BeLike '*until the feature Microsoft.Compute/UseStandardSecurityType is registered*'
+            $thrown | Should -BeLike '*az feature register --subscription 11111111-1111-1111-1111-111111111111 --namespace Microsoft.Compute --name UseStandardSecurityType*'
+            $thrown | Should -BeLike '*az provider register --subscription 11111111-1111-1111-1111-111111111111 --namespace Microsoft.Compute --wait*'
+            $thrown | Should -BeLike '*Preflight never registers features*'
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'register' -in $Arguments }
+        }
+        It 'reports a missing feature together with a missing extension and an unregistered provider' {
+            $script:featureStates['Microsoft.Compute/UseStandardSecurityType'] = 'Pending'
+            $script:providerStates['Microsoft.App'] = 'NotRegistered'
+            $preflight = $script:preflight
+            $thrown = $null
+            try { Test-Prerequisites @preflight -Providers @('Microsoft.App') -RequiredExtensions @('containerapp') -Features @('Microsoft.Compute/UseStandardSecurityType') }
+            catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*extension(s) not installed: containerapp*'
+            $thrown | Should -BeLike '*provider(s) not registered: Microsoft.App (NotRegistered)*'
+            $thrown | Should -BeLike '*feature(s) not registered: Microsoft.Compute/UseStandardSecurityType (Pending)*'
+        }
+        It 'has nothing to register for a feature that is no longer in the catalog' {
+            $script:featureStates['Microsoft.Compute/UseStandardSecurityType'] = 'absent'
+            $preflight = $script:preflight
+            { Test-Prerequisites @preflight -Features @('Microsoft.Compute/UseStandardSecurityType') } | Should -Not -Throw
         }
     }
 }
 
-Describe 'Key Vault secret write rides out RBAC propagation' {
+Describe 'Which deployments need the Standard security type feature' {
+    BeforeAll {
+        $script:nestedSkinTable = @{ nestedSqlGuest = @{ enabled = $true; parentVmName = 'win-sql-02'; guestVmName = 'g'; arcMachineName = 'g' } }
+        $script:fleetFile = Join-Path $TestDrive 'fleet.json'
+    }
+    It 'needs it for a nested SQL parent' {
+        Test-DemoStandardSecurityTypeRequired -Skin $script:nestedSkinTable | Should -BeTrue
+    }
+    It 'does not need it for the base fleet' {
+        Test-DemoStandardSecurityTypeRequired -Skin @{ schemaVersion = 1 } | Should -BeFalse
+        Test-DemoStandardSecurityTypeRequired -Skin @{ nestedSqlGuest = @{ enabled = $false } } | Should -BeFalse
+        Test-DemoStandardSecurityTypeRequired -Skin $null | Should -BeFalse
+    }
+    It 'needs it when a fleet entry declares Standard, and not for TrustedLaunch or no declaration' {
+        Set-Content -LiteralPath $script:fleetFile -Value '[{"name":"a","securityType":"Standard"},{"name":"b"}]'
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath $script:fleetFile | Should -BeTrue
+        Set-Content -LiteralPath $script:fleetFile -Value '[{"name":"a","securityType":"TrustedLaunch"},{"name":"b"}]'
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath $script:fleetFile | Should -BeFalse
+        Set-Content -LiteralPath $script:fleetFile -Value '[{"name":"a"}]'
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath $script:fleetFile | Should -BeFalse
+    }
+    It 'leaves a missing fleet file to Deploy, which reports its path' {
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath (Join-Path $TestDrive 'absent.json') | Should -BeFalse
+    }
+}
+
+Describe 'Key Vault secret write goes through Azure Resource Manager' {
     InModuleScope Common {
         BeforeEach {
             $script:attempts = 0
+            $script:previousSubscription = $script:DemoSubscription
+            $script:DemoSubscription = '11111111-1111-1111-1111-111111111111'
             Mock Write-Warn {}
             Mock Start-Sleep {}
         }
-        It 'writes once with the checked CLI wrapper on the happy path' {
-            Mock Invoke-DemoAz { $script:attempts++ }
-            Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1'
+        AfterEach { $script:DemoSubscription = $script:previousSubscription }
+        It 'writes once with an ARM PUT on the vault secret resource and never touches the data plane' {
+            Mock Invoke-AzRest { $script:attempts++ }
+            Mock Invoke-DemoAz { throw 'fixture: the data plane must not be used' }
+            Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1'
             $script:attempts | Should -Be 1
-            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter {
-                $Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'secret' -and $Arguments[2] -eq 'set' -and
-                $Arguments[[Array]::IndexOf($Arguments, '--vault-name') + 1] -eq 'kv-fixture-abc123'
+            Should -Invoke Invoke-AzRest -Times 1 -Exactly -ParameterFilter {
+                $Method -eq 'Put' -and
+                $Url -eq 'https://management.azure.com/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.KeyVault/vaults/kv-fixture-abc123/secrets/vm-admin-password?api-version=2024-11-01' -and
+                $Body.properties.value -eq 'Synthetic-Value-1'
             }
+            Should -Invoke Invoke-DemoAz -Times 0
             Should -Invoke Start-Sleep -Times 0
         }
-        It 'retries Forbidden while the new role assignment propagates, with increasing waits' {
-            Mock Invoke-DemoAz {
+        It 'retries throttling and 5xx with increasing waits' {
+            Mock Invoke-AzRest {
                 $script:attempts++
-                if ($script:attempts -lt 3) { throw 'Azure CLI keyvault secret failed (exit 1): (Forbidden) Caller is not authorized to perform action on resource. If role assignments, deny assignments or role definitions were changed recently, please observe propagation time.' }
+                if ($script:attempts -lt 3) { throw 'Response status code does not indicate success: 503 (Service Unavailable).' }
             }
-            Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(5, 7, 9)
+            Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(5, 7, 9)
             $script:attempts | Should -Be 3
             Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 5 }
             Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 7 }
             Should -Invoke Start-Sleep -Times 0 -ParameterFilter { $Seconds -eq 9 }
         }
-        It 'does not retry an error that will not clear by itself' {
-            Mock Invoke-DemoAz { $script:attempts++; throw 'Azure CLI keyvault secret failed (exit 1): (VaultNotFound) The Vault ''kv-fixture-abc123'' was not found.' }
-            { Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' } | Should -Throw '*VaultNotFound*'
+        It 'does not retry a refusal that will not clear by itself, such as 403' {
+            Mock Invoke-AzRest { $script:attempts++; throw 'Response status code does not indicate success: 403 (Forbidden).' }
+            { Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' } |
+                Should -Throw '*could not be written to kv-fixture-abc123 through Azure Resource Manager*403*'
             $script:attempts | Should -Be 1
             Should -Invoke Start-Sleep -Times 0
         }
         It 'gives up after the bounded backoff and never prints the secret' {
-            Mock Invoke-DemoAz { $script:attempts++; throw 'Azure CLI keyvault secret failed (exit 1): (Forbidden) Caller is not authorized to perform action on resource.' }
+            Mock Invoke-AzRest { $script:attempts++; throw 'Response status code does not indicate success: 429 (Too Many Requests).' }
             $thrown = $null
-            try { Set-DemoKeyVaultSecret -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(1, 2) }
+            try { Set-DemoKeyVaultSecret -ResourceGroup rg-fixture-infra -VaultName kv-fixture-abc123 -Name vm-admin-password -Value 'Synthetic-Value-1' -RetryDelaySeconds @(1, 2) }
             catch { $thrown = $_.Exception.Message }
             $thrown | Should -BeLike '*vm-admin-password could not be written to kv-fixture-abc123 after 3 attempts*'
             $thrown | Should -Not -BeLike '*Synthetic-Value-1*'
             $script:attempts | Should -Be 3
         }
+        It 'needs the explicit demo context' {
+            $script:DemoSubscription = $null
+            { Set-DemoKeyVaultSecret -ResourceGroup rg -VaultName kv -Name n -Value v } | Should -Throw '*Initialize the explicit demo context*'
+        }
+    }
+}
+
+Describe 'Saved secret files' {
+    It 'round-trips a secret as a SecureString and returns null when the file is absent' {
+        $path = Join-Path $TestDrive 'secret.clixml'
+        Read-DemoSecretFile -Path $path | Should -BeNullOrEmpty
+        Save-DemoSecretFile -Path $path -Value 'Synthetic-Value-1' 3>$null
+        $read = Read-DemoSecretFile -Path $path
+        $read | Should -BeOfType [securestring]
+        [System.Net.NetworkCredential]::new('', $read).Password | Should -Be 'Synthetic-Value-1'
+        (Get-Content -LiteralPath $path -Raw) | Should -Not -BeLike '*Synthetic-Value-1*'
+    }
+    It 'also reads a credential export and refuses other content or a missing folder' {
+        $path = Join-Path $TestDrive 'credential.clixml'
+        [pscredential]::new('azureuser', (ConvertTo-SecureString 'Synthetic-Value-2' -AsPlainText -Force)) | Export-Clixml -LiteralPath $path
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $path)).Password | Should -Be 'Synthetic-Value-2'
+        Set-Content -LiteralPath (Join-Path $TestDrive 'text.clixml') -Value 'plain text'
+        { Read-DemoSecretFile -Path (Join-Path $TestDrive 'text.clixml') } | Should -Throw '*could not be read*'
+        { Save-DemoSecretFile -Path (Join-Path $TestDrive 'no-such-folder\secret.clixml') -Value 'x' } | Should -Throw '*folder for the saved secret does not exist*'
+    }
+}
+
+Describe 'Subscription deployment is submitted without blocking and polled with progress' {
+    InModuleScope Common {
+        BeforeEach {
+            $script:states = [System.Collections.Generic.Queue[string]]::new()
+            $script:lastState = $null
+            $script:submitFailures = [System.Collections.Generic.Queue[string]]::new()
+            $script:operations = [System.Collections.Generic.Queue[string]]::new()
+            $script:created = [System.Collections.Generic.List[object]]::new()
+            $script:paramFile = Join-Path $TestDrive "params-$([guid]::NewGuid().ToString('N')).json"
+            Set-Content -LiteralPath $script:paramFile -Value '{}'
+            $script:fakeNow = [datetime]'2026-11-05T00:00:00Z'
+            Mock Write-Step {}
+            Mock Write-Ok {}
+            Mock Write-Warn {}
+            Mock Start-Sleep { $script:fakeNow = $script:fakeNow.AddSeconds($Seconds) }
+            Mock Get-Date { $script:fakeNow }
+            Mock Invoke-DemoAz {
+                param($Arguments)
+                if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'create') {
+                    $script:created.Add($Arguments)
+                    if ($script:submitFailures.Count) { throw $script:submitFailures.Dequeue() }
+                    return
+                }
+                if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'show') {
+                    if ($script:states.Count) { $script:lastState = $script:states.Dequeue() }
+                    if ($script:lastState -eq 'missing') { return $null }
+                    if ($script:lastState -like 'throw:*') { throw $script:lastState.Substring(6) }
+                    return $script:lastState
+                }
+                if ($Arguments[0] -eq 'deployment' -and $Arguments[1] -eq 'operation') {
+                    return $(if ($script:operations.Count) { $script:operations.Dequeue() } else { '[]' })
+                }
+                throw "Unexpected operation: $($Arguments -join ' ')"
+            }
+        }
+        BeforeAll {
+            function script:Invoke-Fixture {
+                param([switch]$RemoveFile, [int]$TimeoutMinutes = 240)
+                Invoke-DemoSubscriptionDeployment -Name arc-demo-20261105-100000 -Location australiaeast -TemplateFile 'main.bicep' -ParametersFile $script:paramFile `
+                    -RemoveParametersFileWhenAccepted:$RemoveFile -TimeoutMinutes $TimeoutMinutes -PollSeconds 30
+            }
+        }
+
+        It 'submits with --no-wait, deletes the plain-text parameters file once accepted and returns on Succeeded' {
+            foreach ($s in '{"state":"Accepted"}', '{"state":"Running"}', '{"state":"Running"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            Invoke-Fixture -RemoveFile
+            $script:created.Count | Should -Be 1
+            $script:created[0] | Should -Contain '--no-wait'
+            $script:created[0] | Should -Contain "@$script:paramFile"
+            Test-Path -LiteralPath $script:paramFile | Should -BeFalse
+            Should -Invoke Write-Ok -Times 1 -Exactly -ParameterFilter { $Message -like '*arc-demo-20261105-100000 succeeded after*' }
+        }
+        It 'keeps the parameters file unless asked to remove it' {
+            $script:states.Enqueue('{"state":"Accepted"}'); $script:states.Enqueue('{"state":"Succeeded"}')
+            Invoke-Fixture
+            Test-Path -LiteralPath $script:paramFile | Should -BeTrue
+        }
+        It 'throws the deployment error text on Failed so capacity guidance can still match it' {
+            $script:states.Enqueue('{"state":"Accepted"}')
+            $script:states.Enqueue('{"state":"Failed","error":{"code":"DeploymentFailed","details":[{"code":"SkuNotAvailable","message":"Standard_B2as_v2 is not available"}]}}')
+            $thrown = $null
+            try { Invoke-Fixture } catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*arc-demo-20261105-100000 Failed after*SkuNotAvailable*'
+            (Get-DemoAllocationGuidance -ErrorText $thrown -Location australiaeast -VmSize Standard_B2as_v2) | Should -BeLike '*(SkuNotAvailable; size Standard_B2as_v2*'
+        }
+        It 'names the modules still running when they change' {
+            foreach ($s in '{"state":"Running"}', '{"state":"Running"}', '{"state":"Running"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            foreach ($o in '["vm-win-sql-01","vm-lnx-app-01"]', '["vm-win-sql-01","vm-lnx-app-01"]', '["vm-lnx-app-01"]') { $script:operations.Enqueue($o) }
+            Invoke-Fixture
+            Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -like '*still running: vm-lnx-app-01, vm-win-sql-01*' }
+            Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -like '*still running: vm-lnx-app-01' -and $Message -notlike '*vm-win-sql-01*' }
+        }
+        It 'follows the accepted deployment after a client error during the submit, without submitting twice' {
+            $script:submitFailures.Enqueue('Azure CLI deployment sub failed (exit 1): ERROR: (ConnectionResetError(10054, An existing connection was forcibly closed))')
+            foreach ($s in '{"state":"Running"}', '{"state":"Running"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            Invoke-Fixture
+            $script:created.Count | Should -Be 1
+            Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*after Azure had accepted it*' }
+        }
+        It 'resubmits a transient submit failure only while Azure has no record, at most three attempts' {
+            $script:submitFailures.Enqueue('ERROR: Connection reset by peer'); $script:submitFailures.Enqueue('ERROR: Connection aborted')
+            foreach ($s in 'missing', 'missing', '{"state":"Accepted"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            Invoke-Fixture
+            $script:created.Count | Should -Be 3
+            Should -Invoke Write-Warn -Times 2 -Exactly -ParameterFilter { $Message -like '*Azure has no record of it, so nothing was created*' }
+        }
+        It 'does not retry a submit error that will not clear, and gives up after three transient ones' {
+            $script:submitFailures.Enqueue('ERROR: {"code":"InvalidTemplateDeployment","message":"fixture"}'); $script:states.Enqueue('missing')
+            { Invoke-Fixture } | Should -Throw '*InvalidTemplateDeployment*'
+            $script:created.Count | Should -Be 1
+            $script:created.Clear()
+            1..3 | ForEach-Object { $script:submitFailures.Enqueue('ERROR: timed out'); $script:states.Enqueue('missing') }
+            { Invoke-Fixture } | Should -Throw '*timed out*'
+            $script:created.Count | Should -Be 3
+        }
+        It 'tolerates a few failed reads while polling but not five in a row' {
+            $script:states.Enqueue('{"state":"Accepted"}')
+            1..4 | ForEach-Object { $script:states.Enqueue('throw:ERROR: Connection reset') }
+            $script:states.Enqueue('{"state":"Succeeded"}')
+            { Invoke-Fixture } | Should -Not -Throw
+            $script:states.Enqueue('{"state":"Accepted"}')
+            1..5 | ForEach-Object { $script:states.Enqueue('throw:ERROR: Connection reset') }
+            { Invoke-Fixture } | Should -Throw '*Could not read deployment arc-demo-20261105-100000 after 5 attempts*Azure keeps running it*'
+        }
+        It 'stops waiting at the timeout and leaves the deployment running in Azure' {
+            $script:lastState = '{"state":"Running"}'
+            $thrown = $null
+            try { Invoke-Fixture -TimeoutMinutes 2 } catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*still Running after 2 minutes*Azure keeps running it*Do not start another*'
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'cancel' -in $Arguments -or 'delete' -in $Arguments }
+        }
+    }
+}
+
+Describe 'Generated passwords meet the credential contract' {
+    It 'always has an upper-case letter, a lower-case letter, a digit and a symbol, in printable ASCII, at the requested length' {
+        foreach ($length in 8, 24, 24, 64, 128) {
+            1..200 | ForEach-Object {
+                $password = New-StrongPassword -Length $length
+                $password.Length | Should -Be $length
+                $password | Should -MatchExactly '\A[\x21-\x7e]+\z'
+                $password | Should -MatchExactly '[A-Z]'
+                $password | Should -MatchExactly '[a-z]'
+                $password | Should -Match '[0-9]'
+                $password | Should -Match '[^A-Za-z0-9]'
+            }
+        }
+    }
+    It 'is not predictable: a hundred passwords are all different' {
+        @(1..100 | ForEach-Object { New-StrongPassword }).Count | Should -Be 100
+        @(1..100 | ForEach-Object { New-StrongPassword } | Sort-Object -Unique).Count | Should -Be 100
+    }
+    It 'is accepted by the nested guest answer-file builder contract' {
+        $secure = ConvertTo-SecureString (New-StrongPassword) -AsPlainText -Force
+        { Import-Module (Join-Path $repo 'scripts\lib\NestedSqlDemo.psm1') -Force; New-NestedSqlAnswerXml -ComputerName 'guest01' -AdministratorPassword $secure } | Should -Not -Throw
     }
 }
 
@@ -412,6 +765,11 @@ Describe 'Deploy hardening wiring' {
         Mock Set-DemoKeyVaultSecret { throw 'fixture: stop after the secret write' }
         Mock Invoke-AzRest { throw 'fixture: no ARM REST call expected' }
         $state = @{ createCalls = 0; createError = $null }
+        # The deployment helper has its own tests; here only its call and failure text matter.
+        Mock Invoke-DemoSubscriptionDeployment {
+            $state.createCalls++
+            if ($state.createError) { throw $state.createError }
+        }
         Mock Invoke-DemoAz {
             param($Arguments)
             # On a clean subscription the infra group does not exist: every -AllowNotFound read returns $null.
@@ -420,11 +778,6 @@ Describe 'Deploy hardening wiring' {
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return }
-            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'create') {
-                $state.createCalls++
-                if ($state.createError) { throw $state.createError }
-                return
-            }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'show') { return '{"workspaceId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.OperationalInsights/workspaces/law-fixture"}}' }
             throw "Unexpected operation: $($Arguments -join ' ')"
         }
@@ -447,10 +800,10 @@ Describe 'Deploy hardening wiring' {
             @($Providers) -contains 'Microsoft.ContainerService' -and @($Providers) -notcontains 'Microsoft.App' -and @($RequiredExtensions) -notcontains 'containerapp'
         }
     }
-    It 'saves the generated password through the retrying Key Vault helper right after the deployment' {
+    It 'saves the generated password through Azure Resource Manager right after the deployment' {
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -Confirm:$false } | Should -Throw '*stop after the secret write*'
         Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly -ParameterFilter {
-            $VaultName -match '^kv-fixture-[a-z0-9]{6}$' -and $Name -eq 'vm-admin-password' -and $Value.Length -eq 24
+            $ResourceGroup -eq 'rg-fixture-infra' -and $VaultName -match '^kv-fixture-[a-z0-9]{6}$' -and $Name -eq 'vm-admin-password' -and $Value.Length -eq 24
         }
         $state.createCalls | Should -Be 1
     }
@@ -469,6 +822,172 @@ Describe 'Deploy hardening wiring' {
     It 'passes any other deployment failure through unchanged' {
         $state.createError = 'Azure CLI deployment sub failed (exit 1): ERROR: {"code":"InvalidTemplateDeployment","message":"fixture template problem"}'
         { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -Confirm:$false } | Should -Throw '*fixture template problem*'
+    }
+}
+
+Describe 'Deploy admin password, saved copy and resume of an unfinished build' {
+    BeforeEach {
+        Mock Import-Module {}
+        Mock Write-Step {}
+        Mock Write-Header {}
+        Mock Write-Ok {}
+        Mock Write-Warn {}
+        Mock Test-Prerequisites { '33333333-3333-3333-3333-333333333333' }
+        Mock Test-DemoComputeCapacity {}
+        Mock Set-DemoKeyVaultSecret { throw 'fixture: stop after the secret write' }
+        Mock Invoke-AzRest { throw 'fixture: no ARM REST call expected' }
+        $script:pwFile = Join-Path $TestDrive 'vm-admin-credential.clixml'
+        Remove-Item -LiteralPath $script:pwFile -ErrorAction SilentlyContinue
+        $vaultId = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.KeyVault/vaults'
+        $script:s = @{
+            vaults = $null; vms = $null; secret = $null; liveAccess = $null; bicepPassword = $null; fileAtCreate = $false; createCalls = 0; secretReads = 0
+            deployments = '[]'; vaultShow = $null; vaultId = $vaultId
+            retainedManifest = '{"name":"arc-demo-20261009-181623","properties":{"provisioningState":"Succeeded","timestamp":"2026-10-09T08:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-stale"}}}}'
+            failedBuild = '{"name":"arc-demo-20261105-100000","properties":{"provisioningState":"Failed","timestamp":"2026-11-05T00:00:00Z","parameters":{"arcResourceGroup":{"value":"rg-fixture"},"keyVaultName":{"value":"kv-fixture-abc123"}}}}'
+            vm = '{"name":"keep-vm","location":"australiaeast","hardwareProfile":{"vmSize":"Standard_B2as_v2"}}'
+        }
+        # Mock bodies run outside the test file's script scope, so they share the state through globals (as FleetVmShape.Tests does).
+        $global:ArcPw = $script:s
+        $global:ArcPwFile = $script:pwFile
+        Mock Invoke-DemoSubscriptionDeployment {
+            $global:ArcPw.createCalls++
+            $global:ArcPw.bicepPassword = (Get-Content -LiteralPath $ParametersFile -Raw | ConvertFrom-Json).parameters.adminPassword.value
+            $global:ArcPw.fileAtCreate = Test-Path -LiteralPath $global:ArcPwFile
+        }
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'list') { return $global:ArcPw.vaults }
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'show') { return $(if ('--query' -in $Arguments) { $global:ArcPw.liveAccess } else { $global:ArcPw.vaultShow }) }
+            if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'secret') { $global:ArcPw.secretReads++; return $global:ArcPw.secret }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return $global:ArcPw.deployments }
+            if ($Arguments[0] -eq 'group') { return 'true' }
+            if ($Arguments[0] -eq 'vm') { return $global:ArcPw.vms }
+            if ($Arguments[0] -in @('network', 'consumption', 'aks', 'containerapp')) { return $null }
+            if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
+            if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return }
+            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'show') { return '{"workspaceId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.OperationalInsights/workspaces/law-fixture"},"dcrCoreId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.Insights/dataCollectionRules/dcr-fixture"},"dcrVmiId":{"value":"/x/dcr-vminsights"},"dcrCtId":{"value":"/x/dcr-changetracking"}}' }
+            throw "Unexpected operation: $($Arguments -join ' ')"
+        }
+        function Invoke-FixtureDeploy {
+            param([switch]$WithPath, [switch]$WhatIf, [string]$Path = $script:pwFile)
+            $extra = @{}
+            if ($WithPath) { $extra.AdminPasswordPath = $Path }
+            if ($WhatIf) { $extra.WhatIf = $true } else { $extra.Confirm = $false }
+            & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' @extra
+        }
+        function Set-RetainedEstate {
+            param([string]$Access)
+            $script:s.vaults = '[{"name":"kv-fixture-stale"}]'
+            $script:s.deployments = "[$($script:s.retainedManifest)]"
+            $script:s.vaultShow = '{"id":"' + $script:s.vaultId + '/kv-fixture-stale","properties":{"publicNetworkAccess":"' + $Access + '"}}'
+            $script:s.vms = "[$($script:s.vm)]"
+        }
+    }
+
+    AfterEach { Remove-Variable ArcPw, ArcPwFile -Scope Global -ErrorAction SilentlyContinue }
+
+    It 'saves a fresh password before the deployment starts and passes the same value to Bicep and the vault' {
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.fileAtCreate | Should -BeTrue
+        $script:s.bicepPassword.Length | Should -Be 24
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $script:pwFile)).Password | Should -Be $script:s.bicepPassword
+        Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly -ParameterFilter { $Value -eq $global:ArcPw.bicepPassword }
+    }
+    It 'saves nothing during a preview, and nothing when no path is given' {
+        Invoke-FixtureDeploy -WithPath -WhatIf
+        Test-Path -LiteralPath $script:pwFile | Should -BeFalse
+        { Invoke-FixtureDeploy } | Should -Throw '*stop after the secret write*'
+        Test-Path -LiteralPath $script:pwFile | Should -BeFalse
+    }
+    It 'ignores a stale saved password on a brand-new build, generates a new one and replaces the file' {
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Stale-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword | Should -Not -Be 'Stale-Value-1'
+        $script:s.bicepPassword.Length | Should -Be 24
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $script:pwFile)).Password | Should -Be $script:s.bicepPassword
+        Should -Invoke Write-Step -ParameterFilter { $Message -eq 'VM admin password: generated' }
+    }
+    It 'is not blocked on a brand-new build by a saved file that cannot be read, and replaces it' {
+        Set-Content -LiteralPath $script:pwFile -Value 'not a protected export'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword.Length | Should -Be 24
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $script:pwFile)).Password | Should -Be $script:s.bicepPassword
+    }
+    It 'still stops on a saved file that cannot be read when a retained estate needs it' {
+        Set-RetainedEstate -Access 'Disabled'
+        Set-Content -LiteralPath $script:pwFile -Value 'not a protected export'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*could not be read*'
+        $script:s.createCalls | Should -Be 0
+    }
+    It 'refuses a password file inside the git worktree' {
+        { Invoke-FixtureDeploy -WithPath -Path (Join-Path $repo '.local\vm-admin-credential.clixml') } | Should -Throw '*outside the git worktree*'
+        Should -Invoke Invoke-DemoAz -Times 0
+    }
+    It 'warns that a policy made the vault private-only, and still writes the secret through ARM' {
+        $script:s.liveAccess = 'Disabled'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*publicNetworkAccess=Disabled although this deployment asked for Enabled*not a role-propagation delay*' }
+        Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly
+    }
+    It 'reuses the saved password for a retained estate whose vault is private-only, without reading the vault' {
+        Set-RetainedEstate -Access 'Disabled'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+        $script:s.secretReads | Should -Be 0
+        Should -Invoke Set-DemoKeyVaultSecret -Times 0
+    }
+    It 'prefers the vault secret over the saved file when the vault is public, and the file when it holds no secret' {
+        Set-RetainedEstate -Access 'Enabled'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        $script:s.secret = 'Vault-Value-1'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Vault-Value-1'
+        $script:s.secret = $null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+        Should -Invoke Set-DemoKeyVaultSecret -Times 0
+    }
+    It 'lets an explicit -AdminPassword win over everything and refuses a private-only vault with no password at all' {
+        Set-RetainedEstate -Access 'Disabled'
+        { Invoke-FixtureDeploy } | Should -Throw '*private-only*AdminPasswordPath*'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        $explicit = ConvertTo-SecureString 'Explicit-Value-1' -AsPlainText -Force
+        { & (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') @target -NamePrefix fixture -AdminEmail 'test@example.com' -AdminPasswordPath $script:pwFile -AdminPassword $explicit -Confirm:$false } |
+            Should -Throw '*no ARM REST call expected*'
+        $script:s.bicepPassword | Should -Be 'Explicit-Value-1'
+    }
+    It 'resumes an unfinished build: adopts the vault named by its own Failed deployment, reuses the saved password and stores the vault copy' {
+        $script:s.vaults = '[{"name":"kv-fixture-abc123"}]'
+        $script:s.deployments = "[$($script:s.failedBuild)]"
+        $script:s.vaultShow = '{"id":"' + $script:s.vaultId + '/kv-fixture-abc123","properties":{"publicNetworkAccess":"Disabled"}}'
+        $script:s.vms = "[$($script:s.vm)]"
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+        Should -Invoke Write-Step -ParameterFilter { $Message -like '*Resuming the unfinished build arc-demo-20261105-100000*kv-fixture-abc123*' }
+        Should -Invoke Set-DemoKeyVaultSecret -Times 1 -Exactly -ParameterFilter { $VaultName -eq 'kv-fixture-abc123' -and $Value -eq 'Saved-Value-1' }
+    }
+    It 'resumes the same way when the failed build had not created a VM yet' {
+        $script:s.vaults = '[{"name":"kv-fixture-abc123"}]'
+        $script:s.deployments = "[$($script:s.failedBuild)]"
+        $script:s.vaultShow = '{"id":"' + $script:s.vaultId + '/kv-fixture-abc123","properties":{"publicNetworkAccess":"Enabled"}}'
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Saved-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword | Should -Be 'Saved-Value-1'
+    }
+    It 'never adopts a vault that no deployment of this demo names' {
+        $script:s.vaults = '[{"name":"kv-fixture-unrelated"}]'
+        $script:s.deployments = "[$($script:s.failedBuild)]"
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*no canonical retained deployment output*'
+        $script:s.createCalls | Should -Be 0
+    }
+    It 'does not start a second deployment while this demo has one running' {
+        $script:s.deployments = '[{"name":"arc-demo-20261105-110000","properties":{"provisioningState":"Running","timestamp":"2026-11-05T01:00:00Z","parameters":{"arcResourceGroup":{"value":"rg-fixture"}}}}]'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*arc-demo-20261105-110000*is still Running*'
+        $script:s.createCalls | Should -Be 0
+        { Invoke-FixtureDeploy -WithPath -WhatIf } | Should -Not -Throw
     }
 }
 
@@ -498,8 +1017,13 @@ Describe 'Test-Prerequisites.ps1 checks what Deploy would check for the skin' {
         Set-Content -LiteralPath $script:skinPath -Value '{"schemaVersion":1}'
         & (Join-Path $repo 'scripts\Test-Prerequisites.ps1') @target -SkinPath $script:skinPath
         Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter {
-            @($RequiredExtensions).Count -eq 1 -and @($RequiredExtensions) -contains 'connectedmachine' -and @($Providers) -notcontains 'Microsoft.App'
+            @($RequiredExtensions).Count -eq 1 -and @($RequiredExtensions) -contains 'connectedmachine' -and @($Providers) -notcontains 'Microsoft.App' -and @($Features).Count -eq 0
         }
+    }
+    It 'adds the Standard security type feature when the skin declares the nested SQL parent' {
+        Set-Content -LiteralPath $script:skinPath -Value '{"schemaVersion":1,"nestedSqlGuest":{"enabled":true,"parentVmName":"win-sql-02","guestVmName":"g","arcMachineName":"g"}}'
+        & (Join-Path $repo 'scripts\Test-Prerequisites.ps1') @target -SkinPath $script:skinPath
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter { @($Features) -contains 'Microsoft.Compute/UseStandardSecurityType' }
     }
 }
 
@@ -507,8 +1031,10 @@ Describe 'Readiness polling bound for a fresh deployment' {
     It 'allows read-only polling for up to 30 minutes and nothing unbounded' {
         { & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') @target -TimeoutSeconds 1801 } | Should -Throw '*1800*'
     }
-    It 'waits up to 20 minutes for Windows Heartbeats at the end of Deploy' {
-        (Get-Content (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -Raw) | Should -Match 'Test-ArcDemoReadiness\.ps1''\) .* -TimeoutSeconds 1200'
+    It 'waits up to 20 minutes for Windows Heartbeats at the end of Deploy, without the nested guest row, and names the rows that did not pass' {
+        $deploy = Get-Content (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -Raw
+        $deploy | Should -Match 'Test-ArcDemoReadiness\.ps1''\) .* -TimeoutSeconds 1200 -SkipNestedGuest -OutputFormat Json'
+        $deploy | Should -Match 'required infrastructure/monitor readiness rows did not pass\$named'
     }
 }
 
@@ -520,8 +1046,10 @@ Describe 'Remove-ArcDemo workspace and deployment-history options' {
         Mock Write-Step {}
         Mock Get-DemoRemovalChecks { New-DemoCheck 'owned' '/fixture' 'absent' 'absent' 'pass' }
         Mock Wait-Until {
-            param($Condition)
-            if (-not (& $Condition)) { throw 'Owned resources still present.' }
+            param($Condition, [switch]$AllowTimeout)
+            if (& $Condition) { return $true }
+            if ($AllowTimeout) { return $false }
+            throw 'Owned resources still present.'
         }
         $state = @{
             events = [Collections.Generic.List[string]]::new()
@@ -579,10 +1107,39 @@ Describe 'Remove-ArcDemo workspace and deployment-history options' {
         & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -PruneDeploymentHistory -Confirm:$false
         $state.events | Should -Be @('group-delete:rg-fixture', 'group-delete:rg-fixture-infra', 'deployment-delete:arc-demo-20261009-181623', 'deployment-delete:arc-demo-20261009-181139')
     }
-    It 'does not prune when removal verification fails' {
-        Mock Get-DemoRemovalChecks { New-DemoCheck 'budget' '/budget' 'absent' 'exists' 'pending' }
-        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -PruneDeploymentHistory -Confirm:$false } | Should -Throw '*still present*'
+    It 'does not prune or touch Defender, and exits pending with what is still present, when removal is still in progress at the deadline' {
+        Mock Get-DemoRemovalChecks { New-DemoCheck 'group/rg-fixture-infra' '/g' 'absent' 'exists' 'pending' }
+        Mock Write-Warn {}
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -PruneDeploymentHistory -DisableDefender -TimeoutMinutes 1 -Confirm:$false
+        $LASTEXITCODE | Should -Be 2
         $state.events | Should -Not -Contain 'deployment-delete:arc-demo-20261009-181623'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'security' -or ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'delete') }
+        Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter {
+            $Message -like '*still in progress after 1 minutes (still present: group/rg-fixture-infra)*Test-ArcDemoReadiness.ps1 -DesiredState Removed*rerun this command*'
+        }
+        Should -Invoke Wait-Until -Times 1 -Exactly -ParameterFilter { $TimeoutSeconds -eq 60 -and $AllowTimeout }
+        Should -Not -Invoke Write-Ok -ParameterFilter { $Message -like 'Removed:*' }
+    }
+    It 'waits 60 minutes by default and names each change in what is still present, once' {
+        $script:polls = 0
+        Mock Get-DemoRemovalChecks {
+            $script:polls++
+            if ($script:polls -eq 1) { return @((New-DemoCheck 'group/rg-fixture' '/g1' 'absent' 'exists' 'pending'), (New-DemoCheck 'group/rg-fixture-infra' '/g2' 'absent' 'exists' 'pending')) }
+            if ($script:polls -eq 2) { return @((New-DemoCheck 'group/rg-fixture-infra' '/g2' 'absent' 'exists' 'pending')) }
+            @((New-DemoCheck 'group/rg-fixture-infra' '/g2' 'absent' 'absent' 'pass'))
+        }
+        Mock Wait-Until {
+            param($Condition, [switch]$AllowTimeout)
+            while (-not (& $Condition)) { }
+            $true
+        }
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -Confirm:$false
+        Should -Invoke Wait-Until -Times 1 -Exactly -ParameterFilter { $TimeoutSeconds -eq 3600 -and $IntervalSeconds -eq 20 }
+        Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -eq 'Still present: group/rg-fixture, group/rg-fixture-infra' }
+        Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -eq 'Still present: group/rg-fixture-infra' }
+    }
+    It 'does not accept a wait longer than two hours' {
+        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -TimeoutMinutes 121 -Confirm:$false } | Should -Throw
     }
     It 'previews both options without any Azure call' {
         Mock Invoke-DemoAz { throw 'WhatIf must not call Azure' }

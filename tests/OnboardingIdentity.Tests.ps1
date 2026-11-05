@@ -15,7 +15,10 @@ BeforeAll {
             assignments = @()
             baselineKey = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
             mintedKey = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+            createdKey = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
             keys = @('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+            keyNames = @{}
+            apps = @()
             mintedSecret = 'Synthetic-Onboarding-Secret-7419'
             createdSecret = 'Synthetic-Created-Secret-3306'
             mintDenied = $false; removeFails = $false; removeDeletesBaseline = $false; failGuestOn = ''
@@ -52,7 +55,15 @@ BeforeAll {
                 $fx.events.Add('sp-create')
                 $fx.created = $Arguments
                 $fx.sps = @(@{ id = '55555555-5555-5555-5555-555555555555'; appId = '44444444-4444-4444-4444-444444444444' })
+                $fx.keys += $fx.createdKey
+                $fx.keyNames[$fx.createdKey] = 'rbac'
                 return (@{ appId = $fx.sps[0].appId; displayName = $fx.spName; password = $fx.createdSecret; tenant = '22222222-2222-2222-2222-222222222222' } | ConvertTo-Json -Compress)
+            }
+        }
+        if ($verb -eq 'ad app') {
+            if ($Arguments[2] -eq 'list') {
+                $fx.events.Add('app-list')
+                return (ConvertTo-Json -InputObject @($fx.apps) -Depth 4)
             }
         }
         if ($verb -eq 'role assignment') {
@@ -78,16 +89,17 @@ BeforeAll {
             }
             if ($url -like '*/removePassword') {
                 $body = Get-Content -LiteralPath $Arguments[[array]::IndexOf($Arguments, '--body') + 1].Substring(1) -Raw | ConvertFrom-Json
-                if ($body.keyId -ne $fx.mintedKey -or $body.passwordCredential) { throw 'removePassword must receive the exact top-level keyId.' }
+                if ($body.keyId -notin @($fx.mintedKey, $fx.createdKey) -or $body.passwordCredential) { throw 'removePassword must receive the exact top-level keyId.' }
                 if ($fx.removeFails) { throw 'Azure CLI rest POST failed (exit 1): (ServiceUnavailable) The service is temporarily unavailable.' }
-                $fx.events.Add('cleanup')
-                $fx.keys = @($fx.keys | Where-Object { $_ -ne $fx.mintedKey -and -not ($fx.removeDeletesBaseline -and $_ -eq $fx.baselineKey) })
+                $fx.events.Add($(if ($body.keyId -eq $fx.createdKey) { 'creation-cleanup' } else { 'cleanup' }))
+                $removed = $body.keyId
+                $fx.keys = @($fx.keys | Where-Object { $_ -ne $removed -and -not ($fx.removeDeletesBaseline -and $_ -eq $fx.baselineKey) })
                 return ''
             }
             if ($url -like '*/applications%28*') {
                 $fx.graphGets++
                 $fx.events.Add('graph-get')
-                return (@{ appId = $fx.sps[0].appId; passwordCredentials = @($fx.keys | ForEach-Object { @{ keyId = $_ } }) } | ConvertTo-Json -Depth 5 -Compress)
+                return (@{ appId = $fx.sps[0].appId; passwordCredentials = @($fx.keys | ForEach-Object { @{ keyId = $_; displayName = $(if ($fx.keyNames.ContainsKey($_)) { $fx.keyNames[$_] } else { 'baseline' }) } }) } | ConvertTo-Json -Depth 5 -Compress)
             }
             throw "Unexpected Graph URL: $url"
         }
@@ -213,8 +225,8 @@ Describe 'Initialize-DemoOnboardingIdentity' {
     }
 
     Context 'there is no service principal yet' {
-        BeforeEach { $global:OnboardingFixture.sps = @() }
-        It 'creates it with the role at the Arc group, waits, delivers its secret and stores nothing' {
+        BeforeEach { $global:OnboardingFixture.sps = @(); $global:OnboardingFixture.keys = @() }
+        It 'creates it with the role at the Arc group, waits, delivers its secret, stores nothing and removes the one-year credential the creation added' {
             $fx = $global:OnboardingFixture
             $output = Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver *>&1 | Out-String
             $created = $fx.created -join ' '
@@ -227,7 +239,43 @@ Describe 'Initialize-DemoOnboardingIdentity' {
             $fx.delivered.Text | Should -Be $fx.createdSecret
             $fx.delivered.ApplicationId | Should -Be '44444444-4444-4444-4444-444444444444'
             $fx.sleeps | Should -Be @(90)
+            ($fx.events | Where-Object { $_ -in 'app-list', 'sp-create', 'deliver', 'creation-cleanup' }) -join ',' | Should -Be 'app-list,sp-create,deliver,creation-cleanup'
+            $fx.keys.Count | Should -Be 0
             ($output + ($fx.messages -join "`n")) | Should -Not -Match 'Synthetic-Created-Secret'
+        }
+        It 'keeps the credentials an existing application of that name already had and removes only the one it added' {
+            $fx = $global:OnboardingFixture
+            $fx.keys = @($fx.baselineKey)
+            $fx.apps = @(@{ appId = '44444444-4444-4444-4444-444444444444'; keys = @($fx.baselineKey) })
+            Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver | Out-Null
+            $fx.keys | Should -Be @($fx.baselineKey)
+            $fx.events | Should -Contain 'creation-cleanup'
+        }
+        It 'removes the credential the creation added, and rethrows the failure, when onboarding fails' {
+            $fx = $global:OnboardingFixture
+            $failing = { param([string]$ApplicationId, [securestring]$Secret) $global:OnboardingFixture.events.Add('deliver'); throw 'synthetic onboarding failure' }
+            { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $failing } | Should -Throw '*synthetic onboarding failure*'
+            $fx.events | Should -Contain 'creation-cleanup'
+            $fx.keys.Count | Should -Be 0
+        }
+        It 'names the manual command, with the key, when the creation credential cannot be removed' {
+            $fx = $global:OnboardingFixture
+            $fx.removeFails = $true
+            { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver } |
+                Should -Throw "*could not be removed*ServiceUnavailable*az ad app credential delete --id 44444444-4444-4444-4444-444444444444 --key-id $($fx.createdKey)*"
+        }
+        It 'leaves a new credential with another name alone and says so' {
+            $fx = $global:OnboardingFixture
+            $adds = { param([string]$ApplicationId, [securestring]$Secret) $global:OnboardingFixture.keys += 'dddddddd-dddd-dddd-dddd-dddddddddddd'; $global:OnboardingFixture.keyNames['dddddddd-dddd-dddd-dddd-dddddddddddd'] = 'added-by-hand' }
+            Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $adds | Out-Null
+            $fx.keys | Should -Be @('dddddddd-dddd-dddd-dddd-dddddddddddd')
+            ($fx.messages -join "`n") | Should -Match 'not named rbac; they are left alone: added-by-hand'
+        }
+        It 'refuses two applications with the name before it creates anything' {
+            $fx = $global:OnboardingFixture
+            $fx.apps = @(@{ appId = '44444444-4444-4444-4444-444444444444'; keys = @() }, @{ appId = '77777777-7777-7777-7777-777777777777'; keys = @() })
+            { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver } | Should -Throw '*Ambiguous onboarding application name*'
+            $fx.events | Should -Not -Contain 'sp-create'
         }
     }
 
@@ -259,7 +307,7 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         $assignment = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$onboardArcMachines' }, $true)
         $invocation = $ast.Find({ param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Clauses[0].Item1.Extent.Text -eq '$toOnboardFleet.Count' }, $true)
         $script:onboardPhases = $assignment.Extent.Text + "`n" + $invocation.Extent.Text
-        function Get-ArcMachineTagArgs { param($Machine, $BaseTags) @('fixture=1') }
+        function Get-ArcMachineTags { param($Machine, $BaseTags) [ordered]@{ fixture = '1' } }
     }
     BeforeEach {
         New-OnboardingFixture
@@ -277,13 +325,20 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         Mock Write-Step {}
         Mock Write-Warn {}
         Mock Wait-Until { $true }
+        Mock Wait-DemoJobs {}
         Mock az { $global:OnboardingFixture.events.Add("az $($args[0]) $($args[1])") }
+        Mock Set-DemoResourceTags { $true }
         Mock Invoke-DemoGuestCommand {
             $fx = $global:OnboardingFixture
+            if ($null -ne $Job) {
+                $fx.events.Add('guest-result')
+                if ($Job.Fail) { throw "Guest command failed on $($Machine.Name)" }
+                return
+            }
             $fx.events.Add('guest-command')
             $path = $Script.Substring(1)
             $fx.guestScripts.Add(@{ Machine = $Machine.Name; OsType = $Machine.OsType; Path = $path; Text = (Get-Content -LiteralPath $path -Raw) })
-            if ($fx.failGuestOn -eq $Machine.Name) { throw "Guest command failed on $($Machine.Name)" }
+            [pscustomobject]@{ Name = "vm-run-command-$($Machine.Name)"; State = 'Completed'; Fail = ($fx.failGuestOn -split ',' -contains $Machine.Name) }
         }
         $NamePrefix = 'fixture'; $arcRg = 'rg-fixture'; $infraRg = 'rg-fixture-infra'
         $SubscriptionId = '11111111-1111-1111-1111-111111111111'; $TenantId = '22222222-2222-2222-2222-222222222222'
@@ -307,7 +362,10 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         $linux.Text | Should -Match "--service-principal-id 44444444-4444-4444-4444-444444444444 --service-principal-secret 'Synthetic-Onboarding-Secret-7419'"
         $windows.Text | Should -Match "--service-principal-id 44444444-4444-4444-4444-444444444444 --service-principal-secret 'Synthetic-Onboarding-Secret-7419'"
         Test-Path -LiteralPath $linux.Path | Should -BeFalse
-        Should -Invoke az -Times 4 -Exactly
+        # Only the two periodic-assessment updates still use az; the tags go through the ARM tags API.
+        Should -Invoke az -Times 2 -Exactly
+        Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -eq '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.HybridCompute/machines/vm-win' }
+        Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -like '*/machines/vm-lnx' -and $Tags['fixture'] -eq '1' }
     }
     It 'uses a supplied secret as is and mints nothing' {
         $fx = $global:OnboardingFixture
@@ -329,10 +387,25 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
     It 'removes the credential and the script files when a machine fails to onboard' {
         $fx = $global:OnboardingFixture
         $fx.failGuestOn = 'vm-lnx'
-        { & ([scriptblock]::Create($script:onboardPhases)) } | Should -Throw '*Guest command failed on vm-lnx*'
+        { & ([scriptblock]::Create($script:onboardPhases)) } | Should -Throw '*Arc onboarding failed on 1 of 2 VM(s): vm-lnx: Guest command failed on vm-lnx*'
         ($fx.events | Where-Object { $_ -in 'mint', 'guest-command', 'cleanup' }) -join ',' | Should -Be 'mint,guest-command,guest-command,cleanup'
         $fx.keys | Should -Be @($fx.baselineKey)
         $fx.guestScripts | ForEach-Object { Test-Path -LiteralPath $_.Path | Should -BeFalse }
+    }
+    It 'submits every machine before it waits for any, and receives each result' {
+        $fx = $global:OnboardingFixture
+        & ([scriptblock]::Create($script:onboardPhases))
+        ($fx.events | Where-Object { $_ -in 'guest-command', 'guest-result' }) -join ',' | Should -Be 'guest-command,guest-command,guest-result,guest-result'
+        Should -Invoke Wait-DemoJobs -Times 1 -Exactly -ParameterFilter { @($Jobs).Count -eq 2 -and $TimeoutSeconds -eq 900 }
+        Should -Invoke Invoke-DemoGuestCommand -Times 2 -Exactly -ParameterFilter { $AsJob }
+        Should -Invoke Invoke-DemoGuestCommand -Times 2 -Exactly -ParameterFilter { $Job -and $TimeoutSeconds -eq 30 }
+    }
+    It 'names every VM that failed to onboard, not only the first, and still receives the others' {
+        $fx = $global:OnboardingFixture
+        $fx.failGuestOn = 'vm-win,vm-lnx'
+        { & ([scriptblock]::Create($script:onboardPhases)) } | Should -Throw '*Arc onboarding failed on 2 of 2 VM(s): vm-win: Guest command failed on vm-win | vm-lnx: Guest command failed on vm-lnx*'
+        @($fx.events | Where-Object { $_ -eq 'guest-result' }).Count | Should -Be 2
+        $fx.keys | Should -Be @($fx.baselineKey)
     }
     It 'needs no identity when every machine is already Arc-onboarded' {
         $fx = $global:OnboardingFixture
@@ -341,6 +414,6 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         $fx.events | Should -Not -Contain 'group-exists'
         $fx.events | Should -Not -Contain 'mint'
         $fx.guestScripts.Count | Should -Be 0
-        Should -Invoke az -Times 4 -Exactly
+        Should -Invoke az -Times 2 -Exactly
     }
 }

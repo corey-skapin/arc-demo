@@ -39,13 +39,31 @@ do not induce a fault just to make this query nonempty.
 
 ## SQL preparation reports a pending file rename
 
-A nonempty `PendingFileRenameOperations` value was observed during an approved
-SQL preflight even though the other checked reboot flags were clear.
-That observation does not identify the owning package, prove an active installer
-or authorize a reboot. The [real SQL helper](sql-engine-workload.md) fails closed
-before installation; it never deletes the flag or skips setup checks.
-Keep the running lab unchanged. Obtain separate scope for any deeper diagnosis
-and approval for an appropriate reboot/repair before retrying installation.
+**Symptom** — wrapper step P5.3 (or `Invoke-SqlEngineOnArc.ps1 -Action Install`) stops after about a
+minute with `A reboot/pending rename is recorded (PendingFileRenameOperations: ...)`. The wrapper words
+it as "A reboot/pending rename is recorded".
+
+**Cause** — a nonempty `PendingFileRenameOperations` value on a fresh Windows host is usually routine
+installer leftovers (in the build that found this: an Edge updater folder, `Amcache.hve.tmp` and an NSIS
+temp folder, with the Component Based Servicing and Windows Update flags clear, no installer running and
+the last boot at VM creation). The error now lists the first eight pending sources so you can judge that.
+It does not identify the owning package or prove an active installer, and SQL Server setup itself refuses
+a host with a pending restart, so the [real SQL helper](sql-engine-workload.md) fails closed before
+installation and never deletes the value or skips setup checks.
+
+**Fix** — keep the running lab otherwise unchanged and ask the owner for **one graceful restart** of that
+VM; request it together with the other approvals for the build, not when the step fails. Then:
+
+1. Read-only first: confirm in the error (or the guest) that only routine entries are listed and no
+   installer is running.
+2. With approval, restart once from Azure: `az vm restart --subscription <SUB> -g rg-<prefix>-infra -n <vm>`
+   (about 45 seconds). Never restart from inside the guest or repeatedly.
+3. Rerun the step (`-Only P5`, or `Invoke-SqlEngineOnArc.ps1 -Action Install`). It waits up to six minutes
+   for `himds`, `ExtensionService` and `GCArcService` (running about 3.5 minutes after the restart) and
+   `MonAgentCore` (about 4.5 minutes) before its Arc SQL block check, which requires all four.
+
+If the value is still set after a restart, or the list names something other than routine leftovers,
+stop and obtain separate scope for deeper diagnosis.
 
 ## Media staging stops on a size or hash mismatch
 
@@ -97,7 +115,9 @@ and Change Tracking reporting ARM Updating even when their guest handlers report
 Succeeded and data continues to arrive. A read-only look at one awake Linux host
 showed the VM provisioning state `Updating`, `MDE.Linux` `Transitioning` (the guest
 agent reported no status file) and the other handlers Ready, still so about 75
-minutes after wake with fresh Heartbeats.
+minutes after wake with fresh Heartbeats. The cause (an orphaned install lock in the
+vendor's MDE.Linux handler) and the recovery are in
+[A Linux VM stays Updating behind a Defender MDE.Linux install lock](#a-linux-vm-stays-updating-behind-a-defender-mdelinux-install-lock).
 
 **Not a gate.** Extension provisioning state (AMA, Change Tracking, MDE) is a soft
 warning, not a readiness condition. Activation prints `extension <name> Updating for
@@ -109,6 +129,60 @@ with no Heartbeat is different: that is a real failure. A missing MDE status fil
 not proof of working endpoint protection.
 Preserve healthy AMA/CT and DCRAs; agree a targeted recovery before retrying MDE or
 restarting anything. No reinstall/restart is part of read-only rehearsal preflight.
+
+## A Linux VM stays Updating behind a Defender MDE.Linux install lock
+
+**Symptom** — a Linux VM reads `Updating` and its `MDE.Linux` extension `Transitioning` for far longer than a
+wake or a deployment should take, while the guest is healthy: the agent is active, Heartbeats are fresh and AMA
+and Change Tracking run. A Deploy rerun waits at that VM's module with nothing else wrong, and a Run Command sent
+to it queues. It recurs, because Defender pushes the extension about hourly: in one build window three Linux VMs
+spent most of four hours `Updating`. After an Activate it is likely rather than rare: on 5 November 2026 a push
+26 minutes after the three Linux VMs finished starting stalled all three, until the next Hibernate cancelled it.
+Readiness shows non-required `provisioning/<vm>` and `extension/<vm>/MDE.Linux` rows.
+
+**Cause** — the vendor's MDE.Linux handler (observed in version 1.0.16.6) writes an install lock with a 36-minute
+expiry at the end of every real `enable`, even when its installer wrapper already finished and removed its own, so
+every real `enable` on a healthy host leaves an orphan lock. An `enable` inside that window logs "Installation
+already in progress." and writes no status file, so ARM keeps the VM `Updating` until the platform times the write
+out (about 90 minutes) or a new goal state reaches the guest after the lock is over 36 minutes old. Defender's push
+skips a VM whose write is still open. Defender for Servers Plan 2 provisions the VM-path and the Arc-path
+`MDE.Linux` extension on a simulated host, and they share one handler directory, lock and status directory with
+colliding sequence numbers, so an Arc-path `Succeeded` is not evidence of an install. Anything that makes the
+handler run `enable` within 36 minutes before a push seeds the stall: a Run Command, a Deploy re-PUT of the VM, a
+tag edit (a write now, a propagation write about 10 minutes later, and a Defender re-push minutes after the first)
+or a boot of the VM. `ExcludeMdeAutoUpdate=true` on the VM and the Arc machine did not stop the push. This is a
+defect in the vendor extension: nothing here removes, reinstalls or patches Defender.
+
+**What to do** — it clears without action; while it lasts:
+
+- Treat it as a soft warning and present normally; the required `heartbeat/*` rows decide readiness.
+- Wait. The platform releases the open write at about 90 minutes and the VM becomes `Succeeded` with no action.
+- Do not cancel the update, remove or reinstall Defender, restart the agent or the VM, or send a Run Command to a VM
+  whose `MDE.Linux` is `Transitioning` with a fresh lock: it queues and then blocks the one nudge that could help.
+- If recovery cannot wait, ask the owner first, then send exactly ONE new goal state (`az vm reapply`, or a read-only
+  Run Command) only when the last `enable` is more than 36 minutes old and right after a Defender push. A nudge
+  resets the lock clock, so one sent shortly before the next push recreates the stall.
+- When the VM channel is stuck, inspect through the Arc channel (`az connectedmachine run-command create`, preview and
+  best effort). It only inspects: an Arc-channel run command produces no goal state and cannot heal the VM.
+- Deploy warns before it submits when a VM is already `Updating` and then polls its deployment with progress, so the
+  wait is visible rather than silent. It does not skip, cancel or reorder anything.
+- Hibernate is safe on a VM that is `Updating`, and is the quickest way out. Proven on 5 November 2026 with all
+  three Linux VMs `Updating` behind a Defender write that had been open for about 14 minutes: every deallocation was
+  accepted at once (no 409, no queueing), the stuck writes show `Canceled` in the activity log 11-15 seconds before
+  the VMs read deallocated, and the run exited 0 in 416.4 seconds. Hibernate submits the deallocation without
+  waiting and then waits up to 20 minutes for the VM to read deallocated; if it does not, the run fails with an
+  error rather than reporting verified stopped compute, and a rerun after the VM settles finishes the job; see
+  [the lifecycle note](lifecycle.md#linux-vms-and-the-defender-mdelinux-install-lock). While deallocated, the VMs'
+  AMA, Change Tracking and `MDE.Linux` extensions kept reading ARM `Updating` for at least 86 minutes; the effect at
+  the next Activate is not known.
+- Do not use the `MDE.Linux` VM-extension status time as a push detector: it read the same constant (11 May 2026
+  00:00 UTC) in every capture of the lab, whether or not an `enable` had run. Detect a push from the VM's
+  provisioning-state transitions, from `extensions/write` events in the activity log whose caller is the Defender
+  resource provider, or from the vmSettings goal-state events.
+
+The defect belongs to the Defender for Endpoint extension owners (create the lock before starting the wrapper and
+delete it when the wrapper ends, or write a status file in the "already in progress" branch, and do not share one
+handler directory between the VM and Arc paths). It has not been reported upstream from this repository.
 
 ## Activation fails parsing an absent NAT or public IP
 
@@ -342,6 +416,36 @@ is evidence about the agent, not about telemetry. A guest missing from the roste
 not yet an Arc machine in the group: onboard it, then republish the workbook. Do not
 change associations or collection from the workbook.
 
+## Arc machine tags are missing or one tag holds the rest
+
+**Symptom** — the Estate Overview's OS and environment filters, its Role and Tier columns and the
+governance table are empty or wrong, and every Arc machine reads *(untagged)* in the Capacity roster.
+An affected host keeps only `costcenter`, `env`, `owner` and `purpose`, and the value of `owner` holds
+the rest (`demo purpose=arc-demo role=sql osType=Windows ...`). Readiness fails the required
+`tags/<machine>` row and parity fails `fleet/<machine>/tags`.
+
+**Cause** — an earlier Deploy set the tags with `az connectedmachine update --tags k=v k=v ...`. In
+the `connectedmachine` extension 3.0.0 that option is shorthand syntax and folds every pair after the
+first into the first key's value, and the step ran on every Deploy, so each rerun corrupted the tags
+again while printing success. Deploy now merges them through the ARM tags API (`Set-DemoResourceTags`),
+reads the result back and skips a host whose tags already match.
+
+**Recovery** — rerun Deploy with the same skin; it writes only the tags that differ and recreates
+nothing. A tag edit is a resource write, and on a Linux host a write can seed the Defender stall
+described in [Linux ARM Updating while monitoring guest handlers are healthy](#linux-arm-updating-while-monitoring-guest-handlers-are-healthy),
+so to repair one host without a redeploy merge just its tags (a Merge keeps every tag it does not name):
+
+```powershell
+Import-Module .\scripts\lib\Common.psm1
+Initialize-DemoContext -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID>
+Set-DemoResourceTags -ResourceId '/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/rg-<prefix>/providers/Microsoft.HybridCompute/machines/<machine>' `
+    -Tags ([ordered]@{ owner = 'demo'; role = 'sql'; osType = 'Windows'; osTier = 'WS2022' })
+```
+
+The capacity and optimisation workbooks list the Arc machines and their tags as they were when they were
+published, so a tag repair needs a republish of both (a separately approved step; see the
+[runbook](runbook.md)).
+
 ## Linux Change Tracking missing despite healthy AMA
 
 The previous deploy implementation installed CT via Arc while AGENTS required
@@ -367,11 +471,34 @@ timestamped app `runningStatus`, latest/latest-ready revision, active revision
 `healthState`/`runningState` and `SIMULATE_CRASH` **without updating them**. A stale
 snapshot or enum mismatch is not grounds to reset a workload fault.
 
+## The Container Apps environment is slow or fails with `ManagedEnvironmentProvisioningError`
+
+**Symptom** — a Deploy with Container Apps enabled spends 17-23 minutes on `cae-<prefix>`, which
+shows `Waiting` for 20 minutes or more; or, in one observed run, the deployment ended `Failed` with
+`ManagedEnvironmentProvisioningError: Fail to create managed environment because creation of the
+managed cluster failed, please retry later.` Everything else (VMs, network, vault, monitoring)
+was created; the fault app was not.
+
+**Cause** — the environment is the slowest single resource in the estate, so a long `Waiting` is
+normal and the console prints it as a running module. The error is a platform error the service
+itself calls retryable: the identical template and region created the environment in the runs
+before and after, the provider was registered and no leftover managed resource group or Service
+Health event existed. No defect in this repo is known.
+
+**Recovery** — confirm the state as in [a fresh Deploy failed part way](#a-fresh-deploy-failed-part-way),
+then rerun the same Deploy command: it adopts the failed deployment's vault, reuses the saved
+admin password and submits the template again. If it fails again on `cae-<prefix>`, check
+Service Health, wait and retry; deleting only that environment is the next step, and it needs
+the operator's approval (it holds nothing else and the fault app was never created). Do not
+Remove the estate for this. To keep a failure here from stranding the base estate, build
+the base first and add Container Apps as a second Deploy pass
+([lifecycle](lifecycle.md#adding-an-optional-workload-to-a-running-estate)).
+
 ## Preflight or redeployment now refuses a previously tolerated state
 
 Preflight no longer registers providers or skips RBAC for a supplied principal.
 Missing providers, missing CLI extensions (`connectedmachine`, plus `containerapp`
-for Container Apps), insufficient effective permissions, malformed skins,
+for Container Apps, which is preview-only today and takes about 2 minutes to install), insufficient effective permissions, malformed skins,
 SKU restrictions and insufficient quota terminate with instructions. Missing
 providers and extensions are reported together, for example
 `az extension add --name connectedmachine --yes`; preflight itself installs and
@@ -379,7 +506,8 @@ registers nothing.
 Quota/listing checks are not capacity guarantees.
 `Deploy-ArcDemo.ps1` does not reset SP credentials or generate a new password for
 existing VMs. Old labs without the saved Key Vault secret need their **current**
-password as `-AdminPassword` (SecureString); obtain it from the operator and
+password as `-AdminPassword` (SecureString), or the file an earlier run saved with
+`-AdminPasswordPath`; obtain it from the operator and
 do not rotate it as a shortcut. Arc onboarding needs no supplied secret: it adds
 and removes its own one-day SP credential (see the next entry).
 See [lifecycle semantics](lifecycle.md).
@@ -403,6 +531,26 @@ group has lost the previous assignment; the helper re-grants it and waits 90
 seconds for propagation, so a retry after a failed first attempt needs no manual
 role work.
 
+## Parity reports a long-lived credential on the onboarding application
+
+**Symptom** — `Test-ArcDemoParity.ps1` fails `tenant/no-long-lived-credentials` and names a credential such as `rbac until
+<date>` on the `sp-<prefix>-onboard` application, while `tenant/no-residual-credentials` passes.
+
+**Cause** — an older Deploy created the onboarding application with `az ad sp create-for-rbac`, which also adds a
+one-year password credential that nothing removed. The build only ever mints one-day credentials; Deploy now removes the
+creation-time credential once onboarding has used it. Nothing holds the old secret.
+
+**What to do** — this is the owner's decision, not a repair step: no script deletes an existing credential, and
+`Remove-ArcDemo.ps1 -RemoveOnboardingIdentity` removes only the service principal. With the owner's approval, delete
+that one credential by its key ID from `az ad app credential list --id <appId>`:
+
+```powershell
+az ad app credential delete --id <appId> --key-id <keyId>
+```
+
+The next Deploy and nested build mint and remove their own one-day credentials as before. Until the owner decides, report the
+failed row as known rather than clearing it another way.
+
 ## Activate rejects an unused alternative parent as outside the manifest
 
 If a parked alternative SQL parent remains alongside the selected scratch parent,
@@ -417,6 +565,94 @@ deallocated`, means a listed VM was deleted (or is running). Remove deleted VMs
 from `operations.keepParkedVmNames` in the private skin; keep a name there only
 while that VM exists and is parked.
 
+## Microsoft Graph calls fail with a continuous access evaluation challenge
+
+**Symptom** — every `az ad ...` call (the preflight's signed-in-user lookup, the onboarding identity,
+the nested build, inventory snapshots, `Prepare-NestedSqlParent.ps1`, `Remove-ArcDemo.ps1`) starts failing,
+often an hour into a session, while ARM calls keep working:
+
+```text
+Continuous access evaluation resulted in challenge with result: InteractionRequired and code: TokenCreatedWithOutdatedPolicies
+```
+
+Repeated `az login` (even with the Graph scope) does not clear it.
+
+Live `Test-ArcDemoParity.ps1` shows it only as failed onboarding-application rows
+(`snapshot/onboardingApp`, `tenant/onboarding-app`, `tenant/no-residual-credentials`,
+`tenant/no-long-lived-credentials`; the message carries the hint) while every Azure row passes.
+They are not estate faults. Observed on 5 November 2026: 3 of 57 checks failed with the
+cached token and 57 of 57 passed with the variable below set, in 151 seconds.
+
+**Cause** — the Azure CLI keeps reusing a cached CAE-capable Graph token that was minted before a
+tenant policy event, and cannot answer the interactive challenge non-interactively.
+
+**Fix** — The scripts now retry a Graph call that fails with exactly this challenge once with
+`AZURE_IDENTITY_DISABLE_CP1=1` for that one child process (the CLI then requests a token without the CAE
+capability), warn that they did, and keep doing so for later Graph calls in the process. A setting you made
+yourself is never overridden. You can also set it for the whole shell before running a script or an `az`
+call, which is the documented workaround and affects neither ARM calls nor the default subscription:
+
+```powershell
+$env:AZURE_IDENTITY_DISABLE_CP1 = '1'
+```
+
+The alternative is a fresh sign-in, `az logout` then `az login --tenant <TENANT>`. A new login can change the
+CLI's default subscription; the scripts always pass the explicit subscription and refuse a directory call
+when the CLI's default tenant differs from the requested one, so re-select the tenant and subscription
+afterwards and never rely on the default.
+
+`-DeployerPrincipalId` (and `deployerPrincipalId` in `build.json`) replaces only the preflight's signed-in-user
+lookup. It bypasses no permission: the same Owner (or Contributor plus User Access Administrator) check runs
+against that ID, so supply your own object ID, never someone else's. When Graph is the blocked service, read it
+from the `oid` claim of your own ARM token, locally:
+
+```powershell
+$jwt = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv
+$p = $jwt.Split('.')[1].Replace('-', '+').Replace('_', '/')
+$p = $p.PadRight($p.Length + (4 - $p.Length % 4) % 4, '=')
+([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p)) | ConvertFrom-Json).oid
+```
+
+## Deploy finishes but says required readiness rows did not pass
+
+**Symptom** — the last phase ends with `required infrastructure/monitor readiness rows did not pass:
+heartbeat/<host> (pending), ...` (the rows are named; each is also printed as a warning).
+
+**Cause** — Deploy validates what it built, read-only, for up to 20 minutes. `heartbeat/*` rows stay
+`pending` while Azure Monitor Agent telemetry catches up (about 10 minutes, longer for Windows hosts); a
+`fail` row is a real gap. The nested SQL guest is not part of this check: it is built after Deploy (wrapper
+step P4), so its `nested/arc` row is left out here and is gated by P7. Before this was fixed, a skin with
+`nestedSqlGuest` could never pass Deploy's last phase, which stopped the wrapper at P2 on a perfect deployment.
+
+**Fix** — nothing was repaired or reset. Rerun `Test-ArcDemoReadiness.ps1 -DesiredState Active` (read-only)
+until it exits 0 rather than redeploying.
+
+## Deploy fails partway at the nested parent: `securityType` is not available
+
+**Symptom** — most VMs, the network, the vault and the monitoring are created, then the
+nested SQL parent's module fails:
+
+```text
+BadRequest ... The value 'Standard' is not available for property 'securityType' until the feature Microsoft.Compute/UseStandardSecurityType is registered
+```
+
+**Cause** — The nested SQL parent declares security type `Standard` (Hyper-V cannot run
+under Trusted Launch) and Compute accepts it only on a subscription that has the
+`Microsoft.Compute/UseStandardSecurityType` feature registered. Current preflight
+(`Test-Prerequisites.ps1`, the build wrapper's P0 and Deploy) checks it read-only and stops
+before any spend, so this only appears with an older checkout.
+
+**Fix** — With separate approval, register the feature once, then refresh the provider (the
+refresh is what propagates it; both took under a minute in the rebuild that found this):
+
+```powershell
+az feature register --subscription <SUB> --namespace Microsoft.Compute --name UseStandardSecurityType
+az feature show --subscription <SUB> --namespace Microsoft.Compute --name UseStandardSecurityType --query properties.state -o tsv
+az provider register --subscription <SUB> --namespace Microsoft.Compute --wait
+```
+
+Then rerun the same Deploy command.
+
 ## Deploy fails immediately with `SkuNotAvailable`
 
 **Symptom** — `Deploy-ArcDemo.ps1` fails at the VM creation phase with:
@@ -430,7 +666,9 @@ SkuNotAvailable: The requested VM size for resource 'Following SKUs have failed 
 **Fix** — Deploy now catches this (and `AllocationFailed`, `ZonalAllocationFailed`,
 `OverconstrainedAllocationRequest` and quota errors) and prints the options with
 the exact commands. It never switches VM size or region on its own: retry later
-with the same command (it resumes), or choose another size/region explicitly for
+with the same command (it resumes when the first run saved its password with
+`-AdminPasswordPath`, as the build wrapper does; see
+[A fresh Deploy failed part way](#a-fresh-deploy-failed-part-way)), or choose another size/region explicitly for
 a new lab. Inspect restrictions and quota in the confirmed target:
 
 ```powershell
@@ -440,7 +678,9 @@ az vm list-usage --subscription <SUB> -l australiaeast -o table
 
 Choose a permitted SKU/region and review the matching Bicep preview. Neither an
 unrestricted SKU listing nor `--validate` guarantees physical allocation. Do not
-create/delete arbitrary probe resource groups in an in-use lab.
+create/delete arbitrary probe resource groups in an in-use lab. The `list-skus`
+command above takes 3-4 minutes with `--all`, and `list-usage` counters can lag for hours
+after a Remove (a count of 2 to 6 vCPUs with no VMs left is stale, not a reason to stop).
 
 ## Capacity preflight says "Insufficient ... vCPU quota" with plenty of headroom
 
@@ -451,7 +691,10 @@ of one family together (`Test-DemoComputeCapacity -Requirements`) and names the 
 it exceeded, for
 example `standardBasv2Family vCPU quota ...: 90 in use + 16 needed ... limit of 100`.
 Trust that message: request quota or reduce the fleet. A regional `cores` overflow
-means the total across all VM families would exceed the regional limit.
+means the total across all VM families would exceed the regional limit. This check is
+Deploy's first step, not part of `Test-Prerequisites` or the wrapper's P0; it takes about
+4 minutes and prints a banner first. Usage counters can lag for hours after a Remove, so
+compare a surprising number with `az vm list` before acting on it.
 
 ## A fresh Deploy after Remove complains about the canonical Key Vault
 
@@ -474,15 +717,59 @@ days and re-creating the same name recovers it with its data. Use
 `Remove-ArcDemo.ps1 -ForceDeleteWorkspace` (irreversible) before the group delete
 when a clean workspace is wanted.
 
-## The Key Vault secret write is Forbidden right after deployment
+## The Key Vault is private-only and `az keyvault secret` is refused (`ForbiddenByConnection`)
 
-A role assignment created by the same deployment can take minutes to reach the Key
-Vault data plane. The write of `vm-admin-password` retries `Forbidden` and
-transient errors for up to ten minutes and stops immediately on anything else.
-If it finally fails, the VMs already exist with a generated password that was not
-saved: do not redeploy over them. Fix the vault access, then either remove and
-rebuild the lab or, with approval, reset the VM administrator password and rerun
-Deploy with that value as `-AdminPassword`.
+**Symptom** — an older Deploy retried the first `vm-admin-password` write for about ten
+minutes after Bicep succeeded and then failed, warning about "role propagation":
+
+```text
+(ForbiddenByConnection) Public network access is disabled and request is not from a trusted service nor via an approved private link.
+```
+
+The vault reads `publicNetworkAccess=Disabled` although Deploy asked for `Enabled`.
+
+**Cause** — Not role propagation. A tenant or management-group policy with a `modify` effect on
+`Microsoft.KeyVault/vaults/publicNetworkAccess` (in the rebuild that found this, a tenant-root
+assignment) flips every new vault to private-only seconds after it is created; the vault's
+activity log shows `Microsoft.Authorization/policies/modify/action`. The policy cannot be undone
+from the demo, and a rebuild fails the same way. Only the data plane (`az keyvault secret
+set/show` from a workstation) is blocked; Azure Resource Manager is not.
+
+**Fix** — Current Deploy writes the secret through Azure Resource Manager
+(`Microsoft.KeyVault/vaults/secrets`), warns once that a policy made the vault private-only and does not
+retry what cannot clear. Nothing to do for a new build. Because the vault can then never be read from
+a workstation, every later Deploy needs the current password from somewhere else: pass
+`-AdminPasswordPath <private folder>\vm-admin-credential.clixml` (the build wrapper always does), which a
+fresh build fills before any Azure write, or `-AdminPassword`. Do not open the vault, add network
+exceptions or reset a VM password to get around this.
+
+## A fresh Deploy failed part way
+
+**Symptom** — the console ends with an error after some VMs, the vault or the monitoring were
+created: a platform error, a lost connection (`ConnectionResetError`), a missing subscription feature, a
+slow Container Apps environment. The estate is partial.
+
+**Recovery** — Deploy submits the deployment without blocking and polls it, so a lost client
+connection during the build no longer ends it (a reset while *submitting* is checked against
+Azure before anything is resubmitted). A fresh Deploy saves the generated VM admin password before it changes anything,
+when `-AdminPasswordPath` is given (the build wrapper's P2 always gives it), and a rerun reads it
+back, so the same command resumes. Check what Azure has first:
+
+```powershell
+az deployment sub show --name <arc-demo-timestamp from the console log> --query "{state:properties.provisioningState,error:properties.error}" -o json
+```
+
+| The deployment is | Do |
+| --- | --- |
+| Not found (`DeploymentNotFound`) | Nothing was created; rerun the same command. |
+| `Running` | Wait. Deploy refuses to start a second deployment over it (it would race the VM and vault creation). |
+| `Failed` | Read `error` (and the troubleshooting entry that matches it), fix the cause, rerun the same command. Deploy adopts the vault named by its own failed deployment and reuses the saved password; it never adopts another vault. |
+| `Succeeded` | Rerun the same command; it is a normal idempotent redeploy. |
+
+If VMs exist and the saved file is missing (a build started without `-AdminPasswordPath` on an older
+checkout), the password is unknown and routine redeploy must not generate or rotate one. The only
+recovery that needs no credential change is `Remove-ArcDemo.ps1` for both groups and a fresh Deploy;
+resetting the VM password is a separate approved credential change.
 
 ## What-if lists the Defender plan with `Delete properties.extensions`
 
@@ -518,6 +805,7 @@ drive letter for you.
 | `LUN 0 already holds ...` or `Disk ... already exists but is attached elsewhere or differs` | Prepare never reuses, resizes, converts or moves a disk. Declare the existing disk in the skin or remove the stray disk deliberately. |
 | `Drive D: is already used by another volume` or `Refusing to initialise a data disk that already has partitions` | Volume moves the empty virtual DVD-ROM that a size without a temp disk leaves on `D:` to `Z:` (seen on a fresh `Standard_D4s_v5`), but will not touch any other `D:` (a temp disk on a `d` size, a data volume, a DVD-ROM that holds a disc) or a disk that is not blank. Inspect the VM and decide deliberately. |
 | `Hyper-V is not running after the restart` | The size or security type blocks nested virtualization; Trusted Launch is not supported, the parent must be `Standard`. Check both, then rerun `-Phase HyperV`. |
+| `Cannot connect to CIM server. A system shutdown is in progress.` (or another guest error right after the restart) | Windows restarted itself a second time shortly after the first boot (servicing finishing after the role install) while Arc already read `Connected`. HyperV now inspects again until two inspections a minute apart both find Hyper-V ready (about 10 minutes at most) and only then fails with the guest's own error. If you still see it, wait two minutes and rerun `-Phase HyperV`: it reports the phase satisfied. |
 | `Guest prefix ... overlaps ...`, `An existing NAT conflicts ...` or `Switch ... exists with type ...` | `172.31.240.0/24` collides with the Azure address space, a route or a different switch or NAT. Pass other `-GuestNetworkPrefix`, `-GatewayAddress` and `-GuestAddress` and use the same values in the build. |
 | Pinned-size or hash errors while staging media | See [Media staging stops on a size or hash mismatch](#media-staging-stops-on-a-size-or-hash-mismatch). |
 | `Verify failed: ...` | The result's `checks` name each failing check. Run the matching `-Phase`, then Verify again. Verify never starts a parked parent; run Activate first. |
@@ -542,6 +830,8 @@ disk; override with `parentVmSize`, `parentDataDiskGb`,
 retained `Standard_LRS` disk). For any other entry add `vmSize` and `dataDisks`
 to its [fleet entry](legacy-os-fleet.md#per-entry-size-and-data-disks). A real
 size change is a separate approved resize with the VM deallocated, not a deploy.
+A disk tier that changed outside this repo is declared the same way; see
+[the OS disk tier changed by itself](#the-os-disk-tier-changed-by-itself).
 
 ## Clean deploy fails while creating DCRs with missing Log Analytics tables
 
@@ -810,6 +1100,62 @@ az policy state trigger-scan --subscription <SUB> --resource-group rg-arc-demo
 
 The scan remains asynchronous with no fixed demo-time completion guarantee.
 
+## Failed deployIfNotExists policy events follow every VM write
+
+**Symptom** — After a Deploy (or any other write to a VM) the activity log holds one `Started`
+and one `Failed` `deployIfNotExists` policy event per VM, about 60-110 seconds after the write
+finished: "Evaluation of DeployIfNotExists policy was unsuccessful. The policy assignment
+'.../nist-<prefix>' resource identity does not have the necessary permissions to create
+deployment ...". Observed on the eight-host lab: 54 `Failed` and no `Succeeded` over seven
+batches of VM writes. Nothing follows a deallocate, a start, an extension write or a disk write.
+
+**Cause** — `bicep/modules/policy.bicep` assigns the NIST SP 800-53 initiative with
+`enforcementMode: 'Default'` and a system-assigned identity, but grants that identity no
+role. The audit half of the initiative works; its remediation (for example installing the
+Guest Configuration extension) can never deploy. The VMs are unaffected.
+
+**What to do** — Nothing; it is expected. Do not remove the assignment, change its
+enforcement mode or hand-grant roles to clear the rows: granting the roles would install
+Guest Configuration extensions on every VM, a visible change to confirm first, and
+[AGENTS.md](../AGENTS.md) keeps the existing policy as it is. Leaving the assignment
+audit-only (the demo as built) or granting the policy identities the roles named in each
+definition is an owner decision.
+
+## Activity log noise on an idle or parked estate
+
+**Symptom** — The activity log of a parked or idle lab shows operations nobody started:
+hourly `upgradeExtensions` failures on the Linux Arc machines with `HCRP404`, patch-extension
+writes on the Arc machines that end `Failed` with `HCRP400`, and Advisor recommendations for
+machine, database or disk names that are not in the subscription. Nothing is stuck and
+nothing notifies.
+
+**Cause** — All of it comes from the platform, not from this repo or the operator:
+
+- `upgradeExtensions` ran about once an hour on one Linux machine at a time and failed
+  within about a second with `HCRP404` ("The VM extension with publisher
+  'microsoft.cplat.core' and type 'linuxpatchextension' could not be found"). The patch
+  extension is installed and `Succeeded` on those machines, so this reads as the platform's
+  automatic-upgrade lookup failing, not a failure on the machine (inferred). Observed six
+  times over five hours, then not again.
+- A platform update service writes `LinuxPatchExtension` and `WindowsPatchExtension` on the
+  Arc machines about every 4.5 hours. Against a running machine it succeeds in under a
+  minute; against a machine whose VM is deallocated the write sits `Running` for about 31
+  minutes and then fails with `HCRP400` "The Hybrid Compute machine is not connected to Azure."
+- Advisor recommendation events kept arriving while the lab was parked. Some name resources
+  that exist (secure-communication protocols on an un-hardened Windows host, availability
+  zones for a VM) and are expected on this deliberately un-hardened demo. Others name SQL
+  Server hosts, databases and a disk that are not in the subscription or in this repo:
+  probably stale records of an earlier lab that used the same group names (unverified).
+
+**What to do** — Nothing. Do not remove, reinstall or reconfigure anything to stop them: the
+patch extensions and the SQL-only block belong to the lab, and
+[AGENTS.md](../AGENTS.md) keeps Defender for SQL and the existing policy as they are. See
+[what still happens to a parked estate](lifecycle.md#what-still-happens-to-a-parked-estate).
+Open item: a platform patch write that is still pending when an Activate starts (a burst
+less than 31 minutes earlier) could overlap the boot-time `MDE.Linux` lock; it was not
+observed. The related policy events after VM writes are in
+[the previous entry](#failed-deployifnotexists-policy-events-follow-every-vm-write).
+
 ## Hibernation blocked by unrelated preflight or monitoring health
 
 **Observed** - An added operator wrapper required deployment Graph/Owner checks,
@@ -879,4 +1225,45 @@ disk. Select its current tier using the CLI input or private
 `Standard_LRS`, while new OS disks default to `StandardSSD_LRS`.
 Do not bypass the check or run an implicit conversion. An approved disk-tier
 migration needs a maintenance window with stop/deallocate/restart; HDD OS
-support retires on 8 September 2028. See [cost.md](cost.md).
+support retires on 8 September 2028. See [cost.md](cost.md). If the disks were
+Standard SSD when the lab was built and nobody changed them, read
+[the next entry](#the-os-disk-tier-changed-by-itself).
+
+## The OS disk tier changed by itself
+
+**Symptom** — A Deploy that worked before a Hibernate stops before any Bicep, even
+as a preview, with `OS disk tier mismatch on <vm>: the disk is Standard_LRS and this
+run requests StandardSSD_LRS`. Once the OS tier is declared, the nested SQL parent
+can stop it again with `Data disk ... differs from its declaration (existing lun 0,
+128 GiB, Standard_LRS)`. The private skin did not change.
+
+**Cause** — The disks really are Standard HDD now. A governance automation in the
+tenant can convert the disks of a parked estate to Standard HDD on its own. Observed
+on 5-6 November 2026: about two hours after a Hibernate, every OS disk and the
+nested data disk in `rg-<prefix>-infra` was rewritten within about 15 seconds and
+read `Standard_LRS` afterwards, while every VM stayed deallocated. The activity log
+shows `Microsoft.Compute/disks/write` from an application identity, not from this
+repo or the operator. Whether a subscription does this depends on its tenant
+policy. No Hibernate, Activate or readiness check reads a disk tier, so the first
+sign is the Deploy guard, which reads each disk before it sends anything to Bicep.
+
+**Check** — Read-only:
+
+```powershell
+az disk list -g rg-<prefix>-infra --query "[].{name:name, tier:sku.name, sizeGb:diskSizeGb}" -o table
+```
+
+**Fix** — Declare what exists. Deploy never converts a disk, so it will not undo the
+automation. In the private skin:
+
+```json
+"compute": { "osDiskStorageAccountType": "Standard_LRS" },
+"nestedSqlGuest": { "parentDataDiskStorageAccountType": "Standard_LRS" }
+```
+
+`-OsDiskStorageAccountType Standard_LRS` does the same for the OS disks on the command
+line; the data disk has only the skin key. The guard then passes for the tiers the
+disks have. Accepting HDD (cheaper, with OS disk support retiring on 8 September
+2028) or converting back to Standard SSD is the owner's decision. A conversion back is
+a separately approved window with the VMs deallocated, stop/deallocate/change
+tier/restart, as [cost.md](cost.md) describes. Do not bypass the guard.

@@ -42,21 +42,46 @@ function Get-DemoMissingCliExtension {
 function Get-DemoPrerequisiteSet {
     <#
     .SYNOPSIS
-        The resource providers and Azure CLI extensions Deploy needs for the selected workloads.
+        The resource providers, subscription features and Azure CLI extensions Deploy needs for the selected workloads.
     .DESCRIPTION
         One list shared by Deploy, the build wrapper preflight and Test-Prerequisites.ps1, so a
-        read-only check cannot pass while Deploy would stop on a provider or extension it skipped.
+        read-only check cannot pass while Deploy would stop on a provider, feature or extension it skipped.
+        -StandardSecurityType adds Microsoft.Compute/UseStandardSecurityType, which Compute requires before it
+        accepts securityType Standard (the nested SQL parent always declares it).
     #>
     [CmdletBinding()]
-    param([switch]$ContainerApps, [switch]$Aks)
+    param([switch]$ContainerApps, [switch]$Aks, [switch]$StandardSecurityType)
     $providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
         'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement', 'Microsoft.Insights', 'Microsoft.Security',
         'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab',
         'Microsoft.Consumption')
     $extensions = @('connectedmachine')
+    $features = @()
     if ($ContainerApps) { $providers += 'Microsoft.App'; $extensions += 'containerapp' }
     if ($Aks) { $providers += @('Microsoft.ContainerService', 'Microsoft.ManagedIdentity', 'Microsoft.Resources', 'Microsoft.Storage', 'Microsoft.ContainerInstance') }
-    [pscustomobject]@{ Providers = $providers; Extensions = $extensions }
+    if ($StandardSecurityType) { $features += 'Microsoft.Compute/UseStandardSecurityType' }
+    [pscustomobject]@{ Providers = $providers; Extensions = $extensions; Features = $features }
+}
+
+function Test-DemoStandardSecurityTypeRequired {
+    <#
+    .SYNOPSIS
+        True when the deployment declares securityType Standard: the skin's nested SQL parent always does,
+        and a fleet file may set it on any entry. Reads only local files.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()][System.Collections.IDictionary]$Skin,
+        [string]$FleetPath = '',
+        [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    )
+    if (Get-DemoNestedSqlGuestConfig -Skin $Skin) { return $true }
+    if ([string]::IsNullOrWhiteSpace($FleetPath)) { return $false }
+    $path = if ([System.IO.Path]::IsPathRooted($FleetPath)) { $FleetPath } else { Join-Path $RepoRoot $FleetPath }
+    # A missing fleet file is reported by Deploy's own fleet loading, with the path.
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    $fleet = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -Depth 20
+    [bool]@($fleet | Where-Object { $_.securityType -eq 'Standard' }).Count
 }
 
 function Test-Prerequisites {
@@ -64,8 +89,8 @@ function Test-Prerequisites {
     .SYNOPSIS
         Verifies tooling, login state, and target subscription/tenant.
     .DESCRIPTION
-        Read-only: it never registers providers or installs CLI extensions. Missing extensions and
-        unregistered providers are reported together so one pass is enough to fix them.
+        Read-only: it never registers providers or subscription features or installs CLI extensions. Missing
+        extensions, unregistered providers and unregistered features are reported together so one pass is enough to fix them.
     .OUTPUTS
         Throws if any required check fails.
     #>
@@ -75,7 +100,8 @@ function Test-Prerequisites {
         [Parameter(Mandatory)][string]$TenantId,
         [string]$DeployerPrincipalId = '',
         [string[]]$Providers = (Get-DemoPrerequisiteSet).Providers,
-        [string[]]$RequiredExtensions = (Get-DemoPrerequisiteSet).Extensions
+        [string[]]$RequiredExtensions = (Get-DemoPrerequisiteSet).Extensions,
+        [string[]]$Features = (Get-DemoPrerequisiteSet).Features
     )
 
     Write-Header 'Pre-flight checks'
@@ -135,6 +161,12 @@ function Test-Prerequisites {
         $state = Invoke-DemoAz -Arguments @('provider', 'show', '--namespace', $rp, '--query', 'registrationState', '-o', 'tsv')
         if ($state -ne 'Registered') { [pscustomobject]@{ Namespace = $rp; State = $state } }
     })
+    $unregisteredFeatures = @(foreach ($feature in $Features) {
+        $namespace, $featureName = $feature -split '/', 2
+        # A feature that is no longer in the catalog (generally available) has nothing left to register.
+        $state = Invoke-DemoAz -Arguments @('feature', 'show', '--namespace', $namespace, '--name', $featureName, '--query', 'properties.state', '-o', 'tsv') -AllowNotFound
+        if ($null -ne $state -and $state -ne 'Registered') { [pscustomobject]@{ Feature = $feature; Namespace = $namespace; Name = $featureName; State = $state } }
+    })
     $problems = @()
     if ($missingExtensions) {
         $install = ($missingExtensions | ForEach-Object { "az extension add --name $_ --yes" }) -join '; '
@@ -144,8 +176,15 @@ function Test-Prerequisites {
         $listed = ($unregistered | ForEach-Object { "$($_.Namespace) ($($_.State))" }) -join ', '
         $problems += "Resource provider(s) not registered: $listed. An authorized operator must run, for each: az provider register --subscription $SubscriptionId --namespace <provider> --wait. Preflight never registers providers."
     }
+    if ($unregisteredFeatures) {
+        $listedFeatures = ($unregisteredFeatures | ForEach-Object { "$($_.Feature) ($($_.State))" }) -join ', '
+        $register = ($unregisteredFeatures | ForEach-Object { "az feature register --subscription $SubscriptionId --namespace $($_.Namespace) --name $($_.Name)" }) -join '; '
+        $refresh = (@($unregisteredFeatures.Namespace | Sort-Object -Unique) | ForEach-Object { "az provider register --subscription $SubscriptionId --namespace $_ --wait" }) -join '; '
+        $problems += "Subscription feature(s) not registered: $listedFeatures. Without them the deployment fails partway through, after the other VMs exist (BadRequest: the value 'Standard' is not available for property 'securityType' until the feature Microsoft.Compute/UseStandardSecurityType is registered). An authorized operator must run: $register; wait until az feature show reads Registered; then run: $refresh. Preflight never registers features."
+    }
     if ($problems) { throw ($problems -join ' ') }
     Write-Ok 'Required resource providers already registered (read-only check)'
+    if ($Features) { Write-Ok "Required subscription features checked: $($Features -join ', ') (read-only check)" }
 
     return $principalId
 }
@@ -249,6 +288,20 @@ function ConvertTo-DemoTagString {
     return (($Tags.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value }) -join ',')
 }
 
+function Get-DemoResourceTags {
+    <#
+    .SYNOPSIS
+        The lab's resource tags: the four default cost-allocation and owner tags plus the skin's own tags section.
+    .DESCRIPTION
+        Deploy puts these on everything it creates. Activate puts them on the NAT gateway and public IP it recreates,
+        which Bicep does not declare again once they exist, so both read them here and a skin override reaches both.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][System.Collections.IDictionary]$Skin)
+    Merge-DemoHashtable -Defaults ([ordered]@{ owner = 'demo'; purpose = 'arc-demo'; costcenter = 'demo'; env = 'demo' }) `
+        -Overrides (Get-DemoSkinValue -Skin $Skin -Path 'tags' -Default @{})
+}
+
 function Get-MgmtToken {
     [CmdletBinding()]
     param()
@@ -282,6 +335,53 @@ function Invoke-AzRest {
     Invoke-RestMethod @params
 }
 
+function ConvertTo-DemoTagMap {
+    <#
+    .SYNOPSIS
+        A tags object, as ARM or az returns it, as a case-insensitive name -> value map. $null and {} give an empty map.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()]$Tags)
+    $map = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq $Tags) { return $map }
+    if ($Tags -is [System.Collections.IDictionary]) {
+        foreach ($key in $Tags.Keys) { $map[[string]$key] = [string]$Tags[$key] }
+    } else {
+        foreach ($property in $Tags.PSObject.Properties) { $map[$property.Name] = [string]$property.Value }
+    }
+    $map
+}
+
+function Set-DemoResourceTags {
+    <#
+    .SYNOPSIS
+        Merges tags onto one resource through the ARM tags API and writes only when a wanted tag differs.
+        Returns $true when it wrote and $false when every wanted tag was already in place.
+    .DESCRIPTION
+        Not `az connectedmachine update --tags k=v k=v`: with extension 3.0.0 that is shorthand syntax and folds every
+        pair after the first into the first key's value, so a host kept four tags and `owner` held all the others. A Merge
+        leaves tags it does not name alone. The skip matters too: a tag edit is a resource write, and on a Linux host a
+        write can seed the Defender MDE.Linux install lock (see docs/troubleshooting.md). The write's response is read
+        back and a tag that did not take its value throws.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/[^/]+/.+')][string]$ResourceId,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Tags
+    )
+    $url = "https://management.azure.com$ResourceId/providers/Microsoft.Resources/tags/default?api-version=2021-04-01"
+    $member = { param($object, $name) if ($object -is [System.Collections.IDictionary]) { if ($object.Contains($name)) { $object[$name] } } elseif ($object) { $found = $object.PSObject.Properties[$name]; if ($found) { $found.Value } } }
+    $tagsOf = { param($response) & $member (& $member $response 'properties') 'tags' }
+    $wanted = ConvertTo-DemoTagMap $Tags
+    $current = ConvertTo-DemoTagMap (& $tagsOf (Invoke-AzRest -Method Get -Url $url))
+    $differs = @($wanted.Keys | Where-Object { -not $current.ContainsKey($_) -or $current[$_] -cne $wanted[$_] })
+    if (-not $differs.Count) { return $false }
+    $merged = ConvertTo-DemoTagMap (& $tagsOf (Invoke-AzRest -Method Patch -Url $url -Body @{ operation = 'Merge'; properties = @{ tags = $wanted } }))
+    $wrong = @($differs | Where-Object { -not $merged.ContainsKey($_) -or $merged[$_] -cne $wanted[$_] })
+    if ($wrong.Count) { throw "Tags on $ResourceId did not take the requested value after a Merge: $($wrong -join ', ')." }
+    $true
+}
+
 function Wait-Until {
     <#
     .SYNOPSIS
@@ -312,10 +412,26 @@ function Wait-Until {
 }
 
 function New-StrongPassword {
+    <#
+    .SYNOPSIS
+        A random password with at least one upper-case letter, lower-case letter, digit and symbol (printable ASCII).
+    .DESCRIPTION
+        Drawn with a cryptographic RNG and shuffled, so every result meets the nested guest credential contract
+        (24 to 128 printable ASCII characters with all four classes) as well as the Azure VM rule.
+    #>
     [CmdletBinding()]
-    param([int]$Length = 24)
-    $chars = ((48..57) + (65..90) + (97..122) + @(33, 35, 36, 37, 38, 42, 64))
-    -join (($chars | Get-Random -Count $Length) | ForEach-Object { [char]$_ })
+    param([ValidateRange(8, 128)][int]$Length = 24)
+    $sets = @('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz', '0123456789', '!#$%&*@')
+    $all = -join $sets
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]
+    $chars = [System.Collections.Generic.List[char]]::new()
+    foreach ($set in $sets) { $chars.Add($set[$rng::GetInt32($set.Length)]) }
+    while ($chars.Count -lt $Length) { $chars.Add($all[$rng::GetInt32($all.Length)]) }
+    for ($i = $chars.Count - 1; $i -gt 0; $i--) {
+        $j = $rng::GetInt32($i + 1)
+        $swap = $chars[$i]; $chars[$i] = $chars[$j]; $chars[$j] = $swap
+    }
+    -join $chars
 }
 
 function New-KeyVaultName {
@@ -328,33 +444,76 @@ function New-KeyVaultName {
 function Set-DemoKeyVaultSecret {
     <#
     .SYNOPSIS
-        Writes a Key Vault secret, retrying only errors that clear by themselves.
+        Writes a Key Vault secret through Azure Resource Manager, retrying only errors that clear by themselves.
     .DESCRIPTION
-        A role assignment created by the same deployment can take minutes to reach the Key Vault data
-        plane, so a first write may return Forbidden. Other errors fail immediately. The value is never
-        written to output or error text.
+        Uses the management plane (Microsoft.KeyVault/vaults/secrets), so it works whatever the vault's network
+        setting is. A tenant policy can force a new vault to publicNetworkAccess=Disabled seconds after creation;
+        az keyvault secret set from a workstation then fails with ForbiddenByConnection however long it retries,
+        and that error is not a role-propagation delay. The deployer already holds Owner (or Contributor), so no
+        data-plane role has to propagate first. Only throttling, 5xx and connection errors are retried. The value
+        is never written to output or error text.
     #>
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory)][string]$ResourceGroup,
         [Parameter(Mandatory)][string]$VaultName,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Value,
-        [int[]]$RetryDelaySeconds = @(10, 20, 30, 60, 60, 60, 120, 120, 120)
+        [int[]]$RetryDelaySeconds = @(5, 15, 30, 60)
     )
-    $transient = 'Forbidden|Unauthorized|not authorized|propagat|AccessDenied|TooManyRequests|Too Many Requests|ServiceUnavailable|timed out|Connection (reset|aborted)'
+    if (-not $script:DemoSubscription) { throw 'Initialize the explicit demo context before writing a Key Vault secret.' }
+    $url = "https://management.azure.com/subscriptions/$script:DemoSubscription/resourceGroups/$ResourceGroup/providers/Microsoft.KeyVault/vaults/$VaultName/secrets/${Name}?api-version=2024-11-01"
+    $transient = '\b(408|429|500|502|503|504)\b|TooManyRequests|Too Many Requests|ServiceUnavailable|timed out|timeout|Connection (reset|aborted)|connection was closed|error occurred while sending the request'
     for ($attempt = 0; ; $attempt++) {
         try {
-            Invoke-DemoAz -Arguments @('keyvault', 'secret', 'set', '--vault-name', $VaultName, '-n', $Name, '--value', $Value, '-o', 'none', '--only-show-errors') | Out-Null
+            Invoke-AzRest -Method Put -Url $url -Body @{ properties = @{ value = $Value } } | Out-Null
             return
         } catch {
-            if ($_.Exception.Message -notmatch $transient) { throw }
-            if ($attempt -ge $RetryDelaySeconds.Count) {
-                throw "Key Vault secret $Name could not be written to $VaultName after $($attempt + 1) attempts: $($_.Exception.Message)"
+            $problem = $_.Exception.Message
+            $detail = @($_.ErrorDetails.Message, $problem) | Where-Object { $_ } | Select-Object -First 1
+            if ($problem -notmatch $transient) {
+                throw "Key Vault secret $Name could not be written to $VaultName through Azure Resource Manager: $detail"
             }
-            Write-Warn "Key Vault secret write attempt $($attempt + 1) was refused; role assignments can take several minutes to propagate. Retrying in $($RetryDelaySeconds[$attempt]) seconds."
+            if ($attempt -ge $RetryDelaySeconds.Count) {
+                throw "Key Vault secret $Name could not be written to $VaultName after $($attempt + 1) attempts: $detail"
+            }
+            Write-Warn "Key Vault secret write attempt $($attempt + 1) hit a transient Azure Resource Manager error; retrying in $($RetryDelaySeconds[$attempt]) seconds."
             Start-Sleep -Seconds $RetryDelaySeconds[$attempt]
         }
     }
+}
+
+function Save-DemoSecretFile {
+    <#
+    .SYNOPSIS
+        Saves a secret as a SecureString export (Export-Clixml) so a later run can reuse it.
+    .DESCRIPTION
+        On Windows the export is DPAPI-protected: only the same Windows user on the same PC can read it back. Elsewhere
+        PowerShell does not encrypt it, so keep the file in a user-only folder. The folder must already exist and, like
+        every credential, live outside the git worktree. The value is never written to output.
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The secret is converted in memory and written only as a protected SecureString export.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Value)
+    $folder = Split-Path -Parent $Path
+    if ($folder -and -not (Test-Path -LiteralPath $folder -PathType Container)) { throw "The folder for the saved secret does not exist: $folder" }
+    ConvertTo-SecureString -String $Value -AsPlainText -Force | Export-Clixml -LiteralPath $Path
+    if (-not $IsWindows) { Write-Warn "Saved the secret to $Path without encryption (DPAPI is Windows-only); keep it in a user-only folder." }
+}
+
+function Read-DemoSecretFile {
+    <#
+    .SYNOPSIS
+        Reads a file written by Save-DemoSecretFile (or a credential export) back as a SecureString; $null when the file does not exist.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try { $saved = Import-Clixml -LiteralPath $Path }
+    catch { throw "The saved secret file $Path could not be read (a Windows export only opens for the user and PC that wrote it): $($_.Exception.Message)" }
+    if ($saved -is [pscredential]) { return $saved.Password }
+    if ($saved -is [securestring]) { return $saved }
+    throw "The saved secret file $Path is not a SecureString or credential export."
 }
 
 function Assert-DemoName {
@@ -380,6 +539,18 @@ function Test-DemoNotFoundText {
 }
 
 function Invoke-DemoAz {
+    <#
+    .SYNOPSIS
+        The one checked Azure CLI call: explicit subscription pinning, tenant guard for directory calls, not-found handling.
+    .DESCRIPTION
+        A Microsoft Graph call (az ad, or az rest against graph.microsoft.com) can be refused with a continuous
+        access evaluation (CAE) challenge, "TokenCreatedWithOutdatedPolicies", while ARM calls keep working: the
+        Azure CLI keeps reusing a cached CAE-capable Graph token minted before a tenant policy event, and az login
+        does not clear it. The documented workaround is AZURE_IDENTITY_DISABLE_CP1=1. Because every directory call
+        in the repo goes through here, a Graph call that fails with exactly that challenge is retried once with the
+        variable set for that child process only, and later Graph calls in the process keep it. Nothing else is
+        changed and a setting the operator made is never overridden.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
@@ -391,6 +562,9 @@ function Invoke-DemoAz {
     }
     $stderr = [System.IO.Path]::GetTempFileName()
     $captureWhatIfPreference = $WhatIfPreference
+    $isGraphCall = $Arguments[0] -eq 'ad' -or ($Arguments[0] -eq 'rest' -and ($Arguments -join ' ') -match 'graph\.microsoft\.com')
+    $caePattern = 'Continuous access evaluation resulted in challenge|TokenCreatedWithOutdatedPolicies'
+    $cp1Disabled = $false
     try {
         # Caller ShouldProcess guards Azure writes; preview must still capture local stderr.
         $WhatIfPreference = $false
@@ -402,17 +576,34 @@ function Invoke-DemoAz {
                 throw 'Directory operations use the CLI default tenant, which differs from the explicitly requested tenant. Select the intended tenant before retrying; no CLI defaults were changed.'
             }
         }
+        if ($isGraphCall -and $script:DemoGraphWithoutCae -and -not $env:AZURE_IDENTITY_DISABLE_CP1) {
+            $env:AZURE_IDENTITY_DISABLE_CP1 = '1'
+            $cp1Disabled = $true
+        }
         $output = & $az @Arguments 2> $stderr
         $exitCode = $LASTEXITCODE
         $detail = [System.IO.File]::ReadAllText($stderr).Trim()
+        if ($exitCode -ne 0 -and $isGraphCall -and -not $env:AZURE_IDENTITY_DISABLE_CP1 -and $detail -match $caePattern) {
+            Write-Warn 'Microsoft Graph refused the cached token with a continuous access evaluation (CAE) challenge. Retrying this call once with AZURE_IDENTITY_DISABLE_CP1=1, for this call only (docs/troubleshooting.md).'
+            $env:AZURE_IDENTITY_DISABLE_CP1 = '1'
+            $cp1Disabled = $true
+            $output = & $az @Arguments 2> $stderr
+            $exitCode = $LASTEXITCODE
+            $detail = [System.IO.File]::ReadAllText($stderr).Trim()
+            if ($exitCode -eq 0) { $script:DemoGraphWithoutCae = $true }
+        }
         if ($exitCode -ne 0) {
             if ($AllowNotFound -and (Test-DemoNotFoundText $detail)) { return $null }
+            $hint = if ($isGraphCall -and $detail -match $caePattern) {
+                ' Continuous access evaluation challenge: set $env:AZURE_IDENTITY_DISABLE_CP1 = ''1'' in the shell that runs this script, or run az logout then az login --tenant <TENANT>, and retry (docs/troubleshooting.md).'
+            } else { '' }
             # Do not echo arguments: run-command and identity commands can carry credentials.
-            throw "Azure CLI $($Arguments[0]) $($Arguments[1]) failed (exit $exitCode): $detail"
+            throw "Azure CLI $($Arguments[0]) $($Arguments[1]) failed (exit $exitCode): $detail$hint"
         }
         if ($detail) { Write-Verbose $detail }
         return $output
     } finally {
+        if ($cp1Disabled) { Remove-Item -Path Env:\AZURE_IDENTITY_DISABLE_CP1 -ErrorAction SilentlyContinue }
         $WhatIfPreference = $captureWhatIfPreference
         [System.IO.File]::Delete($stderr)
     }
@@ -450,8 +641,8 @@ function Get-DemoInventory {
         $machines += @($resources | Where-Object { $_.type -eq 'Microsoft.Compute/virtualMachines' -and $_.id -notin $vmRecords.id } |
             ForEach-Object { [pscustomobject]@{ Name = $_.name; Id = $_.id; Actual = $null } })
         return [pscustomobject]@{ ArcRg = $arcRg; InfraRg = $infraRg; Resources = $resources; Machines = $machines
-            AksClusterIds = @($resources | Where-Object type -eq 'Microsoft.ContainerService/managedClusters' | ForEach-Object id)
-            ContainerAppIds = @($resources | Where-Object type -eq 'Microsoft.App/containerApps' | ForEach-Object id) }
+            AksClusterIds = @($resources | Where-Object type -eq 'Microsoft.ContainerService/managedClusters' | ForEach-Object { $_.id })
+            ContainerAppIds = @($resources | Where-Object type -eq 'Microsoft.App/containerApps' | ForEach-Object { $_.id }) }
     }
     $deployments = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '--query',
         "[?properties.provisioningState=='Succeeded' && properties.outputs.arcResourceGroup.value=='$arcRg']", '-o', 'json') | ConvertFrom-Json |
@@ -476,7 +667,7 @@ function Get-DemoInventory {
         $actual = $vmRecords | Where-Object { $_.id -eq $id } | Select-Object -First 1
         [pscustomobject]@{ Name = $entry.name; Id = $id; ArcId = "/subscriptions/$script:DemoSubscription/resourceGroups/$arcRg/providers/Microsoft.HybridCompute/machines/$($entry.name)"
             OsType = $entry.osType; Monitor = $entry.supportsAzureMonitor; VmInsights = $entry.supportsVmInsights
-            ChangeTracking = $entry.supportsChangeTracking; Native = $false; Actual = $actual }
+            ChangeTracking = $entry.supportsChangeTracking; Native = $false; Actual = $actual; Role = $entry.role; OsTier = $entry.osTier }
     }
     $machines = @($machines)
     foreach ($id in $nativeIds) {
@@ -560,21 +751,42 @@ function Get-DemoNestedSqlGuestConfig {
 }
 
 function Invoke-DemoNestedSqlGuest {
+    <#
+    .SYNOPSIS
+        Starts or gracefully stops the nested Hyper-V guest from the parent VM through Run Command.
+    .DESCRIPTION
+        -AllowAbsent (Stop only) treats a parent without the Hyper-V role, or without a guest of that name, as already
+        stopped instead of an error. Remove uses it: the parent and its disks are deleted anyway, so a guest that was
+        never built is not worth a failure.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$ParentMachine,
         [Parameter(Mandatory)][string]$GuestVmName,
         [Parameter(Mandatory)][ValidateSet('Start', 'Stop')][string]$Action,
         [switch]$AsJob,
+        [switch]$AllowAbsent,
         [ValidateRange(30, 3600)][int]$TimeoutSeconds = 900
     )
     if ($ParentMachine.OsType -ne 'Windows') { throw 'Nested SQL lifecycle requires the configured Windows parent VM.' }
     if ($GuestVmName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') { throw 'Nested SQL guest VM name is invalid.' }
+    if ($AllowAbsent -and $Action -ne 'Stop') { throw '-AllowAbsent only applies to Stop: a guest that must start has to exist.' }
     $guestScript = @'
 $ErrorActionPreference = 'Stop'
 $guestName = '__GUEST_NAME__'
 $action = '__ACTION__'
-$guest = @(Get-VM -Name $guestName -ErrorAction Stop)
+$allowAbsent = '__ALLOW_ABSENT__' -eq 'true'
+if ($allowAbsent -and -not (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
+    'The Hyper-V role is not installed on the parent, so there is no guest to stop.'
+    'ARC_DEMO_OK'
+    return
+}
+$guest = @(Get-VM -Name $guestName -ErrorAction $(if ($allowAbsent) { 'SilentlyContinue' } else { 'Stop' }))
+if ($guest.Count -eq 0 -and $allowAbsent) {
+    "No Hyper-V guest named $guestName exists on the parent, so there is nothing to stop."
+    'ARC_DEMO_OK'
+    return
+}
 if ($guest.Count -ne 1) { throw "Expected exactly one Hyper-V guest named $guestName." }
 $guest = $guest[0]
 if ($action -eq 'Start') {
@@ -600,7 +812,7 @@ do {
 } while ($true)
 'ARC_DEMO_OK'
 '@
-    $guestScript = $guestScript.Replace('__GUEST_NAME__', $GuestVmName).Replace('__ACTION__', $Action)
+    $guestScript = $guestScript.Replace('__GUEST_NAME__', $GuestVmName).Replace('__ACTION__', $Action).Replace('__ALLOW_ABSENT__', $(if ($AllowAbsent) { 'true' } else { 'false' }))
     Invoke-DemoGuestCommand -Machine $ParentMachine -Script $guestScript -AsJob:$AsJob -TimeoutSeconds $TimeoutSeconds
 }
 
@@ -646,6 +858,108 @@ function Get-DemoNetworkState {
     )
     if ($conflicts -and -not $ForHibernation) { throw ($conflicts -join ' ') }
     [pscustomobject]@{ Subnet = $subnet; Nat = $nat; PublicIp = $pip; NatId = $natId; PublicIpId = $pipId; SafeToRemove = -not $conflicts; ConflictMessage = $conflicts -join ' ' }
+}
+
+function Get-DemoRevisionSummary {
+    <#
+    .SYNOPSIS
+        The active revision names of one Container App, or a short reason when they cannot be read. Read-only.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InfraRg, [Parameter(Mandatory)][string]$Name)
+    try {
+        $active = @(@(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $InfraRg, '-n', $Name, '-o', 'json') | ConvertFrom-Json) |
+            Where-Object { $_.properties.active } | ForEach-Object { $_.name })
+        [pscustomobject]@{ Readable = $true; Active = $active; Message = '' }
+    } catch { [pscustomobject]@{ Readable = $false; Active = @(); Message = $_.Exception.Message } }
+}
+
+function Get-DemoParkPreview {
+    <#
+    .SYNOPSIS
+        One line per workload that Hibernate would park, for its -WhatIf preview.
+    .DESCRIPTION
+        Read-only: the only call it makes is listing each Container App's revisions. The lines come from the inventory
+        and network state the script has already read, so the preview says what a real run would do to this estate
+        instead of one generic sentence.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Inventory, [AllowNull()]$NestedSqlGuest, [AllowNull()]$Network)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $parked = @('VM deallocated', 'VM deallocating')
+    $machines = @($Inventory.Machines)
+    if ($NestedSqlGuest) {
+        $parent = $machines | Where-Object { $_.Name -ceq $NestedSqlGuest.ParentVmName } | Select-Object -First 1
+        $state = if ($parent -and $parent.Actual) { [string]$parent.Actual.powerState } else { 'unreadable' }
+        $lines.Add($(if ($state -eq 'VM running') {
+            "Nested SQL guest $($NestedSqlGuest.GuestVmName): stopped gracefully first, through Run Command on its parent $($NestedSqlGuest.ParentVmName) (up to 15 minutes)."
+        } else { "Nested SQL guest $($NestedSqlGuest.GuestVmName): no stop command, its parent $($NestedSqlGuest.ParentVmName) is $state." }))
+    }
+    foreach ($machine in $machines) {
+        $state = if ($machine.Actual.powerState) { [string]$machine.Actual.powerState } else { 'power state unknown' }
+        $lines.Add($(if ($machine.Actual.powerState -in $parked) { "VM $($machine.Name): $state, already parked." } else { "VM $($machine.Name): $state -> deallocate (submitted without waiting)." }))
+    }
+    foreach ($id in @($Inventory.AksClusterIds)) { $lines.Add("AKS $(($id -split '/')[-1]): stopped if it is running.") }
+    foreach ($id in @($Inventory.ContainerAppIds)) {
+        $name = ($id -split '/')[-1]
+        $summary = Get-DemoRevisionSummary -InfraRg $Inventory.InfraRg -Name $name
+        $lines.Add($(if (-not $summary.Readable) { "Container App ${name}: revisions could not be read ($($summary.Message))." }
+            elseif ($summary.Active.Count) { "Container App ${name}: active revision(s) $($summary.Active -join ', ') -> deactivate." }
+            else { "Container App ${name}: no active revision, nothing to deactivate." }))
+    }
+    if (-not $Network) { $lines.Add('Network: not inspected.') }
+    elseif (-not $Network.SafeToRemove) { $lines.Add("Network: left alone ($($Network.ConflictMessage)) NAT/PIP costs may remain.") }
+    else {
+        $names = @(
+            if ($Network.Subnet.natGateway.id -eq $Network.NatId) { 'the subnet association' }
+            if ($Network.Nat) { "NAT gateway $(($Network.NatId -split '/')[-1])" }
+            if ($Network.PublicIp) { "public IP $(($Network.PublicIpId -split '/')[-1])" })
+        $lines.Add($(if ($names.Count) { "Network: after compute has stopped, removed in this order: $($names -join ', ')." } else { 'Network: no NAT association, NAT gateway or public IP to remove.' }))
+    }
+    $lines.Add('Then: the Hibernated readiness check runs, and every required cost-state row must pass.')
+    $lines.ToArray()
+}
+
+function Get-DemoWakePreview {
+    <#
+    .SYNOPSIS
+        One line per step that Activate would take, for its -WhatIf preview.
+    .DESCRIPTION
+        Read-only: the only call it makes is listing each Container App's revisions. Nothing is started, created or tagged.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Inventory, [AllowNull()]$NestedSqlGuest, [AllowNull()]$Network, [int]$GuestCheckMinutes = 12)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($Network) {
+        $pipName = ($Network.PublicIpId -split '/')[-1]
+        $natName = ($Network.NatId -split '/')[-1]
+        $lines.Add($(if ($Network.PublicIp) { "Public IP ${pipName}: present." } else { "Public IP ${pipName}: absent -> created (Standard, static) before any VM starts." }))
+        $lines.Add($(if ($Network.Nat) { "NAT gateway ${natName}: present." } else { "NAT gateway ${natName}: absent -> created with that public IP." }))
+        $lines.Add($(if ($Network.Subnet.natGateway.id -eq $Network.NatId) { 'Subnet snet-vms: already attached to the NAT gateway.' } else { 'Subnet snet-vms: attached to the NAT gateway.' }))
+        $lines.Add('The NAT gateway and public IP carry the lab tags (owner, purpose, costcenter, env and the skin''s own).')
+    } else { $lines.Add('Network: not inspected.') }
+    foreach ($machine in @($Inventory.Machines)) {
+        $state = [string]$machine.Actual.powerState
+        $lines.Add($(switch ($state) {
+            'VM running' { "VM $($machine.Name): running, left alone." }
+            'VM starting' { "VM $($machine.Name): already starting, waited for." }
+            default { "VM $($machine.Name): $(if ($state) { $state } else { 'power state unknown' }) -> start." }
+        }))
+    }
+    foreach ($machine in @($Inventory.ParkedMachines | Where-Object { $_ })) { $lines.Add("VM $($machine.Name): kept deallocated (operations.keepParkedVmNames); never started.") }
+    if ($NestedSqlGuest) {
+        $lines.Add("Nested SQL guest $($NestedSqlGuest.GuestVmName): started through Run Command on its parent $($NestedSqlGuest.ParentVmName) as a concurrent job (5-minute budget), then its Arc connection is awaited.")
+    }
+    foreach ($id in @($Inventory.AksClusterIds)) { $lines.Add("AKS $(($id -split '/')[-1]): started if it is stopped.") }
+    foreach ($id in @($Inventory.ContainerAppIds)) {
+        $name = ($id -split '/')[-1]
+        $summary = Get-DemoRevisionSummary -InfraRg $Inventory.InfraRg -Name $name
+        $lines.Add($(if (-not $summary.Readable) { "Container App ${name}: revisions could not be read ($($summary.Message))." }
+            elseif ($summary.Active.Count) { "Container App ${name}: active revision(s) $($summary.Active -join ', ') left alone; no fault reset." }
+            else { "Container App ${name}: no active revision -> its latest revision is activated; no fault reset." }))
+    }
+    $lines.Add("Then one shared wait of up to $GuestCheckMinutes minutes for every host: VM running, Arc Connected and, for monitored hosts, a Heartbeat after the start.")
+    $lines.ToArray()
 }
 
 function Get-DemoRemovalChecks {
@@ -696,7 +1010,11 @@ function Assert-DemoOsDiskStorageAccountType {
         $observed = Invoke-DemoAz -Arguments @('disk', 'show', '--ids', $diskId, '--query', 'sku.name', '-o', 'tsv')
         if ([string]::IsNullOrWhiteSpace($observed)) { throw "OS disk tier unreadable for $($machine.name); inspect the retained disk before deployment." }
         if ($observed.Trim() -ne $StorageAccountType) {
-            throw "OS disk tier mismatch on $($machine.name): existing $($observed.Trim()), requested $StorageAccountType. Preserve the existing tier with -OsDiskStorageAccountType or compute.osDiskStorageAccountType. Disk conversion requires a separately approved stop/deallocate/restart window; deployment will not perform it."
+            $tier = $observed.Trim()
+            $declare = if ($tier -in @('Standard_LRS', 'StandardSSD_LRS')) {
+                "To keep the disk as it is, declare what exists: set compute.osDiskStorageAccountType to $tier in the private skin (or pass -OsDiskStorageAccountType $tier) and, when a nested SQL parent is configured, nestedSqlGuest.parentDataDiskStorageAccountType to the tier of its data disk."
+            } else { "Deploy can only declare Standard_LRS or StandardSSD_LRS, so a $tier disk needs a separate decision." }
+            throw "OS disk tier mismatch on $($machine.name): the disk is $tier and this run requests $StorageAccountType. Deploy never converts a disk. $declare A tenant governance automation can convert a parked estate's disks to Standard HDD on its own (docs/troubleshooting.md, 'The OS disk tier changed by itself'). Converting a disk back is a separately approved stop/deallocate/restart window."
         }
     }
 }
@@ -883,11 +1201,12 @@ function Receive-DemoJobs {
     )
     try {
         $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-        do {
+        # Say what is awaited only when something is: a job that has already finished must not print a 15-minute budget.
+        while (@($Jobs | Where-Object State -in @('NotStarted', 'Running')).Count -and (Get-Date) -lt $deadline) {
             $remaining = [Math]::Max(0, [int]($deadline - (Get-Date)).TotalSeconds)
-            Write-Step "Waiting for guest/extension jobs: $($Jobs.Name -join ', ') ($remaining s remaining)"
-            $Jobs | Wait-Job -Timeout ([Math]::Min(15, $remaining)) | Out-Null
-        } while (@($Jobs | Where-Object State -in @('NotStarted', 'Running')).Count -and (Get-Date) -lt $deadline)
+            Write-Step "Waiting for guest/extension jobs: $(@($Jobs | Where-Object State -in @('NotStarted', 'Running')).Name -join ', ') ($remaining s remaining)"
+            $Jobs | Wait-Job -Timeout ([Math]::Min(15, [Math]::Max(1, $remaining))) | Out-Null
+        }
         foreach ($job in $Jobs) {
             if ($job.State -ne 'Completed') { throw "Job $($job.Name) did not complete: $($job.State). Inspect the target resource before retrying." }
             $output = Receive-Job $job -ErrorAction Stop
@@ -897,6 +1216,24 @@ function Receive-DemoJobs {
     } finally {
         $Jobs | Where-Object State -eq 'Running' | Stop-Job
         $Jobs | Remove-Job -Force
+    }
+}
+
+function Wait-DemoJobs {
+    <#
+    .SYNOPSIS
+        Waits for already-submitted jobs until they finish or the deadline passes, naming every job still pending in each
+        progress line. It neither receives nor removes them: Invoke-DemoGuestCommand -Job and Receive-DemoJobs do that.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]]$Jobs, [ValidateRange(0, 7200)][int]$TimeoutSeconds = 900)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $pending = @($Jobs | Where-Object State -in @('NotStarted', 'Running'))
+        if (-not $pending.Count -or (Get-Date) -ge $deadline) { return }
+        $remaining = [Math]::Max(0, [int]($deadline - (Get-Date)).TotalSeconds)
+        Write-Step "Waiting for guest/extension jobs: $($pending.Name -join ', ') ($remaining s remaining)"
+        $pending | Wait-Job -Timeout ([Math]::Min(15, [Math]::Max(1, $remaining))) | Out-Null
     }
 }
 
@@ -986,6 +1323,33 @@ function Get-DemoFleetWithNestedParent {
     }
 }
 
+function Get-DemoFleetWithoutRetainedSecurityType {
+    <#
+    .SYNOPSIS
+        Omits securityType from fleet entries whose VM already exists. Compute fixes the
+        security type when a VM is created and rejects a redeploy that sends it again
+        (PropertyChangeNotAllowed), so only a VM that is being created declares it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Fleet,
+        [AllowEmptyCollection()][string[]]$ExistingVmName = @()
+    )
+    foreach ($entry in $Fleet) {
+        $isTable = $entry -is [System.Collections.IDictionary]
+        $name = if ($isTable) { $entry['name'] } else { $entry.name }
+        $declaresType = if ($isTable) { $entry.Contains('securityType') } else { $null -ne $entry.PSObject.Properties['securityType'] }
+        if (-not $declaresType -or [string]$name -notin $ExistingVmName) {
+            $entry
+            continue
+        }
+        $kept = [ordered]@{}
+        if ($isTable) { foreach ($key in $entry.Keys) { if ($key -ne 'securityType') { $kept[$key] = $entry[$key] } } }
+        else { foreach ($property in $entry.PSObject.Properties) { if ($property.Name -ne 'securityType') { $kept[$property.Name] = $property.Value } } }
+        [pscustomobject]$kept
+    }
+}
+
 function Assert-DemoRetainedVmShape {
     <#
     .SYNOPSIS
@@ -1016,8 +1380,17 @@ function Assert-DemoRetainedVmShape {
             }
             $wantedType = if ($match.storageAccountType) { [string]$match.storageAccountType } else { 'StandardSSD_LRS' }
             $actualType = [string]$disk.managedDisk.storageAccountType
-            if ([int]$disk.lun -ne [int]$match.lun -or ($disk.diskSizeGb -and [int64]$disk.diskSizeGb -ne [int64]$match.sizeGb) -or ($actualType -and $actualType -ne $wantedType)) {
-                throw "Data disk $($disk.name) on $($machine.name) differs from its declaration (existing lun $($disk.lun), $($disk.diskSizeGb) GiB, $actualType). Deployment never resizes, converts or moves a retained data disk; declare the existing values."
+            $actualSize = $disk.diskSizeGb
+            $diskId = [string]$disk.managedDisk.id
+            if ((-not $actualType -or -not $actualSize) -and $diskId) {
+                # A deallocated VM's model reports neither the size nor the tier of its disks; the disk resource always does.
+                $resource = Invoke-DemoAz -Arguments @('disk', 'show', '--ids', $diskId, '-o', 'json') | ConvertFrom-Json
+                if (-not $actualType) { $actualType = [string]$resource.sku.name }
+                if (-not $actualSize) { $actualSize = $resource.diskSizeGb }
+            }
+            if ([int]$disk.lun -ne [int]$match.lun -or ($actualSize -and [int64]$actualSize -ne [int64]$match.sizeGb) -or ($actualType -and $actualType -ne $wantedType)) {
+                $governance = if ($actualType -and $actualType -ne $wantedType) { " A tenant governance automation can convert a parked estate's disks to Standard HDD on its own (docs/troubleshooting.md, 'The OS disk tier changed by itself')." } else { '' }
+                throw "Data disk $($disk.name) on $($machine.name) differs from its declaration (existing lun $($disk.lun), $actualSize GiB, $actualType). Deployment never resizes, converts or moves a retained data disk; declare the existing values: nestedSqlGuest.parentDataDiskGb and parentDataDiskStorageAccountType for the nested SQL parent, or the fleet entry's dataDisks lun, sizeGb and storageAccountType for another VM.$governance"
             }
         }
     }
@@ -1075,6 +1448,7 @@ function Test-DemoComputeCapacity {
     )
     if ($PSCmdlet.ParameterSetName -eq 'Single') { $Requirements = @([pscustomobject]@{ VmSize = $VmSize; VmCount = $AdditionalVmCount }) }
     # One listing covers every size: the CLI downloads the whole regional SKU list however the result is filtered.
+    Write-Step "Checking SKU restrictions and vCPU quota in $Location. The CLI downloads the whole regional SKU list, so this takes about 4 minutes and creates nothing."
     $skuList = @(Invoke-DemoAz -Arguments @('vm', 'list-skus', '-l', $Location, '--resource-type', 'virtualMachines', '--all', '-o', 'json') | ConvertFrom-Json)
     $demand = foreach ($size in $Requirements | Group-Object { ([string]$_.VmSize).Trim() }) {
         if (-not $size.Name) { throw 'Every capacity requirement needs a VM size.' }
@@ -1105,6 +1479,111 @@ function Test-DemoComputeCapacity {
         Write-Ok "$($check.Name) vCPU quota: $used in use + $needed needed of $limit"
     }
     Write-Warn 'SKU restrictions and vCPU quota passed. This does not prove physical capacity; ARM what-if/validation is not an allocation guarantee.'
+}
+
+function Get-DemoDeploymentState {
+    <#
+    .SYNOPSIS
+        Reads one subscription deployment's provisioning state and error; $null when it does not exist.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    $raw = Invoke-DemoAz -Arguments @('deployment', 'sub', 'show', '--name', $Name, '--query', '{state:properties.provisioningState,error:properties.error}', '-o', 'json') -AllowNotFound
+    $text = (@($raw) -join "`n").Trim()
+    if (-not $text) { return $null }
+    $text | ConvertFrom-Json
+}
+
+function Invoke-DemoSubscriptionDeployment {
+    <#
+    .SYNOPSIS
+        Starts a subscription-scope deployment, then polls it with progress until it finishes.
+    .DESCRIPTION
+        One synchronous az deployment sub create held a single CLI call open for the whole build (17 to 54 minutes
+        in practice): a client-side connection reset ended it with nothing to resume from, and a slow module (a VM
+        waiting behind a vendor extension update, a Container Apps environment) left the console silent for tens
+        of minutes. This submits with --no-wait, which returns as soon as Azure Resource Manager has accepted the
+        request, then polls the deployment's own state. It prints which modules are still running when that
+        changes (and every five minutes), tolerates a few failed reads, and gives up at -TimeoutMinutes without
+        stopping the deployment in Azure. A transient client error while submitting is checked against Azure
+        before anything is submitted again. -RemoveParametersFileWhenAccepted deletes the parameters file as soon
+        as the request is accepted: it holds the VM admin password in plain text. Failed and Canceled throw the
+        deployment's error text, so capacity guidance can still match it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory)][string]$TemplateFile,
+        [Parameter(Mandatory)][string]$ParametersFile,
+        [switch]$RemoveParametersFileWhenAccepted,
+        [ValidateRange(1, 1440)][int]$TimeoutMinutes = 240,
+        [ValidateRange(1, 300)][int]$PollSeconds = 30
+    )
+    $transient = 'Connection (reset|aborted)|ConnectionReset|timed out|timeout|temporarily unavailable|ServiceUnavailable|TooManyRequests|Too Many Requests|\b50[234]\b|connection was closed|error occurred while sending'
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-DemoAz -Arguments @('deployment', 'sub', 'create', '--name', $Name, '--location', $Location, '--template-file', $TemplateFile,
+                '--parameters', "@$ParametersFile", '--no-wait', '--only-show-errors', '-o', 'none') | Out-Null
+            break
+        } catch {
+            $submitFailure = $_
+            # A reset can arrive after Azure accepted the request: look before submitting a second deployment.
+            $accepted = $false
+            try { $accepted = $null -ne (Get-DemoDeploymentState -Name $Name) } catch { Write-Verbose "Could not check whether $Name was accepted: $($_.Exception.Message)" }
+            if ($accepted) { Write-Warn "Submitting deployment $Name reported an error after Azure had accepted it; following the accepted deployment."; break }
+            if ($submitFailure.Exception.Message -notmatch $transient -or $attempt -ge 3) { throw $submitFailure }
+            Write-Warn "Submitting deployment $Name failed with a transient client error and Azure has no record of it, so nothing was created. Retrying in 15 seconds (attempt $attempt of 3)."
+            Start-Sleep -Seconds 15
+        }
+    }
+    if ($RemoveParametersFileWhenAccepted) { [System.IO.File]::Delete($ParametersFile) }
+    Write-Step "Deployment $Name accepted by Azure; polling every $PollSeconds seconds (a Container Apps environment or a vendor extension update on a VM can take 20 to 40 minutes)."
+    $started = Get-Date
+    $deadline = $started.AddMinutes($TimeoutMinutes)
+    $readFailures = 0
+    $missing = 0
+    $lastActive = $null
+    $lastPrinted = $started
+    while ($true) {
+        $state = $null
+        try {
+            $state = Get-DemoDeploymentState -Name $Name
+            $readFailures = 0
+        } catch {
+            if (++$readFailures -ge 5) {
+                throw "Could not read deployment $Name after $readFailures attempts: $($_.Exception.Message) Azure keeps running it; check it with: az deployment sub show --name $Name --query properties.provisioningState -o tsv"
+            }
+            Write-Warn "Reading deployment $Name failed ($readFailures of 5); retrying: $($_.Exception.Message)"
+            Start-Sleep -Seconds $PollSeconds
+            continue
+        }
+        $minutes = [int]((Get-Date) - $started).TotalMinutes
+        if ($null -eq $state) {
+            if (++$missing -ge 3) { throw "Deployment $Name is not visible in Azure after it was accepted; inspect it with: az deployment sub show --name $Name" }
+        } else {
+            $missing = 0
+            if ($state.state -eq 'Succeeded') { Write-Ok "Deployment $Name succeeded after $minutes min"; return }
+            if ($state.state -in @('Failed', 'Canceled')) {
+                throw "Deployment $Name $($state.state) after $minutes min: $(ConvertTo-Json -InputObject $state.error -Depth 12 -Compress)"
+            }
+            $active = @()
+            try {
+                $active = @(Invoke-DemoAz -Arguments @('deployment', 'operation', 'sub', 'list', '--name', $Name, '--query',
+                    "[?properties.provisioningState=='Running'].properties.targetResource.resourceName", '-o', 'json') | ConvertFrom-Json | Where-Object { $_ } | Sort-Object)
+            } catch { Write-Verbose "Could not list the running modules of ${Name}: $($_.Exception.Message)" }
+            $label = $active -join ', '
+            if ($label -ne $lastActive -or ((Get-Date) - $lastPrinted).TotalMinutes -ge 5) {
+                Write-Step "Deployment $Name is $($state.state) after $minutes min$(if ($label) { "; still running: $label" })"
+                $lastActive = $label
+                $lastPrinted = Get-Date
+            }
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw "Deployment $Name is still $($state.state) after $TimeoutMinutes minutes. Azure keeps running it. Do not start another: wait until 'az deployment sub show --name $Name --query properties.provisioningState -o tsv' reads Succeeded or Failed, then rerun the same command (it resumes; see docs/troubleshooting.md)."
+        }
+        Start-Sleep -Seconds $PollSeconds
+    }
 }
 
 function Get-DemoAllocationGuidance {
@@ -1176,15 +1655,20 @@ function New-DemoCheck {
 }
 
 function Get-DemoHeartbeatIds {
+    <#
+    .SYNOPSIS
+        The resources with a Heartbeat in the last 10 minutes: one object per exact lower-cased _ResourceId, with the
+        UTC time of its latest Heartbeat so that evidence can show how fresh it is.
+    #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$WorkspaceCustomerId)
     $token = Get-LawQueryToken
     $response = Invoke-RestMethod -Method Post -TimeoutSec 60 `
         -Uri "https://api.loganalytics.io/v1/workspaces/$WorkspaceCustomerId/query" `
         -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' `
-        -Body (@{ query = 'Heartbeat | where TimeGenerated > ago(10m) | distinct tolower(_ResourceId)' } | ConvertTo-Json)
+        -Body (@{ query = 'Heartbeat | where TimeGenerated > ago(10m) | summarize LastHeartbeat = max(TimeGenerated) by ResourceId = tolower(_ResourceId)' } | ConvertTo-Json)
     if ($response.error) { throw "Log Analytics returned a query error: $($response.error.code)" }
-    return @($response.tables[0].rows | ForEach-Object { [string]$_[0] })
+    return @($response.tables[0].rows | ForEach-Object { [pscustomobject]@{ Id = [string]$_[0]; LastHeartbeat = (ConvertTo-DemoUtc $_[1]) } })
 }
 
 function Get-DemoReadinessChecks {
@@ -1210,7 +1694,7 @@ function Get-DemoReadinessChecks {
         $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $Inventory.InfraRg, '-n', $name, '-o', 'json') | ConvertFrom-Json)
         $active = @($revisions | Where-Object { $_.properties.active })
         $healthy = @($active | Where-Object { $_.properties.healthState -eq 'Healthy' -and $_.properties.runningState -in @('Running', 'RunningAtMaxScale', 'RunningAtMinScale') })
-        New-DemoCheck "containerapp/$name" $id $(if ($parked) { 'no active revisions' } else { 'healthy active revision' }) @($active.name) $(if (($parked -and $active.Count -eq 0) -or (-not $parked -and $healthy.Count -gt 0)) { 'pass' } else { 'pending' })
+        New-DemoCheck "containerapp/$name" $id $(if ($parked) { 'no active revisions' } else { 'healthy active revision' }) @($active | ForEach-Object { $_.name }) $(if (($parked -and $active.Count -eq 0) -or (-not $parked -and $healthy.Count -gt 0)) { 'pass' } else { 'pending' })
     }
     $network = Get-DemoNetworkState -InfraRg $Inventory.InfraRg -NamePrefix $NamePrefix -ForHibernation:$parked
     foreach ($id in $network.NatId, $network.PublicIpId) {
@@ -1240,10 +1724,13 @@ function Get-DemoReadinessChecks {
     $workbooks = @($arcResources | Where-Object { $_.type -eq 'Microsoft.Insights/workbooks' })
     New-DemoCheck 'workbook' "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/workbooks" 'at least one workbook' $workbooks.Count $(if ($workbooks) { 'pass' } else { 'fail' })
     $arcMachines = @(Invoke-DemoAz -Arguments @('connectedmachine', 'list', '-g', $Inventory.ArcRg, '-o', 'json') | ConvertFrom-Json)
-    $heartbeatIds = @()
+    $heartbeats = @{}
     if (@($Inventory.Machines | Where-Object Monitor).Count -gt 0) {
         $workspace = Invoke-DemoAz -Arguments @('monitor', 'log-analytics', 'workspace', 'show', '--ids', $workspaceId, '-o', 'json') | ConvertFrom-Json
-        $heartbeatIds = @(Get-DemoHeartbeatIds -WorkspaceCustomerId $workspace.customerId)
+        foreach ($entry in @(Get-DemoHeartbeatIds -WorkspaceCustomerId $workspace.customerId)) {
+            if ($entry -is [string]) { $heartbeats[$entry.ToLowerInvariant()] = $null }
+            else { $heartbeats[([string]$entry.Id).ToLowerInvariant()] = $entry.LastHeartbeat }
+        }
     }
     foreach ($machine in $Inventory.Machines) {
         $actual = $machine.Actual
@@ -1251,9 +1738,26 @@ function Get-DemoReadinessChecks {
         if (-not $machine.Native) {
             $arc = $arcMachines | Where-Object { $_.id -eq $machine.ArcId } | Select-Object -First 1
             New-DemoCheck "arc/$($machine.Name)" $machine.ArcId 'Connected' $arc.status $(if (-not $arc) { 'fail' } elseif ($arc.status -eq 'Connected') { 'pass' } else { 'pending' })
+            if ($arc -and $machine.Role -and $machine.OsTier) {
+                # The workbooks group and filter on these two tags; a host that is Connected but mistagged is not ready to present.
+                $tagMap = ConvertTo-DemoTagMap $arc.tags
+                $found = foreach ($tagName in 'role', 'osTier') { "$tagName=$(if ($tagMap.ContainsKey($tagName)) { $tagMap[$tagName] } else { '(missing)' })" }
+                $expectedTags = "role=$($machine.Role), osTier=$($machine.OsTier)"
+                $observedTags = $found -join ', '
+                $tagsOk = $observedTags -ceq $expectedTags
+                New-DemoCheck "tags/$($machine.Name)" $machine.ArcId $expectedTags $observedTags $(if ($tagsOk) { 'pass' } else { 'fail' }) `
+                    -Message $(if ($tagsOk) { '' } else { 'The role/osTier tags the workbooks filter on are missing or wrong. Deploy merges them through the ARM tags API and skips a host that already matches; see docs/troubleshooting.md, Arc machine tags are missing or one tag holds the rest.' })
+            }
         }
         $scope = if ($machine.Native) { $machine.Id } else { $machine.ArcId }
         $extensionScope = if ($machine.Native -or $machine.OsType -eq 'Linux') { $machine.Id } else { $machine.ArcId }
+        $provisioning = if ($actual) { [string]$actual.provisioningState }
+        if ($provisioning) {
+            # Soft: a Linux VM can sit Updating for about 90 minutes behind a Defender MDE.Linux install lock while the guest is healthy.
+            $provisioningStatus = if ($provisioning -eq 'Succeeded') { 'pass' } elseif ($provisioning -eq 'Failed') { 'fail' } else { 'pending' }
+            New-DemoCheck "provisioning/$($machine.Name)" $machine.Id 'Succeeded' $provisioning $provisioningStatus -Required $false `
+                -Message $(if ($provisioningStatus -eq 'pass') { '' } else { "ARM provisioning state $provisioning. Soft warning, not a readiness gate: a Linux VM can stay Updating for about 90 minutes behind a Defender MDE.Linux install lock while the guest is healthy and its Heartbeat is fresh. See docs/troubleshooting.md, A Linux VM stays Updating behind a Defender MDE.Linux install lock." })
+        }
         $extensions = @()
         if ($machine.Monitor -and $actual) {
             $extensions = if ($machine.Native -or $machine.OsType -eq 'Linux') {
@@ -1266,9 +1770,14 @@ function Get-DemoReadinessChecks {
         $amaExtension = $extensions | Where-Object name -eq $amaName | Select-Object -First 1
         $amaState = if ($amaExtension.provisioningState) { $amaExtension.provisioningState } else { $amaExtension.properties.provisioningState }
         if ($machine.Monitor) {
-            $seen = $scope.ToLowerInvariant() -in $heartbeatIds
+            $beatKey = $scope.ToLowerInvariant()
+            $seen = $heartbeats.ContainsKey($beatKey)
+            $lastBeat = if ($seen) { $heartbeats[$beatKey] }
+            $observedBeat = if (-not $seen) { 'no Heartbeat in the last 10 minutes' }
+                elseif ($lastBeat) { "Heartbeat at $($lastBeat.ToString('yyyy-MM-ddTHH:mm:ssZ')), $([int][Math]::Max(0, ((Get-Date).ToUniversalTime() - $lastBeat).TotalMinutes)) min before this check" }
+                else { 'Heartbeat in the last 10 minutes' }
             $amaFailed = -not $seen -and $amaState -eq 'Failed'
-            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'Heartbeat within 10 minutes by _ResourceId' $seen $(if ($seen) { 'pass' } elseif ($amaFailed) { 'fail' } else { 'pending' }) `
+            New-DemoCheck "heartbeat/$($machine.Name)" $scope 'Heartbeat within 10 minutes by _ResourceId' $observedBeat $(if ($seen) { 'pass' } elseif ($amaFailed) { 'fail' } else { 'pending' }) `
                 -Message $(if ($amaFailed) { 'No recent Heartbeat and the AMA extension is Failed: a real failure, not telemetry lag.' } else { '' })
         } else {
             New-DemoCheck "heartbeat/$($machine.Name)" $scope 'unsupported host' $null 'skipped' $false
@@ -1285,6 +1794,9 @@ function Get-DemoReadinessChecks {
         $extensionNames = @($amaName)
         if ($machine.VmInsights) { $extensionNames += 'DependencyAgentWindows' }
         if ($machine.ChangeTracking) { $extensionNames += "ChangeTracking-$($machine.OsType)" }
+        # Defender for Servers installs MDE itself, so its row exists only when the extension does; its state is as soft as the others.
+        $mdeName = if ($machine.OsType -eq 'Windows') { 'MDE.Windows' } else { 'MDE.Linux' }
+        if (@($extensions | Where-Object name -eq $mdeName).Count) { $extensionNames += $mdeName }
         # Extension provisioning is a soft diagnostic. Only the heartbeat row can gate readiness.
         $connectedMinutes = if ($arc.status -eq 'Connected' -and $arc.lastStatusChange) {
             [int][Math]::Max(0, ((Get-Date).ToUniversalTime() - (ConvertTo-DemoUtc $arc.lastStatusChange)).TotalMinutes)
@@ -1902,6 +2414,48 @@ function Invoke-DemoOnboardingCredential {
     $result
 }
 
+function Remove-DemoCreationCredential {
+    <#
+    .SYNOPSIS
+        Removes the one-year credential that az ad sp create-for-rbac adds when it creates the onboarding service principal.
+    .DESCRIPTION
+        Only a credential that was absent before the creation and is named rbac is removed, by its exact key ID, and the
+        credentials that were there before are verified unchanged. A new credential with another name is left alone and
+        reported. Throws, naming the manual command, when a removal or the verification fails.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][guid]$ApplicationId, [string[]]$BaselineKeyId = @())
+    $appRoute = "applications%28appId%3D%27$ApplicationId%27%29"
+    $appUrl = "https://graph.microsoft.com/v1.0/$appRoute`?%24select=id,appId,passwordCredentials"
+    $baseline = @($BaselineKeyId | Where-Object { $_ } | ForEach-Object { "$_".ToLowerInvariant() } | Sort-Object -Unique)
+    $application = Get-DemoGraphApplication -Url $appUrl -ApplicationId $ApplicationId
+    $added = @($application.passwordCredentials | Where-Object { "$($_.keyId)".ToLowerInvariant() -notin $baseline })
+    $creation = @($added | Where-Object { $_.displayName -eq 'rbac' })
+    $others = @($added | Where-Object { $_.displayName -ne 'rbac' })
+    if ($others.Count) {
+        Write-Warn "The onboarding application has $($others.Count) credential(s) that were not there before and are not named rbac; they are left alone: $(($others | ForEach-Object { "$($_.displayName) ($($_.keyId))" }) -join ', ')."
+    }
+    foreach ($credential in $creation) {
+        $keyId = "$($credential.keyId)".ToLowerInvariant()
+        try {
+            $null = Invoke-DemoGraphRequest -Method POST -Url "https://graph.microsoft.com/v1.0/$appRoute/removePassword" -Body @{ keyId = $keyId }
+        } catch {
+            throw "The one-year credential added when the onboarding application was created could not be removed ($($_.Exception.Message)). Remove it with: az ad app credential delete --id $ApplicationId --key-id $keyId"
+        }
+    }
+    if (-not $creation.Count) { return }
+    $expected = @($baseline + @($others | ForEach-Object { "$($_.keyId)".ToLowerInvariant() }) | Sort-Object -Unique)
+    $deadline = [datetime]::UtcNow.AddSeconds(90)
+    do {
+        $remaining = @(Get-DemoCredentialKeyIdSet (Get-DemoGraphApplication -Url $appUrl -ApplicationId $ApplicationId))
+        if (Test-DemoCredentialSet -Expected $expected -Actual $remaining) { return }
+        if ([datetime]::UtcNow -ge $deadline) {
+            throw "Could not verify that the one-year credential was removed and the original credentials were kept. Check the application's credentials; remove the key with: az ad app credential delete --id $ApplicationId --key-id $(($creation | ForEach-Object { $_.keyId }) -join ',')"
+        }
+        Start-Sleep -Seconds 5
+    } while ($true)
+}
+
 function Initialize-DemoOnboardingIdentity {
     <#
     .SYNOPSIS
@@ -1912,8 +2466,8 @@ function Initialize-DemoOnboardingIdentity {
         (which must already exist: a rebuild deletes the old assignment with the group), a one-day credential is
         minted through Graph, handed to -Action as a SecureString and removed in a finally block, and the original
         key IDs are verified unchanged. -ExistingSecret skips minting and passes the supplied secret through.
-        No service principal: it is created with the role at the group, as before, and its initial secret is handed
-        to -Action; nothing is stored.
+        No service principal: it is created with the role at the group, as before, and the one-year credential that
+        creation adds is handed to -Action and then removed (only that credential, by key ID); nothing is stored.
         -Action receives the application ID (string) and the secret (SecureString).
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The secret returned by service principal creation is converted in memory before delivery.')]
@@ -1939,14 +2493,30 @@ function Initialize-DemoOnboardingIdentity {
         if ($found.Count -gt 1) { throw 'Ambiguous onboarding service principal name. Resolve duplicates before deployment.' }
         $principal = $found | Select-Object -First 1
         if (-not $principal) {
+            # create-for-rbac reuses an application of that name and adds a one-year credential either way. Note the keys that
+            # are already there so that only the credential it adds is removed once onboarding has used it.
+            $namedApps = @(Invoke-DemoAz -Arguments @('ad', 'app', 'list', '--display-name', $spName, '--query', "[?displayName=='$spName'].{appId:appId,keys:passwordCredentials[].keyId}", '-o', 'json') | ConvertFrom-Json)
+            if ($namedApps.Count -gt 1) { throw 'Ambiguous onboarding application name. Resolve duplicates before deployment.' }
+            $baselineKeys = @(if ($namedApps.Count) { @($namedApps[0].keys) | Where-Object { $_ } })
             $created = Invoke-DemoAz -Arguments @('ad', 'sp', 'create-for-rbac', '--name', $spName, '--role', $roleName, '--scopes', $scope, '--only-show-errors', '-o', 'json') | ConvertFrom-Json
             $createdAppId = [string]$created.appId
             $secret = ConvertTo-SecureString ([string]$created.password) -AsPlainText -Force
             $created = $null
-            Write-Ok "Onboarding service principal created ($createdAppId); its secret is not stored"
+            Write-Ok "Onboarding service principal created ($createdAppId); its secret is not stored and its one-year credential is removed after onboarding"
             Write-Step "Waiting $RolePropagationSeconds seconds for the new role assignment to propagate..."
             Start-Sleep -Seconds $RolePropagationSeconds
-            try { return (& $Action $createdAppId $secret) } finally { $secret.Dispose() }
+            $result = $null
+            $actionFailure = $null
+            try { $result = & $Action $createdAppId $secret } catch { $actionFailure = $_ } finally { $secret.Dispose() }
+            $cleanupFailure = $null
+            try { Remove-DemoCreationCredential -ApplicationId $createdAppId -BaselineKeyId $baselineKeys } catch { $cleanupFailure = $_ }
+            if ($cleanupFailure) {
+                $message = $cleanupFailure.Exception.Message
+                if ($actionFailure) { $message += " Failure: $($actionFailure.Exception.Message)" }
+                throw $message
+            }
+            if ($actionFailure) { throw $actionFailure }
+            return $result
         }
     } else {
         $principal = Invoke-DemoAz -Arguments @('ad', 'sp', 'show', '--id', "$ApplicationId", '--query', '{id:id,appId:appId}', '-o', 'json') | ConvertFrom-Json

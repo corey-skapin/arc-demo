@@ -24,7 +24,7 @@ actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
 | --- | --- |
 | `schemaVersion` | Numeric `1` |
 | `subscriptionId`, `tenantId` | The operator-confirmed runtime target |
-| `recordedAtUtc` | UTC timestamp of the context/evidence being saved, not the generation time |
+| `recordedAtUtc` | UTC timestamp of the context/evidence being saved, not the generation time. The build wrapper's P10 uses the `checkedAtUtc` of the last passing P7 readiness evidence (when the estate was last seen healthy), and the current time only when there is no such evidence |
 | `resourceGroups` | Object with actual `arc` and `infra` group names |
 | `workspaceResourceId`, `workbookResourceId` | Exact workspace and saved Estate Overview workbook IDs |
 | `windowsMachineResourceId`, `linuxMachineResourceId` | Exact monitored Arc machine IDs selected for the tour, not backing VM IDs |
@@ -40,6 +40,12 @@ actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
 | `assetInventoryWorkbookResourceId`, `sqlEstateWorkbookResourceId` (optional) | Exact IDs of the Asset Inventory and SQL Estate workbooks: the optional extra minute in the estate chapter and the database chapter. Without them the guide skips those steps and says so |
 | `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview or draft IDs. Adds optional links, not current-health or savings proof |
 | `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
+
+The ordered build wrapper's P10 captures these for you. It writes every field above that it can verify
+against Azure, including the data collection rule, the four original workbooks (found by their
+`workbookTag`) and the nested guest with its SQL instance and parent, and it prints and records the
+optional chapters it left out because the resource was not found. Fill in by hand only what it cannot
+know, such as the LOB alert rule.
 
 The assistant/operator writes the approved values once, then runs:
 
@@ -146,7 +152,11 @@ a foreign existing workbook is never adopted. No whole-lab deployment, IAM or
 repair is used. Workbooks survive parking with the workspace, contain no active
 jobs and disappear with the Arc group on approved normal removal. Existing
 lifecycle/readiness gates are unchanged. Re-publishing changed source or
-refreshing roster/topology requires new approval, not an incidental wake.
+refreshing roster/topology requires new approval, not an incidental wake. The roster
+and the Arc tags it shows are a snapshot taken when the workbook is published, so a
+later onboarding, tag repair or new host needs another publish. The ordered build
+wrapper publishes both workbooks once, after the guest exists (its P6), and that
+approval belongs with the build's other up-front approvals.
 The roster is bounded to 1-50 exact Arc IDs because every item query embeds it.
 Each workbook links to the other (a draft to the draft, a published workbook to the published one), so publish both
 for the links to resolve; the portal URL carries the confirmed tenant.
@@ -228,16 +238,16 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 
 | Step | What runs | Needs |
 | --- | --- | --- |
-| P0, P1 | Read-only preflight (tools, access, providers, repo state, soft-deleted workspace name, build window against the VM auto-shutdown) and onboarding-identity check | |
-| P2 | `Deploy-ArcDemo.ps1` with the private skin | `-ApproveCostStart` |
+| P0, P1 | Read-only preflight (tools, access, providers, repo state, soft-deleted workspace name, and the build window: the typical minutes plus a 50% allowance against the VM auto-shutdown, which Deploy sets again on every run, so set `autoShutdownTime` before the build if it would cross) and onboarding-identity check | |
+| P2 | `Deploy-ArcDemo.ps1` with the private skin. It saves the generated VM admin password to `vm-admin-credential.clixml` in the private folder before any Azure write, so a failed P2 reruns with the same password even when a tenant policy made the vault unreadable. Its last phase runs read-only Active readiness (up to 20 minutes for Heartbeats) **without** the nested guest's `nested/arc` row, because the guest is built later at P4; a failure names the rows that did not pass | `-ApproveCostStart` |
 | P3 | `Prepare-NestedSqlParent.ps1`: the Hyper-V parent for the nested guest. Runs after Deploy with the lab Active (it refuses a parked lab) and writes the nested build input into the private folder. A reported `status` of `pending` or `fail` is not recorded as done, and it is safe to re-run | `-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms` |
-| P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is requested at the start of `-Execute` (pass `-GuestCredential` to run unattended) and is never stored | |
-| P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status` | `-AcceptSqlDeveloperTerms` |
-| P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation) | |
-| P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes | |
+| P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is resolved at the start of `-Execute`: `-GuestCredential`, else `nested-guest-credential.clixml` in the [private folder](private-config.md#saving-the-nested-guest-credential), else a prompt. A session that cannot prompt stops there, before anything starts. The wrapper only reads it and keeps it out of the evidence. Each guest step prints when it starts and, about once a minute, that it is still running | |
+| P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status`. A fresh host often reports a routine pending file rename at `Install`: ask the owner for one graceful `az vm restart` of the SQL host up front, with the other approvals, and see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename) | `-AcceptSqlDeveloperTerms` |
+| P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation). The alert (P6.1) watches the SQL engine, so it needs P5.4's saved proof (`.local/sql-engine-status.json` with status `pass`): run on its own before P5 it is blocked rather than deploying an alert for an engine that does not exist, and inside one selection it runs after P5.4 and stops the same way if the proof is not `pass`. Each workbook records the Arc roster and tags at publish time, so a from-zero build publishes them once, here, after the guest exists, and a rerun after P2 or P4 finished later publishes them again (the plan says so). To refresh just the two workbooks later, for example after a tag repair or a new host, run `-Only P6.2, P6.3 -Force`: it leaves the SQL alert (P6.1) alone | |
+| P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes. This is the gate that includes the nested guest's `nested/arc` row (Deploy's own validation leaves it out) | |
 | P8 | Companion repo: LOB alert rule and LOB app | |
 | P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`; `-ApproveSubscriptionGrant` adds the opt-in alert-access grant |
-| P10 | Presenter context and guide for this repo (the SRE guide only if its context exists) | |
+| P10 | Presenter context and guide for this repo (the SRE guide only if its context exists). It stamps the context with the time of the last passing P7 readiness evidence, not the time P10 ran. It adds every optional chapter it can verify (the data collection rule, the four original workbooks found by their tag, the nested guest, its SQL instance and its parent) and prints and records the chapters it had to leave out because their resource was not found; build them, then run P10 again | |
 | P11 | `Export-ArcDemoInventory.ps1`, then `Test-ArcDemoParity.ps1` | |
 
 - The plan shows each step as `ready`, `done`, `skipped` (with the reason) or
@@ -257,7 +267,8 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
   failed, and need no approval; when the check cannot be read, they are `blocked`
   with the exact error. P9 therefore belongs after a confirmed removal; use
   `Initialize-SreConfiguration` for configuration-only changes to a running agent.
-- `-From`, `-To` and `-Only` take phase names; `-WhatIf` is the same as the plan;
+- `-From` and `-To` take phase names; `-Only` takes phases or single steps (`-Only P6.2, P6.3`);
+  `-WhatIf` is the same as the plan;
   pass `-Confirm:$false` for unattended runs. The plan's minutes are typical
   timings (about 3.5 hours end to end), not a promise. Billable resources start
   at P2; reprice with [cost.md](cost.md).
@@ -276,15 +287,34 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 
 The snapshot records names, types, sizes, power states, associations, alert and
 workbook definitions, policy/budget/Defender state, onboarding-credential
-metadata and the retained manifest's fleet. It never reads a secret. A denied or
+metadata, the Arc machines' tags and the retained manifest's fleet. It never reads a secret. A denied or
 failed read is recorded verbatim in its section and the script exits 1.
 Take one before a teardown and one after a rebuild.
 
 The parity check compares a snapshot (or a fresh read) with
 [`config/expected-inventory.json`](../config/expected-inventory.json) and the
-manifest's fleet, exiting 0 only when every check passes. Run it while the estate
+manifest's fleet, exiting 0 only when every check passes. That includes the `role` and
+`osTier` tags of each Arc machine against the manifest, when both sides recorded them,
+and the lab tags (owner, purpose, costcenter, env) on the NAT gateway and public IP that
+Activate recreates. Run it while the estate
 is Active (parked estates have no NAT gateway). Update the expected list in the
 same change that adds or removes a named object.
+
+`-SnapshotPath` accepts only a snapshot that `Export-ArcDemoInventory.ps1` wrote
+(`workload: arc-demo-inventory`, `schemaVersion: 1`); a snapshot from any other tool is
+rejected, so take the before/after pair with the export script above.
+
+The onboarding-application rows (`snapshot/onboardingApp`, `tenant/onboarding-app`,
+`tenant/no-residual-credentials`, `tenant/no-long-lived-credentials`) read Microsoft Graph.
+When Graph answers with a continuous access evaluation challenge
+(`TokenCreatedWithOutdatedPolicies`), the scripts retry the call once without the CAE
+capability; if that cannot clear it, those rows fail with the hint in their message while
+every Azure row passes. That is not an estate fault: set
+`$env:AZURE_IDENTITY_DISABLE_CP1 = '1'` in the shell, or `az logout` then
+`az login --tenant <TENANT>`, and run the parity check again
+([troubleshooting](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge)).
+Observed on 5 November 2026: 3 of 57 checks failed with the cached token and 57 of 57
+passed with the variable set, in 151 seconds.
 
 ## 1. Choose the target and skin
 
@@ -316,15 +346,21 @@ Relative fleet paths resolve against the repo root.
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 ```
 
-Preflight does not register providers, install CLI extensions or change context.
-It reports every unregistered provider and every missing CLI extension (`connectedmachine`,
-plus `containerapp` for Container Apps) in one error with the exact fix, for example
-`az extension add --name containerapp --yes`; resolve missing providers with
-separate operator authorization, using the exact providers reported
+Preflight does not register providers or subscription features, install CLI extensions or change context.
+It reports every unregistered provider, every unregistered subscription feature
+(`Microsoft.Compute/UseStandardSecurityType`, when the skin declares the nested SQL parent) and every
+missing CLI extension (`connectedmachine`, plus `containerapp` for Container Apps) in one error with
+the exact fix, for example `az extension add --name containerapp --yes` (that extension is
+preview-only today and takes about 2 minutes, so approving it approves a preview build); resolve missing providers
+and features with separate operator authorization, using the exact ones reported
 by preflight for the skin's workload toggles (`Test-Prerequisites.ps1`, Deploy and
 the build wrapper's P0 check the same set). Supplying
-`-DeployerPrincipalId <OBJECT_ID>` bypasses only Graph user discovery, not RBAC.
-SKU restriction and regional/family vCPU quota checks do not guarantee capacity. If Azure still
+`-DeployerPrincipalId <OBJECT_ID>` (your own; read it from your ARM token when Graph is blocked, see
+[the CAE entry](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge))
+bypasses only Graph user discovery, not RBAC.
+SKU restriction and regional/family vCPU quota are checked by Deploy's own first step, not by this
+preflight or the wrapper's P0: about 4 minutes, announced on the console, before anything is created.
+These checks do not guarantee capacity. If Azure still
 refuses allocation, Deploy prints the options and never switches VM size or
 region on its own; re-running the same command resumes.
 Review [cost assumptions](cost.md) before agreeing to a budget.
@@ -338,7 +374,10 @@ Review [cost assumptions](cost.md) before agreeing to a budget.
 Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
 Arc-enabled with `MSFT_ARC_TEST=true` for this demo-only simulation. SQL-capable
 hosts do not imply SQL Server is installed. Optional flags are independent:
-`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`.
+`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. Add a slow
+optional workload (the Container Apps environment alone takes 17-23 minutes and can fail on its
+own) as a second pass once the base Deploy has Succeeded, so a failure there cannot strand the base:
+[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
 For custom tiers, use `-OnPremFleetPath <fleet.json>`; see
 [legacy fleet support](legacy-os-fleet.md). Represented legacy hosts are not
 reported as deployed.
@@ -348,7 +387,13 @@ Real SQL setup is a separate approved operation using
 Deployment has no SQL installation switch; use the separate SQL build/workload helpers.
 
 Bicep provisions static resources in `rg-<prefix>` (Arc/Monitor) and
-`rg-<prefix>-infra` (backing/optional compute). The wrapper handles DCR table
+`rg-<prefix>-infra` (backing/optional compute). Deploy submits the deployment without
+blocking (`--no-wait`) and polls it every 30 seconds, printing which modules are still
+running whenever that changes (a Container Apps environment takes 17 to 23 minutes, a
+VM behind a vendor extension update can take much longer), so a lost client connection no
+longer ends the build and the console is never silent for tens of minutes. Polling gives up
+after 4 hours without stopping the deployment, and a rerun refuses to start while one is still
+Running. The wrapper handles DCR table
 readiness/retries, NAT, Arc onboarding, supported extensions/DCRAs and workbooks.
 Linux AMA and CT use VM extensions but Arc DCRAs. Windows VM Insights map is
 supported by the lab; Linux map remains disabled. Runtime errors stop deployment
@@ -365,8 +410,11 @@ the stale manifest and builds a fresh Key Vault; `Remove-ArcDemo.ps1
 Incremental optional-only deployments do not delete earlier Arc hosts.
 
 `Deploy-ArcDemo.ps1` does not regenerate VM credentials on a routine redeploy. Reuse the existing
-Key Vault secret; old labs without it must supply their **current**
-`-AdminPassword` as a SecureString. New Arc onboarding needs no supplied secret:
+Key Vault secret; old labs without it, and labs whose vault a tenant policy made private-only,
+must supply their **current** `-AdminPassword` as a SecureString or the file an earlier run saved
+with `-AdminPasswordPath` (a fresh build saves one before any Azure write, so a build that fails part way
+resumes with the same command; the wrapper always passes it, see
+[the private folder](private-config.md)). New Arc onboarding needs no supplied secret:
 Deploy ensures an existing SP's Arc-group role and uses a one-day credential it
 removes afterwards (see [credentials](lifecycle.md#credentials-and-partial-deployments));
 no routine SP credential reset. Resolve missing VM credentials with the
@@ -380,16 +428,25 @@ existing HDD lab requires `-OsDiskStorageAccountType Standard_LRS` or that value
 in its private skin. The wrapper refuses mismatches even during preview; it
 does not convert disks. Preserve the operator-chosen HDD tier and plan any
 migration separately before HDD OS support retirement. See [cost.md](cost.md).
+A governance automation can also convert a parked estate's disks to HDD on its
+own, so a Deploy that refuses the tier after a Hibernate is not a script fault:
+declare the tier the disks have now (and
+`nestedSqlGuest.parentDataDiskStorageAccountType` for the nested parent), see
+[the OS disk tier changed by itself](troubleshooting.md#the-os-disk-tier-changed-by-itself).
 
 ## 4. Validate, then rehearse
 
 ```powershell
-.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600
+$stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600 `
+  -OutputPath "<PRIVATE>\evidence\readiness-$stamp.json"
 $LASTEXITCODE
 ```
 
 Exit 0 means required infrastructure/monitor checks pass, 1 is fail/error, 2 is
-still pending. Save the timestamped JSON outside source. Check policy, Defender,
+still pending. `-OutputPath` writes the same JSON to a file (creating its folder) and
+leaves the exit code alone, so one run gives the timestamped evidence; it names the
+subscription and tenant, so keep it in the private folder, outside source. Check policy, Defender,
 Update Manager assessment completion, CT inventory and optional workload behavior
 in their own surfaces; a provisioned extension is not proof of telemetry or
 completed assessment. Policy scores and CT cycles may take substantially longer
@@ -422,13 +479,21 @@ It verifies deallocation/AKS stop/inactive revisions before safe NAT/PIP removal
 Foreign/shared bindings skip only networking with a loud residual-cost warning.
 Data, identities and fault flags remain. Failed compute attempts do not block
 attempts on other hosts/workloads; unknown/denied final power is not success.
+Hibernate prints a time-stamped line for each phase and takes the same optional
+`-ResultPath` as Activate (an existing private directory); allow about 7 minutes
+(observed 6 min 56 s and 7 min 16 s on eight VMs). The `-WhatIf` of Hibernate and of
+Activate lists what each workload would do instead of one generic line; Hibernate's
+takes about 80 seconds because it reads the full inventory first.
 Activation restores outbound NAT first, then starts retained workloads. Every run
 verifies the hosts, including already-connected ones, without restarting anything:
 one shared wait with a 12-minute global deadline (`-GuestCheckMinutes`) passes a host
 when its VM is running, Arc is `Connected` and, for a monitored host, a Heartbeat was
 generated after the VM start. No Run Command is used for host checks by default, so a
 VM extension update that is still `Updating` (a warning, never a gate) cannot stall the
-wake; expect about 12-15 minutes. A host with no Heartbeat at the deadline is pending
+wake; expect about 12-15 minutes (observed 11 min 55 s). The Arc status itself lags: Arc
+machines keep reading `Connected` for 11-16 minutes after a stop and then read
+`Disconnected`, so only the Heartbeat after the start decides a host. A host with no
+Heartbeat at the deadline is pending
 for that host only; a stopped VM or an Arc identity that never connects fails. Opt in
 to Run Command guest checks with `-GuestChecks WhenStalled|Always` (Windows Arc
 `himds`/`MonAgentCore`, Linux services) and to service restarts with
@@ -446,10 +511,15 @@ It does not reset faults. Optional AKS can take longer and
 requires a 15-30 minute stop/start separation; capacity is not guaranteed.
 Nightly VM auto-shutdown is not whole-lab hibernation. VMs can also be
 deallocated outside these scripts: the DevTest auto-shutdown schedule (19:00 by
-default) and, in some subscriptions, governance automation that deallocates VMs
+default; Deploy owns it and sets it again on every run, so set `operations.autoShutdownTime`
+in the skin, or `autoShutdownTime` in the build config, before the Deploy to keep a later
+time) and, in some subscriptions, governance automation that deallocates VMs
 on its own schedule (observed nightly at about 02:17). Neither starts anything
 again, so a stopped fleet after a quiet night is expected, not a fault. Run
 Activate, which starts whatever is stopped, rather than repairing hosts by hand.
+A governance automation can also convert a parked estate's disks to Standard HDD; the
+next Deploy then refuses the tier
+([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
 
 Retain runtime target/skin/fleet inputs and deployment history outside git.
 If SRE is attached, park that dependent layer first through its own maintained
@@ -464,7 +534,13 @@ Use normal lifecycle `-WhatIf`, not deployment Graph/Owner/quota preflight or
 historical whole-group index comparisons. Exact network sharing is checked
 before network writes. On partial failure, retry without redeploying or waking compute.
 Enabled alerts can still evaluate/notify and incur charges; there is no automatic
-pause/restore of their previous enabled state.
+pause/restore of their previous enabled state. Each Hibernate fires the Sev2
+missing-heartbeat alert about 8-10 minutes after the VMs stop; it clears itself 16-21
+minutes after it fired (once with every host still silent), and nothing is paused. That
+is why a companion SRE agent is parked first. Other quiet-estate noise (Arc `Disconnected`,
+Resource Health flaps, failed platform patch writes, activity-log entries for names that
+are not in the subscription) is listed in
+[lifecycle](lifecycle.md#what-still-happens-to-a-parked-estate).
 
 ## 6. Remove permanently (separate destructive approval)
 
@@ -479,7 +555,14 @@ absence. It is `ConfirmImpact='High'` and prompts: after the user's separate app
 add `-Confirm:$false` when running from an unattended or AI-driven shell (Deploy,
 Hibernate and Activate do not prompt; the wrapper, `Prepare-NestedSqlParent.ps1` and
 the nested helpers do, like Remove). A running nested parent gets one bounded graceful guest stop that warns
-and continues if it fails. Two opt-in switches serve an intended clean same-prefix
+and continues if it fails; it is skipped when the guest never became an Arc machine, and a parent without
+the Hyper-V role has nothing to stop. Allow **25-35 minutes**: a Container Apps environment sits in
+`ScheduledForDelete` for about 25 minutes before its group can go. Remove prints `Still present: ...`
+whenever that list changes and waits `-TimeoutMinutes` (default 60, at most 120). If the wait ends first
+the deletion carries on in Azure and the script exits **2** (pending, not failed) without pruning or
+touching Defender; run `Test-ArcDemoReadiness.ps1 -DesiredState Removed` until it passes, or rerun
+the same Remove command, which skips what is already absent and then finishes those steps.
+Two opt-in switches serve an intended clean same-prefix
 rebuild: `-ForceDeleteWorkspace` first permanently deletes `law-<prefix>` (irreversible;
 otherwise re-creating that name within 14 days recovers the old workspace and its
 data) and `-PruneDeploymentHistory` deletes this demo's own old `arc-demo-<timestamp>`

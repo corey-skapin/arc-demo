@@ -35,8 +35,10 @@
     The Entra tenant ID.
 
 .PARAMETER DeployerPrincipalId
-    Optional Entra object ID for the deploying user/service principal. Use this when
-    ARM access works but Graph signed-in-user lookup is blocked by CAE.
+    Optional Entra object ID for the deploying user/service principal (your own). Use this when
+    ARM access works but Graph signed-in-user lookup is blocked by CAE. It replaces only that
+    lookup: the same RBAC check still runs against it. The scripts also retry a Graph call that fails
+    with the CAE challenge once with AZURE_IDENTITY_DISABLE_CP1=1; see docs/troubleshooting.md.
 
 .PARAMETER AdminEmail
     Email address for budget + alert notifications. Defaults from config\demo-skin.json when omitted.
@@ -48,16 +50,30 @@
     Current VM admin password as a SecureString for existing labs without the
     saved Key Vault secret. Never pass a new password for routine reconciliation.
 
+.PARAMETER AdminPasswordPath
+    Optional file (outside the git worktree, in an existing folder) that keeps the VM admin password for
+    reruns. A fresh build saves the generated password there, protected for the current Windows user and PC,
+    before any Azure write, so a Deploy that fails part way can be rerun with the password its VMs were created
+    with. A later run falls back to it when the Key Vault cannot be read from this workstation (a tenant policy
+    can make new vaults private-only) or never received the secret. -AdminPassword and a readable vault win over
+    it. The build wrapper passes vm-admin-credential.clixml from its private folder.
+
 .PARAMETER OsDiskStorageAccountType
     StandardSSD_LRS for new OS disks; Standard_LRS is an explicit retained-lab
     choice. Existing disk tiers must already match; deployment never performs
     an incidental conversion. HDD OS disks retire on 8 September 2028.
+    A tenant governance automation can convert a parked estate's disks to
+    Standard HDD on its own; the next Deploy then refuses until the private skin
+    declares what exists: compute.osDiskStorageAccountType (or this switch) and,
+    for a nested SQL parent, nestedSqlGuest.parentDataDiskStorageAccountType.
 
 .PARAMETER OnboardingSecret
     Optional existing onboarding SP secret as a SecureString. Normally omit it:
     when machines need onboarding, Deploy ensures the SP's Arc resource group role,
     mints a one-day credential on the existing SP through Graph and removes it
-    afterwards. Existing credentials are never read, reset or changed. Supply it
+    afterwards (a first creation of the SP removes the one-year credential that
+    creation adds, after it has been used). Existing credentials are never read,
+    reset or changed. Supply it
     only if the operator cannot manage the application's credentials.
 
 .PARAMETER Location
@@ -115,6 +131,7 @@
     .\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> `
         -AdminEmail demo@contoso.com
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'AdminPasswordPath', Justification = 'It is a file path, not a password: the file holds a protected SecureString export.')]
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [Parameter(Mandatory)][string]$SubscriptionId,
@@ -137,6 +154,7 @@ param(
     [int]$BudgetAmount = 200,
     [string]$SkinPath = '',
     [securestring]$AdminPassword,
+    [string]$AdminPasswordPath = '',
     [securestring]$OnboardingSecret
 )
 
@@ -165,6 +183,12 @@ Assert-DemoName $NamePrefix
 if ($Location -notmatch '^[a-z0-9]+$') { throw 'Location must be an Azure region name.' }
 if ($AutoShutdownTime -notmatch '^([01][0-9]|2[0-3])[0-5][0-9]$') { throw 'AutoShutdownTime must be HHmm.' }
 if ($BudgetAmount -lt 1) { throw 'BudgetAmount must be positive.' }
+if ($AdminPasswordPath) {
+    $AdminPasswordPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($AdminPasswordPath)
+    if ($AdminPasswordPath.StartsWith($repoRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'AdminPasswordPath must be outside the git worktree: keep it in the private build folder.'
+    }
+}
 if ([string]::IsNullOrWhiteSpace($AdminEmail)) {
     throw 'AdminEmail is required. Pass -AdminEmail or set notifications.email in config\demo-skin.json.'
 }
@@ -172,12 +196,7 @@ if ($AdminEmail -in @('you@contoso.com', 'operator@example.com')) {
     throw "AdminEmail is still the placeholder '$AdminEmail'. Pass -AdminEmail with a real operator email or update notifications.email in the skin file before deploying."
 }
 
-$demoTags = Merge-DemoHashtable -Defaults ([ordered]@{
-    owner = 'demo'
-    purpose = 'arc-demo'
-    costcenter = 'demo'
-    env = 'demo'
-}) -Overrides (Get-DemoSkinValue -Skin $skin -Path 'tags' -Default @{})
+$demoTags = Get-DemoResourceTags -Skin $skin
 $arcOnboardingTags = ConvertTo-DemoTagString -Tags $demoTags
 $demoTitle = Get-DemoSkinValue -Skin $skin -Path 'labels.demoTitle' -Default 'Arc Demo'
 $workbookTitle = Get-DemoSkinValue -Skin $skin -Path 'labels.workbookTitle' -Default "$demoTitle — Estate Overview"
@@ -233,7 +252,7 @@ function New-CountBasedOnPremFleet {
     return $fleet
 }
 
-function Get-ArcMachineTagArgs {
+function Get-ArcMachineTags {
     param(
         [Parameter(Mandatory)]$Machine,
         [System.Collections.IDictionary]$BaseTags = @{}
@@ -253,7 +272,7 @@ function Get-ArcMachineTagArgs {
     $tags['machineConfig'] = 'enabled'
     $tags['inventory'] = 'arc'
 
-    return @($tags.GetEnumerator() | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value })
+    return $tags
 }
 
 function Get-LogAnalyticsTableNames {
@@ -535,22 +554,40 @@ function New-ChangeTrackingDcrBody {
 }
 
 # Phase 1: pre-flight
-$prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Aks:$DeployAks
-$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions
+$prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Aks:$DeployAks `
+    -StandardSecurityType:($DeployArcOnPrem -and (Test-DemoStandardSecurityTypeRequired -Skin $skin -FleetPath $OnPremFleetPath -RepoRoot $repoRoot))
+$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions -Features $prerequisites.Features
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"
 $kvPrefix = "kv-$($NamePrefix -replace '-','')"
 $vaultOutput = Invoke-DemoAz -Arguments @('keyvault', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
 $vaultRecords = @(if ($null -ne $vaultOutput) { $vaultOutput | ConvertFrom-Json })
-$vaultManifests = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '-o', 'json') | ConvertFrom-Json |
+$subscriptionDeployments = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '-o', 'json') | ConvertFrom-Json)
+$vaultManifests = @($subscriptionDeployments |
     Where-Object { $_.properties.provisioningState -eq 'Succeeded' -and $_.properties.outputs.arcResourceGroup.value -eq $arcRg -and $_.properties.outputs.keyVaultName.value } |
     Sort-Object { $_.properties.timestamp } -Descending)
 if ($vaultManifests.Count -and -not (Invoke-DemoAz -Arguments @('group', 'exists', '-n', $infraRg, '-o', 'json') | ConvertFrom-Json)) {
     Write-Step "Ignoring $($vaultManifests.Count) retained deployment manifest(s) for ${arcRg}: $infraRg no longer exists, so this is a fresh build with a new Key Vault. Remove-ArcDemo -PruneDeploymentHistory deletes such stale records."
     $vaultManifests = @()
 }
+$runningDeployments = @($subscriptionDeployments | Where-Object {
+    $_.name -cmatch '^arc-demo-\d{8}-\d{6}$' -and $_.properties.provisioningState -in @('Accepted', 'Running') -and $_.properties.parameters.arcResourceGroup.value -eq $arcRg })
+if ($runningDeployments.Count -and -not $WhatIfPreference) {
+    throw "Deployment $($runningDeployments[0].name) for $arcRg is still $($runningDeployments[0].properties.provisioningState). A second deployment over it would race its VM and vault creation: wait until 'az deployment sub show --name $($runningDeployments[0].name) --query properties.provisioningState -o tsv' is Succeeded or Failed, then rerun this command."
+}
 $kvName = if ($vaultManifests.Count) { $vaultManifests[0].properties.outputs.keyVaultName.value } else { '' }
+$resumedBuild = $null
+if (-not $kvName -and $vaultRecords.Count) {
+    # A fresh build that stopped part way leaves its vault behind and has no Succeeded manifest. The vault named by this
+    # demo's own Failed/Canceled deployment record is that build's own: an exact match, never a prefix guess.
+    foreach ($record in @(Get-DemoStaleManifestDeployments -Deployments $subscriptionDeployments -ArcResourceGroup $arcRg |
+            Where-Object { $_.properties.provisioningState -in @('Failed', 'Canceled') -and $_.properties.parameters.keyVaultName.value } |
+            Sort-Object { $_.properties.timestamp } -Descending)) {
+        $candidate = [string]$record.properties.parameters.keyVaultName.value
+        if (@($vaultRecords | Where-Object name -eq $candidate).Count -eq 1) { $resumedBuild = $record; $kvName = $candidate; break }
+    }
+}
 $freshVault = -not $kvName -and -not $vaultRecords.Count
 $vaultPublicAccess = 'Enabled'
 if ($kvName) {
@@ -560,35 +597,73 @@ if ($kvName) {
     if ($selectedVault.id -ne "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.KeyVault/vaults/$kvName" -or
         $selectedVault.properties.publicNetworkAccess -notin @('Enabled', 'Disabled')) { throw 'Retained vault identity/network mode is unknown.' }
     $vaultPublicAccess = $selectedVault.properties.publicNetworkAccess
-    Write-Step "Found existing Key Vault $kvName — preserving for idempotent redeploy"
+    if ($resumedBuild) { Write-Step "Resuming the unfinished build $($resumedBuild.name): preserving its Key Vault $kvName" }
+    else { Write-Step "Found existing Key Vault $kvName — preserving for idempotent redeploy" }
 } else {
     if ($vaultRecords.Count) { throw 'Existing vaults have no canonical retained deployment output; explicit ownership review is required, not first-prefix selection.' }
     $kvName  = New-KeyVaultName -Prefix $kvPrefix
     $kvName  = $kvName.Substring(0, [Math]::Min(24, $kvName.Length))
 }
 
-# Phase 2: generate password, deploy Bicep
-Write-Header 'Generating admin password + deploying Bicep'
+# Phase 2: resolve the admin password, deploy Bicep
+Write-Header 'Deploying main.bicep'
 $vmOutput = Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
 $existingVms = @(if ($null -ne $vmOutput) { $vmOutput | ConvertFrom-Json })
-if (-not $freshVault -and -not $existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
-    throw 'Retained vault without current compute: supply the retained CURRENT AdminPassword; do not generate or overwrite a retained administrator credential.'
+# Deploy owns the VM auto-shutdown schedule: every run sets it to the requested time, per VM as each VM module finishes,
+# so a time changed by hand does not survive a rerun. Say what is about to change instead of reverting it silently.
+if ($existingVms.Count) {
+    try {
+        $liveSchedules = @((Invoke-AzRest -Method Get -Url "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.DevTestLab/schedules?api-version=2018-09-15").value)
+        $changing = @($liveSchedules | Where-Object { $_.properties.dailyRecurrence.time -and ($_.properties.dailyRecurrence.time -ne $AutoShutdownTime -or $_.properties.timeZoneId -ne $AutoShutdownTimezone) })
+        if ($changing.Count) {
+            Write-Warn "$($changing.Count) VM auto-shutdown schedule(s) differ from the requested $AutoShutdownTime ($AutoShutdownTimezone) and this Deploy sets them to it: $((($changing | ForEach-Object { "$($_.name) $($_.properties.dailyRecurrence.time)" }) | Select-Object -First 4) -join ', ')$(if ($changing.Count -gt 4) { ', ...' }). To keep a different time, set operations.autoShutdownTime in the skin (or autoShutdownTime in the build config) and rerun; a change made by hand, or while a deployment runs, is reverted."
+        }
+    } catch {
+        Write-Warn "Could not read the existing VM auto-shutdown schedules ($($_.Exception.Message)); this Deploy sets them to $AutoShutdownTime ($AutoShutdownTimezone)."
+    }
 }
-if ($vaultPublicAccess -eq 'Disabled' -and -not $AdminPassword -and -not $WhatIfPreference) {
-    throw 'Retained vault is private-only. Supply the CURRENT AdminPassword as SecureString; no workstation secret read, public access change or credential rotation.'
+# A VM that is already Updating holds this deployment's own write to it for as long as the platform keeps the earlier
+# operation open: about 90 minutes behind a Defender MDE.Linux install lock on a healthy Linux guest. Say so now.
+foreach ($busyVm in @($existingVms | Where-Object { $_.provisioningState -and $_.provisioningState -ne 'Succeeded' })) {
+    Write-Warn "VM $($busyVm.name) is $($busyVm.provisioningState). This deployment's write to it waits behind the earlier operation, which can take about 90 minutes when it is a Defender MDE.Linux install lock on a healthy Linux guest. The deployment is polled with progress below. Do not cancel it, reapply the VM or send it a Run Command to speed it up (docs/troubleshooting.md, A Linux VM stays Updating behind a Defender MDE.Linux install lock)."
 }
-$existingSecret = if ($existingVms.Count -and -not $AdminPassword -and -not $WhatIfPreference) {
+# The password saved by an earlier run (-AdminPasswordPath) is the way back in when the vault cannot be read from here,
+# for example a vault that a tenant policy made private-only, or a build that stopped before the vault copy was written.
+# A brand-new build (no vault and no VM) never reads it: nothing exists that an older password could still protect, so a
+# stale or unreadable file left by an earlier estate neither supplies the password nor blocks the build, and the new
+# password replaces the file below.
+$savedPassword = if ($AdminPasswordPath -and -not $AdminPassword -and (-not $freshVault -or $existingVms.Count)) { Read-DemoSecretFile -Path $AdminPasswordPath }
+if (-not $freshVault -and -not $existingVms.Count -and -not $AdminPassword -and -not $savedPassword -and -not $WhatIfPreference) {
+    throw 'Retained vault without current compute: supply the retained CURRENT AdminPassword (or the saved -AdminPasswordPath file); do not generate or overwrite a retained administrator credential.'
+}
+if ($vaultPublicAccess -eq 'Disabled' -and -not $AdminPassword -and -not $savedPassword -and -not $WhatIfPreference) {
+    throw 'Retained vault is private-only (a tenant policy can force that; see docs/troubleshooting.md). Supply the CURRENT AdminPassword as SecureString, or the file an earlier run saved with -AdminPasswordPath; no workstation secret read, public access change or credential rotation.'
+}
+$existingSecret = if ($existingVms.Count -and -not $AdminPassword -and $vaultPublicAccess -eq 'Enabled' -and -not $WhatIfPreference) {
     Invoke-DemoAz -Arguments @('keyvault', 'secret', 'show', '--vault-name', $kvName, '-n', 'vm-admin-password', '--query', 'value', '-o', 'tsv') -AllowNotFound
 }
+$passwordSource = 'generated'
 if ($AdminPassword) {
     $adminPwd = [System.Net.NetworkCredential]::new('', $AdminPassword).Password
+    $passwordSource = 'supplied'
 } elseif ($existingSecret) {
     $adminPwd = $existingSecret
+    $passwordSource = 'vault'
+} elseif ($savedPassword) {
+    $adminPwd = [System.Net.NetworkCredential]::new('', $savedPassword).Password
+    $passwordSource = 'saved file'
 } elseif ($existingVms.Count -gt 0 -and -not $WhatIfPreference) {
-    throw 'Existing VMs found but no saved admin credential. Supply the CURRENT password as -AdminPassword (SecureString); routine redeploy must not generate or rotate it.'
+    throw 'Existing VMs found but no saved admin credential. Supply the CURRENT password as -AdminPassword (SecureString) or as the file saved with -AdminPasswordPath; routine redeploy must not generate or rotate it.'
 } else {
     $adminPwd = New-StrongPassword -Length 24
 }
+Write-Step "VM admin password: $passwordSource"
+if ($AdminPasswordPath -and $freshVault -and -not $existingVms.Count -and -not $WhatIfPreference) {
+    # Saved before any Azure write, so a build that fails part way can be rerun with the password its VMs were created with.
+    Save-DemoSecretFile -Path $AdminPasswordPath -Value $adminPwd
+    Write-Ok "Saved the VM admin password to $AdminPasswordPath (protected for this user on this PC); it is never printed."
+}
+$storeAdminSecret = ($freshVault -and -not $existingVms.Count) -or ($resumedBuild -and $passwordSource -eq 'saved file')
 
 $paramFile = Join-Path ([System.IO.Path]::GetTempPath()) "arc-demo-params-$(Get-Random).json"
 
@@ -633,6 +708,8 @@ if ($null -eq $onPremFleet) {
 }
 $nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
 $onPremFleet = @(Get-DemoFleetWithNestedParent -Fleet $onPremFleet -NestedSqlGuest $nestedSqlGuest)
+# Compute rejects a repeated securityType on a VM that exists, so only a VM being created declares it.
+$onPremFleet = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet $onPremFleet -ExistingVmName @($existingVms | ForEach-Object { $_.name }))
 Test-DemoFleet -Fleet $onPremFleet
 $nativePrefix = $NamePrefix.Replace('-', '')
 $expectedNativeVmName = "az-$($nativePrefix.Substring(0, [Math]::Min(9, $nativePrefix.Length)))-01"
@@ -742,8 +819,7 @@ if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Deploy infras
 }
 Write-Step "Deploying main.bicep (deployment: $deploymentName)..."
 try {
-    az deployment sub create --name $deploymentName --location $Location `
-        --template-file $bicepFile --parameters @$paramFile --only-show-errors -o none
+    Invoke-DemoSubscriptionDeployment -Name $deploymentName -Location $Location -TemplateFile $bicepFile -ParametersFile $paramFile -RemoveParametersFileWhenAccepted
 } catch {
     $allocationGuidance = Get-DemoAllocationGuidance -ErrorText $_.Exception.Message -Location $Location -VmSize $VmSize -SubscriptionId $SubscriptionId
     if ($allocationGuidance) { throw $allocationGuidance }
@@ -754,8 +830,13 @@ $outputs = az deployment sub show --name $deploymentName --query properties.outp
     [System.IO.File]::Delete($paramFile)
 }
 Write-Ok 'Bicep deployment complete'
-if ($freshVault -and -not $existingVms.Count) {
-    Set-DemoKeyVaultSecret -VaultName $kvName -Name 'vm-admin-password' -Value $adminPwd
+if ($storeAdminSecret) {
+    $liveAccess = Invoke-DemoAz -Arguments @('keyvault', 'show', '-g', $infraRg, '-n', $kvName, '--query', 'properties.publicNetworkAccess', '-o', 'tsv') -AllowNotFound
+    if ($liveAccess -eq 'Disabled' -and $vaultPublicAccess -ne 'Disabled') {
+        Write-Warn "Key Vault $kvName reads publicNetworkAccess=Disabled although this deployment asked for Enabled: a tenant or subscription policy changed it after creation (see the vault's activity log: Microsoft.Authorization/policies/modify/action). That is not a role-propagation delay and cannot be fixed from here. The password is saved through Azure Resource Manager, which that setting does not block; reading it back from a workstation will keep failing, so reruns use the file saved with -AdminPasswordPath, or -AdminPassword."
+    }
+    Set-DemoKeyVaultSecret -ResourceGroup $infraRg -VaultName $kvName -Name 'vm-admin-password' -Value $adminPwd
+    Write-Ok "VM admin password saved to Key Vault $kvName"
 }
 
 $workspaceId = $outputs.workspaceId.value
@@ -861,12 +942,32 @@ Write-Header 'Phase 5 — Arc onboarding (parallel)'
 if (-not $toOnboardFleet) {
     Write-Ok 'All VMs already Arc-onboarded — skipping'
 } else {
-    Write-Step "Onboarding $($toOnboardFleet.Count) of $($vmNames.Count) VMs..."
-    foreach ($machine in $toOnboardFleet) {
-        $vm = $machine.name
-        $isWin = $machine.osType -eq 'Windows'
-        $target = [pscustomobject]@{ Name = $vm; OsType = $machine.osType; Id = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$vm" }
-        Invoke-DemoGuestCommand -Machine $target -Script ($(if ($isWin) { "@$winFile" } else { "@$lnxFile" }))
+    Write-Step "Onboarding $($toOnboardFleet.Count) of $($vmNames.Count) VMs in parallel..."
+    # Submit every guest command first, then wait for all of them together: serial onboarding took 2-4 minutes per VM.
+    $submitted = [System.Collections.Generic.List[object]]::new()
+    try {
+        foreach ($machine in $toOnboardFleet) {
+            $vm = $machine.name
+            $isWin = $machine.osType -eq 'Windows'
+            $target = [pscustomobject]@{ Name = $vm; OsType = $machine.osType; Id = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$vm" }
+            $submitted.Add([pscustomobject]@{ Machine = $target; Job = (Invoke-DemoGuestCommand -Machine $target -Script ($(if ($isWin) { "@$winFile" } else { "@$lnxFile" })) -AsJob) })
+        }
+        Wait-DemoJobs -Jobs @($submitted.Job) -TimeoutSeconds 900
+        $onboardFailures = @()
+        foreach ($entry in $submitted) {
+            # A job still running at the deadline gets one short extra wait inside the receive, then is stopped.
+            try { Invoke-DemoGuestCommand -Machine $entry.Machine -Job $entry.Job -TimeoutSeconds 30 }
+            catch { $onboardFailures += "$($entry.Machine.Name): $($_.Exception.Message)" }
+        }
+        if ($onboardFailures.Count) { throw "Arc onboarding failed on $($onboardFailures.Count) of $($submitted.Count) VM(s): $($onboardFailures -join ' | ')" }
+    } catch {
+        foreach ($entry in $submitted) {
+            if ($entry.Job -is [System.Management.Automation.Job]) {
+                Stop-Job -Job $entry.Job -ErrorAction SilentlyContinue
+                Remove-Job -Job $entry.Job -Force -ErrorAction SilentlyContinue
+            }
+        }
+        throw
     }
 }
 Write-Step 'Waiting for all Arc machines to report Connected...'
@@ -878,11 +979,14 @@ if (-not $ok) { throw 'Timed out waiting for all Arc machines to be Connected' }
 Write-Ok 'All Arc machines Connected'
 
 Write-Step 'Tagging Arc machines with OS, monitoring, and control-plane metadata...'
+# Merged through the ARM tags API and skipped when the tags already match: `az connectedmachine update --tags k=v k=v`
+# folds every pair after the first into the first key's value, and every write to a Linux host risks a Defender stall.
+$tagsWritten = 0
 foreach ($machine in $deployedFleet) {
-    $tagArgs = Get-ArcMachineTagArgs -Machine $machine -BaseTags $demoTags
-    az connectedmachine update -g $arcRg -n $($machine.name) --tags $tagArgs --only-show-errors -o none
+    $machineId = "/subscriptions/$SubscriptionId/resourceGroups/$arcRg/providers/Microsoft.HybridCompute/machines/$($machine.name)"
+    if (Set-DemoResourceTags -ResourceId $machineId -Tags (Get-ArcMachineTags -Machine $machine -BaseTags $demoTags)) { $tagsWritten++ }
 }
-Write-Ok 'Arc machine tags updated'
+Write-Ok "Arc machine tags: $tagsWritten written, $(@($deployedFleet).Count - $tagsWritten) already correct"
 
 Write-Header 'Phase 5.5 — Update Manager periodic assessment'
 foreach ($machine in $deployedFleet) {
@@ -1139,8 +1243,17 @@ foreach ($wb in $nseilazSet) {
 # Phase 12: validation
 Write-Header 'Phase 12 — Validation'
 # Windows Heartbeats can arrive about 8 minutes after Arc connects, so poll (read-only) for up to 20 minutes.
-& (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 1200
-if ($LASTEXITCODE -ne 0) { throw 'Deployment finished, but required infrastructure/monitor readiness failed or remains pending. Inspect the checks above, then re-run Test-ArcDemoReadiness.ps1 (read-only) rather than redeploying; no faults were reset.' }
+# The nested guest is built after Deploy (wrapper step P4), so its Arc row is left out here.
+$readinessText = & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 1200 -SkipNestedGuest -OutputFormat Json
+$readinessExit = $LASTEXITCODE
+$readiness = try { ($readinessText | Out-String) | ConvertFrom-Json } catch { $null }
+$openRows = @($readiness.checks | Where-Object { $_.required -and $_.status -ne 'pass' })
+foreach ($row in $openRows) { Write-Warn "$($row.id): $($row.status) (observed: $($row.observed))$(if ($row.message) { " $($row.message)" })" }
+if ($readinessExit -ne 0) {
+    $named = if ($openRows) { ": $(($openRows | ForEach-Object { "$($_.id) ($($_.status))" }) -join ', ')" } else { ' (no readable result; run Test-ArcDemoReadiness.ps1 for the reason)' }
+    throw "Deployment finished, but required infrastructure/monitor readiness rows did not pass$named. Re-run Test-ArcDemoReadiness.ps1 (read-only) rather than redeploying; no faults were reset."
+}
+Write-Ok "Readiness passed: $(@($readiness.checks | Where-Object { $_.required }).Count) required rows, $(@($readiness.checks | Where-Object { -not $_.required -and $_.status -ne 'pass' }).Count) soft warning(s)"
 
 Write-Header '🎉 Deploy complete'
 $wbUrl = "https://portal.azure.com/#@$TenantId/resource$wbId"

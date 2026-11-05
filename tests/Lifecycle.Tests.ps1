@@ -99,6 +99,24 @@ Describe 'Explicit retained OS disk tiers' {
             Mock Invoke-DemoAz { 'StandardSSD_LRS' }
             { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType Standard_LRS } | Should -Throw '*tier mismatch*'
         }
+        It 'tells a stranger exactly what to declare when a governance automation has converted the disks to HDD' {
+            Mock Invoke-DemoAz { 'Standard_LRS' }
+            $message = try { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } catch { $_.Exception.Message }
+            $message | Should -Match 'the disk is Standard_LRS and this run requests StandardSSD_LRS'
+            $message | Should -Match 'Deploy never converts a disk'
+            $message | Should -Match 'compute\.osDiskStorageAccountType to Standard_LRS in the private skin \(or pass -OsDiskStorageAccountType Standard_LRS\)'
+            $message | Should -Match 'nestedSqlGuest\.parentDataDiskStorageAccountType'
+            $message | Should -Match 'governance automation can convert a parked estate''s disks to Standard HDD on its own'
+            $message | Should -Match 'The OS disk tier changed by itself'
+            $message | Should -Match 'separately approved stop/deallocate/restart window'
+        }
+        It 'does not advise declaring a tier that Deploy cannot declare' {
+            Mock Invoke-DemoAz { 'Premium_LRS' }
+            $message = try { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } catch { $_.Exception.Message }
+            $message | Should -Match 'the disk is Premium_LRS'
+            $message | Should -Match 'Deploy can only declare Standard_LRS or StandardSSD_LRS'
+            $message | Should -Not -Match 'osDiskStorageAccountType to Premium_LRS'
+        }
         It 'does not inspect a disk when no existing VM is targeted' {
             Mock Invoke-DemoAz { throw 'unexpected disk read' }
             Assert-DemoOsDiskStorageAccountType -Machines @() -StorageAccountType StandardSSD_LRS
@@ -593,6 +611,19 @@ Describe 'Activation with the real optional-network preflight' {
         Should -Invoke Invoke-DemoAz -Times 0
         Test-Path $path | Should -BeFalse
     }
+    It 'lists what a real wake would do from the network it read, including the tags, under -WhatIf' {
+        $global:ArcWakePreview = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Step { param($Message) $global:ArcWakePreview.Add($Message) }
+        try {
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -WhatIf
+            $plan = $global:ArcWakePreview -join "`n"
+            $plan | Should -Match 'Public IP pip-natgw-retail-demo: absent -> created'
+            $plan | Should -Match 'NAT gateway natgw-retail-demo: absent -> created with that public IP'
+            $plan | Should -Match 'carry the lab tags'
+            $plan | Should -Match 'one shared wait of up to 12 minutes'
+            Should -Invoke Invoke-DemoAz -Times 0
+        } finally { Remove-Variable ArcWakePreview -Scope Global -ErrorAction SilentlyContinue }
+    }
     It 'normal activation reaches the mocked first write after accepting absent NAT and PIP' {
         Mock Invoke-DemoAz { throw 'TEST_WRITE_BOUNDARY' } -ParameterFilter { $Arguments[0] -eq 'network' -and $Arguments[1] -eq 'public-ip' -and $Arguments[2] -eq 'create' }
         $path = Join-Path $TestDrive 'normal-result.json'
@@ -621,6 +652,8 @@ Describe 'Activation with the real optional-network preflight' {
             Mock Assert-DemoSkinInventory {}
             Mock Invoke-DemoGuestCommand { throw 'Activate must not call Run Command directly' }
             Mock Invoke-DemoNestedSqlGuest { throw 'No nested guest is configured in this fixture' }
+            # Tag writes go through the ARM REST helper; a test must never reach it (and so the real token call) by accident.
+            Mock Set-DemoResourceTags { $true }
             # The shared wait has its own tests; here it reports a canned per-host outcome and records how it was called.
             Mock Wait-DemoHostsReady {
                 param($Inventory, $NamePrefix, $AttemptStartedUtc, $StartedAtUtc, $DeadlineMinutes, $GuestChecks, $StallMinutes, $RepairStalledAgents, $NestedGuest)
@@ -692,6 +725,38 @@ Describe 'Activation with the real optional-network preflight' {
             Should -Invoke Invoke-DemoGuestCommand -Times 0
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'start' -in $Arguments -or 'create' -in $Arguments -or 'update' -in $Arguments }
             Should -Invoke Invoke-DemoAz -Times 2 -Exactly -ParameterFilter { $Arguments[0] -eq 'aks' -and '-g' -in $Arguments -and '-n' -in $Arguments -and '--ids' -notin $Arguments }
+        }
+        It 'recreates an absent NAT gateway and public IP, then tags both with the lab tags and the skin overrides' {
+            $f = $global:ArcLifecycleFixture
+            $f.resources = @(); $f.nat = ''
+            $f.events = [System.Collections.Generic.List[string]]::new()
+            Mock Get-DemoSkin { @{ tags = @{ owner = 'platform-team'; extra = 'kept' } } }
+            Mock Invoke-DemoAz { $global:ArcLifecycleFixture.events.Add("create $($Arguments[1])") } -ParameterFilter { $Arguments[0] -eq 'network' -and 'create' -in $Arguments }
+            Mock Set-DemoResourceTags {
+                $global:ArcLifecycleFixture.events.Add("tag $(($ResourceId -split '/')[-1])")
+                $global:ArcLifecycleFixture.tags = $Tags
+                $true
+            }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            @($f.events) | Should -Be @('create public-ip', 'create nat', 'tag pip-natgw-retail-demo', 'tag natgw-retail-demo')
+            $f.tags.owner | Should -Be 'platform-team'
+            $f.tags.extra | Should -Be 'kept'
+            $f.tags.purpose | Should -Be 'arc-demo'
+            $f.tags.costcenter | Should -Be 'demo'
+            $f.tags.env | Should -Be 'demo'
+            Should -Invoke Wait-DemoHostsReady -Times 1 -Exactly
+        }
+        It 'checks the lab tags on a NAT gateway and public IP that already exist without recreating them' {
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -like '*/publicIPAddresses/pip-natgw-retail-demo' -and $Tags.purpose -eq 'arc-demo' }
+            Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -like '*/natGateways/natgw-retail-demo' -and $Tags.owner -eq 'demo' }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'create' -in $Arguments }
+        }
+        It 'warns and keeps waking the estate when the tags cannot be written' {
+            Mock Set-DemoResourceTags { throw 'AuthorizationFailed: tags' }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment -WarningVariable warnings
+            ($warnings -join ' ') | Should -Match 'could not be tagged \(AuthorizationFailed: tags\).*cost-allocation metadata only'
+            Should -Invoke Wait-DemoHostsReady -Times 1 -Exactly
         }
         It 'never starts or invokes a guest command on an explicit keep-parked VM' {
             $f = $global:ArcLifecycleFixture
@@ -1097,6 +1162,69 @@ Describe 'Best-effort Hibernate with real inventory and cost checks' {
         $global:ArcParkFixture.denyPower = $true
         { & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo } | Should -Throw '*AuthorizationFailed*'
     }
+    It 'keeps the steps, each VM power state, the revisions, the network outcome and the closing readiness in -ResultPath' {
+        $path = Join-Path $TestDrive 'hibernate-result.json'
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -ResultPath $path
+        $r = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $r.workload | Should -Be 'arc-demo-hibernation'
+        $r.status | Should -Be 'pass'
+        $r.readiness | Should -Be 'pass'
+        $r.error | Should -BeNullOrEmpty
+        $r.completedAtUtc | Should -Not -BeNullOrEmpty
+        @($r.vms.name) | Should -Be @('node-01', 'node-02')
+        @($r.vms | Where-Object { $_.powerStateBefore -eq 'VM running' -and $_.action -eq 'deallocate-submitted' }).Count | Should -Be 2
+        $r.aks[0].action | Should -Be 'stop-submitted'
+        @($r.containerApps[0].deactivatedRevisions) | Should -Be @('revision')
+        $r.network.status | Should -Be 'removed'
+        @($r.network.removed) | Should -Be @('subnet association', 'NAT gateway', 'public IP')
+        @($r.readinessChecks).Count | Should -BeGreaterThan 0
+        ($r.steps.message -join "`n") | Should -Match 'Submitting the deallocation of 2 of 2 VM'
+    }
+    It 'records a failed deallocation and the closing error in -ResultPath, and still throws' {
+        $global:ArcParkFixture.failVm = $true
+        $path = Join-Path $TestDrive 'hibernate-failed.json'
+        { & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -ResultPath $path } | Should -Throw '*running*'
+        $r = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $r.status | Should -Be 'fail'
+        $r.error | Should -Match 'running'
+        $r.vms[0].action | Should -Be 'deallocate-failed'
+        $r.vms[1].action | Should -Be 'deallocate-submitted'
+        ($r.warnings -join ' ') | Should -Match 'VM parking failed'
+        $r.completedAtUtc | Should -Not -BeNullOrEmpty
+    }
+    It 'rejects a -ResultPath folder that does not exist before parking anything' {
+        $f = $global:ArcParkFixture
+        { & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -ResultPath (Join-Path $TestDrive 'missing\result.json') } | Should -Throw '*parent directory must already exist*'
+        @($f.ops | Where-Object { $_ -match ' (deallocate|stop|deactivate|delete|update) ' }).Count | Should -Be 0
+    }
+    It 'prints a progress line before the first Azure read and a time-stamped line for each parking phase' {
+        $f = $global:ArcParkFixture
+        $f.steps = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Step { param($Message) $global:ArcParkFixture.steps.Add($Message) }
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo
+        $f.steps[0] | Should -Match '^Reading the inventory of rg-retail-demo-infra first'
+        $stamped = @($f.steps | Where-Object { $_ -match '^\d\d:\d\d:\d\d ' })
+        ($stamped -join "`n") | Should -Match 'Submitting the deallocation of 2 of 2 VM\(s\)'
+        ($stamped -join "`n") | Should -Match 'Stopping AKS fixture'
+        ($stamped -join "`n") | Should -Match 'Deactivating revision revision of Container App fixture'
+        ($stamped -join "`n") | Should -Match 'removing the NAT association, the NAT gateway and the public IP'
+        ($stamped -join "`n") | Should -Match 'Verifying the Hibernated state'
+    }
+    It 'prints what each workload would do under -WhatIf, writes no result file and changes nothing' {
+        $f = $global:ArcParkFixture
+        $f.steps = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Step { param($Message) $global:ArcParkFixture.steps.Add($Message) }
+        $path = Join-Path $TestDrive 'hibernate-preview.json'
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -WhatIf -ResultPath $path
+        Test-Path -LiteralPath $path | Should -BeFalse
+        @($f.ops | Where-Object { $_ -match ' (deallocate|stop|deactivate|delete|update) ' }).Count | Should -Be 0
+        $plan = $f.steps -join "`n"
+        $plan | Should -Match 'VM node-01: VM running -> deallocate'
+        $plan | Should -Match 'VM node-02: VM running -> deallocate'
+        $plan | Should -Match 'AKS fixture: stopped if it is running'
+        $plan | Should -Match 'Container App fixture: active revision\(s\) revision -> deactivate'
+        $plan | Should -Match 'Network: after compute has stopped, removed in this order: the subnet association, NAT gateway natgw-retail-demo, public IP pip-natgw-retail-demo'
+    }
 }
 
     Describe 'Native process failures and target verification' {
@@ -1237,11 +1365,60 @@ Describe 'Readiness CLI contract' {
         $result.workload | Should -Be 'arc-demo'
         $result.checks[0].resourceId | Should -Be '/expected/id'
     }
+    It 'writes the same JSON to -OutputPath, creating the folder, whatever the display format, and keeps the exit code' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'starting' 'pending' }
+        $file = Join-Path $TestDrive 'evidence\nested\readiness-20260101T000000Z.json'
+        $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath $file
+        $LASTEXITCODE | Should -Be 2
+        $saved = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+        $saved.schemaVersion | Should -Be 1
+        $saved.status | Should -Be 'pending'
+        $saved.checks[0].id | Should -Be 'fixture'
+        ($output -join "`n") | Should -Not -Match 'schemaVersion'
+        $jsonOutput = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -OutputPath $file
+        ((Get-Content -LiteralPath $file -Raw) | ConvertFrom-Json).status | Should -Be ($jsonOutput | ConvertFrom-Json).status
+    }
+    It 'writes no file when -OutputPath is not given' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'ready' 'pass' }
+        $cwd = Join-Path $TestDrive 'no-output-path'
+        $null = New-Item -ItemType Directory -Path $cwd
+        Push-Location $cwd
+        try { $null = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json }
+        finally { Pop-Location }
+        @(Get-ChildItem -LiteralPath $cwd -Recurse -File) | Should -HaveCount 0
+    }
+    It 'resolves a relative -OutputPath against the current location' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'ready' 'pass' }
+        $cwd = Join-Path $TestDrive 'relative-output-path'
+        $null = New-Item -ItemType Directory -Path $cwd
+        Push-Location $cwd
+        try { $null = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath '.\out\readiness.json' }
+        finally { Pop-Location }
+        Test-Path -LiteralPath (Join-Path $cwd 'out\readiness.json') | Should -BeTrue
+    }
     It 'returns exit 2 for pending at the zero-second deadline' {
         Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'starting' 'pending' }
         $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -TimeoutSeconds 0
         $LASTEXITCODE | Should -Be 2
         ($output | ConvertFrom-Json).status | Should -Be 'pending'
+    }
+    It 'keeps polling while a required row is pending, even when an unrelated required row has already failed' {
+        Mock Get-DemoReadinessChecks {
+            New-DemoCheck 'resource/fixture' '/expected/id' 'exists' 'missing' 'fail'
+            New-DemoCheck 'heartbeat/fixture' '/expected/id' 'recent Heartbeat' $false 'pending'
+        }
+        Mock Start-Sleep {}
+        $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -TimeoutSeconds 1
+        $LASTEXITCODE | Should -Be 1
+        ($output | ConvertFrom-Json).status | Should -Be 'fail'
+        Should -Invoke Get-DemoReadinessChecks -Times 2
+    }
+    It 'stops at once when no required row is pending' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'resource/fixture' '/expected/id' 'exists' 'missing' 'fail' }
+        Mock Start-Sleep {}
+        $null = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -TimeoutSeconds 30
+        $LASTEXITCODE | Should -Be 1
+        Should -Invoke Get-DemoReadinessChecks -Times 1 -Exactly
     }
     It 'keeps schema and exits compatible for Active' {
         Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'ready' 'pass' }
@@ -1469,8 +1646,10 @@ Describe 'Removal convergence without broad cleanup' {
         Mock Invoke-AzRest { throw 'Already-absent budget must not be deleted again.' }
         Mock Get-DemoRemovalChecks { New-DemoCheck 'owned' '/fixture' 'absent' 'absent' 'pass' }
         Mock Wait-Until {
-            param($Condition)
-            if (-not (& $Condition)) { throw 'Owned resources still present.' }
+            param($Condition, [switch]$AllowTimeout)
+            if (& $Condition) { return $true }
+            if ($AllowTimeout) { return $false }
+            throw 'Owned resources still present.'
         }
         Mock Invoke-DemoAz {
             param($Arguments)
@@ -1485,9 +1664,14 @@ Describe 'Removal convergence without broad cleanup' {
         Should -Invoke Invoke-AzRest -Times 0
         Should -Invoke Get-DemoRemovalChecks -Times 1
     }
-    It 'does not declare success solely because both groups are gone' {
+    It 'does not declare success solely because both groups are gone: it exits pending and says what is left' {
         Mock Get-DemoRemovalChecks { New-DemoCheck 'budget' '/budget' 'absent' 'exists' 'pending' }
-        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -Confirm:$false } | Should -Throw '*still present*'
+        Mock Write-Ok {}
+        Mock Write-Warn {}
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -Confirm:$false
+        $LASTEXITCODE | Should -Be 2
+        Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*still in progress*still present: budget*' }
+        Should -Invoke Write-Ok -Times 0 -ParameterFilter { $Message -like 'Removed:*' }
     }
     It 'checks optional identity sharing before deleting policies budget or groups' {
         Mock Invoke-DemoAz { '[{"id":"identity-fixture","displayName":"sp-retail-demo-onboard"}]' } -ParameterFilter { $Arguments[0] -eq 'ad' }

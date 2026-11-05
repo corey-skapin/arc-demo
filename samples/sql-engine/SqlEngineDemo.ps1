@@ -59,6 +59,47 @@ function Test-DemoRebootPending {
     return $false
 }
 
+function Get-DemoRebootPendingDetail {
+    # What Test-DemoRebootPending saw, for the error text: the flags and the first pending rename sources, so an
+    # operator can tell a routine installer leftover from a real servicing restart. Read-only.
+    $found = @()
+    foreach ($path in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')) {
+        if (Test-Path -LiteralPath $path) { $found += ('flag ' + ($path -split '\\')[-1]) }
+    }
+    $session = Get-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
+    $renames = @($session.GetValue('PendingFileRenameOperations') | Where-Object { $_ -ne $null })
+    if ($renames.Count) {
+        # Entries come in pairs: the source, then the destination (empty means delete the source at the next boot).
+        $sources = @()
+        for ($i = 0; $i -lt $renames.Count; $i += 2) {
+            $source = ([string]$renames[$i]) -replace '^\\\?\?\\', ''
+            if ($source) { $sources += $(if ($source.Length -gt 100) { $source.Substring(0, 100) + '...' } else { $source }) }
+        }
+        $shown = @($sources | Select-Object -First 8)
+        $more = if ($sources.Count -gt $shown.Count) { '; and ' + ($sources.Count - $shown.Count) + ' more' } else { '' }
+        $found += ('PendingFileRenameOperations: ' + ($shown -join '; ') + $more)
+    }
+    $updates = 'HKLM:\SOFTWARE\Microsoft\Updates'
+    if ((Test-Path -LiteralPath $updates) -and (Get-Item -LiteralPath $updates).GetValue('UpdateExeVolatile', 0)) { $found += 'UpdateExeVolatile' }
+    return ($found -join ' | ')
+}
+
+function Wait-DemoArcAgentsReady {
+    # After a restart the Arc services come up first (about 3.5 minutes) and MonAgentCore later (about 4.5). Setup is
+    # refused until all are running, so give them a bounded time instead of failing on the first look. Read-only; when
+    # the time runs out Get-DemoArcExtensionPolicy reports the exact missing piece.
+    param([int]$TimeoutSeconds = 360)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $services = @(Get-CimInstance Win32_Service -Filter "Name='himds' OR Name='ExtensionService' OR Name='GCArcService'" -OperationTimeoutSec 20)
+        $ama = @(Get-Process -ErrorAction SilentlyContinue | Where-Object ProcessName -eq 'MonAgentCore')
+        if ($services.Count -eq 3 -and -not @($services | Where-Object State -ne 'Running').Count -and $ama.Count) { return }
+        if ((Get-Date) -ge $deadline) { return }
+        Start-Sleep -Seconds 15
+    }
+}
+
 function Get-DemoManifest {
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Owned SQL demo manifest is absent; do not adopt an existing instance.' }
     $record = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -622,6 +663,7 @@ function Install-DemoEngine {
     if (-not $ArcSqlAutoConnectOptOutConfirmed) {
         throw 'Confirm a reviewed effective Arc SQL automatic-connection opt-out before installing; installation never changes tags/extension policy.'
     }
+    Wait-DemoArcAgentsReady
     Assert-DemoSqlExtensionBlocked
     if (Test-Path -LiteralPath $manifestPath) {
         $record = Get-DemoManifest
@@ -633,7 +675,11 @@ function Install-DemoEngine {
         }
     }
     if (Get-Process | Where-Object { $_.ProcessName -in @('setup', 'ScenarioEngine', 'SqlSetupBootstrapper') -or $_.ProcessName -match '^SQL.*SSEI' }) { throw 'An installer may be active. Inspect it before another setup attempt.' }
-    if (Test-DemoRebootPending) { throw 'A reboot/pending rename is recorded. Resolve with the operator; no automatic reboot or bypass.' }
+    if (Test-DemoRebootPending) {
+        throw ('A reboot/pending rename is recorded (' + (Get-DemoRebootPendingDetail) + '). Resolve with the operator; no automatic reboot or bypass. ' +
+            'With the owner''s approval one graceful restart from Azure (az vm restart) normally clears a routine leftover; ' +
+            'rerun this step afterwards (it waits up to six minutes for the Arc services and MonAgentCore). See docs/troubleshooting.md, SQL preparation reports a pending file rename.')
+    }
     if ($record) {
         if ($record.phase -eq 'pending-reboot') {
             $boot = (Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 20).LastBootUpTime.ToUniversalTime()

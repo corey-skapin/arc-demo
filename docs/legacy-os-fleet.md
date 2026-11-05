@@ -23,13 +23,15 @@ tiers that cannot be reliably sourced as Azure Marketplace images.
 | `supportsSql` | SQL-capable role metadata, not installation/health proof. Use the [real SQL helper](sql-engine-workload.md); never enable Arc SQL/BPA in this simulation. |
 | `esuEligible` | Surfaces the ESU discussion in Arc machine tags; it does not buy or configure ESU. |
 | `vmSize` | Optional. Azure VM size for this entry; the shared `compute.vmSize` applies when absent. Deploy never resizes a retained VM, so declare the size it already has. |
-| `securityType` | Optional `Standard` or `TrustedLaunch`; unset leaves the platform default. Nested virtualization needs `Standard`. |
-| `dataDisks` | Optional array of `{ name, lun, sizeGb, storageAccountType, caching }`. Each is a standalone managed disk named `<vm>-<name>` attached with `createOption: Attach`, so a redeploy converges on an existing disk. Deploy refuses to detach, resize or convert a retained disk that the entry does not declare. |
+| `securityType` | Optional `Standard` or `TrustedLaunch`; unset leaves the platform default. Nested virtualization needs `Standard`. Compute fixes it when the VM is created and rejects a repeat, so Deploy sends it only for a VM that does not exist yet and omits it on a redeploy. |
+| `dataDisks` | Optional array of `{ name, lun, sizeGb, storageAccountType, caching }`. Each is a standalone managed disk named `<vm>-<name>` attached with `createOption: Attach`, so a redeploy converges on an existing disk. Deploy refuses to detach, resize or convert a retained disk that the entry does not declare, so declare the tier the disk has now, even when it changed outside this repo ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)). |
 
 The deploy script also tags every Arc machine with `osTier`, `monitorTier`,
 `esuEligible`, `inventory=arc`, `updateManager=assessment`, `defender=plan2`,
 and `machineConfig=enabled` so the Arc control-plane story is visible for all
-Arc-onboarded machines, including legacy entries.
+Arc-onboarded machines, including legacy entries. It merges them through the ARM
+tags API and leaves a host that already matches untouched; readiness and parity
+assert `role` and `osTier` against this manifest.
 
 ## Per-entry size and data disks
 

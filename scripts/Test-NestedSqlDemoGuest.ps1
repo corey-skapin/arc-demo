@@ -84,7 +84,6 @@ Invoke-Command -VMName $VmName -Credential $GuestCredential -ArgumentList $Expec
         SqlExtensionAccount = $extensionService.StartName
         SqlExtensionState = $extensionService.State
         SqlExtensionLoginVerified = $extensionLogin
-        SqlExtensionInventoryVerified = $false
         CheckedAtUtc = [datetime]::UtcNow.ToString('o')
     }
     if (-not $setupComplete -or -not $arcConnected -or -not $sqlRunning -or

@@ -33,6 +33,14 @@ function Get-SnapshotValue {
     $current
 }
 
+function Test-SnapshotKey {
+    # Tells a field that was captured as empty from one an older snapshot never captured.
+    param([AllowNull()]$Object, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Object) { return $false }
+    if ($Object -is [System.Collections.IDictionary]) { return $Object.Contains($Name) }
+    $null -ne $Object.PSObject.Properties[$Name]
+}
+
 function ConvertTo-SnapshotDate {
     # A snapshot read back from JSON holds [datetime] values and a live one holds ISO text. Never go through a
     # culture-bound string: MM/dd/yyyy text parses as a different date under en-AU or de-DE.
@@ -107,7 +115,8 @@ function Get-DemoEstateSnapshot {
     $sections['arcMachines'] = Invoke-SnapshotSection {
         if (-not (Test-SnapshotGroup $groups.arc)) { return , @() }
         $machines = @(Get-SnapshotJson @('connectedmachine', 'list', '-g', $groups.arc, '-o', 'json')) | ForEach-Object {
-            [ordered]@{ name = (Get-SnapshotValue $_ 'name'); status = (Get-SnapshotValue $_ 'status'); osType = (Get-SnapshotValue $_ 'osType'); agentVersion = (Get-SnapshotValue $_ 'agentVersion') }
+            [ordered]@{ name = (Get-SnapshotValue $_ 'name'); status = (Get-SnapshotValue $_ 'status'); osType = (Get-SnapshotValue $_ 'osType'); agentVersion = (Get-SnapshotValue $_ 'agentVersion')
+                tags = (Get-SnapshotValue $_ 'tags') }
         }
         , @($machines)
     }
@@ -198,7 +207,7 @@ function Get-DemoEstateSnapshot {
         [ordered]@{
             deployment = $(if ($manifest) { $manifest[0].name } else { '' })
             machines = @(if ($manifest) { @($manifest[0].properties.outputs.vmFleet.value) | Where-Object { Get-SnapshotValue $_ 'deployed' } |
-                ForEach-Object { [ordered]@{ name = (Get-SnapshotValue $_ 'name'); osType = (Get-SnapshotValue $_ 'osType') } } })
+                ForEach-Object { [ordered]@{ name = (Get-SnapshotValue $_ 'name'); osType = (Get-SnapshotValue $_ 'osType'); role = (Get-SnapshotValue $_ 'role'); osTier = (Get-SnapshotValue $_ 'osTier') } } })
             azureVmNames = @(if ($manifest) { @(Get-SnapshotValue $manifest[0] 'properties.outputs.azureVmNames.value') | Where-Object { $_ } })
         }
     }
@@ -285,6 +294,15 @@ function Test-DemoEstateParity {
                     $start -and $end -and ($end - $start).TotalDays -le 2 })
                 & $add $id 'no credential that lives two days or less' @($residual | ForEach-Object { $_.displayName }) ($residual.Count -eq 0) 'A one-day build credential was not removed.'
             }
+            'noLongLivedCredentials' {
+                $state = Get-SnapshotSection $Snapshot 'onboardingApp'
+                if (-not $state.Ok) { & $unavailable $id 'no credential that lives longer than two days' $state; continue }
+                $long = @(@($state.Data.credentials) | Where-Object {
+                    $start = ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'startDateTime')
+                    $end = ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'endDateTime')
+                    $start -and $end -and ($end - $start).TotalDays -gt 2 })
+                & $add $id 'no credential that lives longer than two days' @($long | ForEach-Object { "$($_.displayName) until $((ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'endDateTime')).ToString('yyyy-MM-dd'))" }) ($long.Count -eq 0) 'The build only ever mints one-day credentials. A longer one was left by the application''s creation (an older Deploy) or added by hand; deleting it is the owner''s decision (az ad app credential delete).'
+            }
             default {
                 $state = Get-SnapshotSection $Snapshot 'groups'
                 $label = "$($rule.type) $(Get-SnapshotValue $rule 'name')".Trim()
@@ -296,12 +314,23 @@ function Test-DemoEstateParity {
                 if ($tags) { foreach ($tag in $tags.PSObject.Properties) { $items = @($items | Where-Object { (Get-SnapshotValue $_ "tags.$($tag.Name)") -eq $tag.Value }) } }
                 $name = [string](Get-SnapshotValue $rule 'name')
                 if ($name) { $name = & $expandName $name; $items = @($items | Where-Object { $_.name -eq $name }) }
+                # tagNames: each named tag must be present with a value, whatever the value is (a skin may set its own).
+                $tagNames = @(@(Get-SnapshotValue $rule 'tagNames') | Where-Object { $_ })
+                $untagged = @()
+                if ($tagNames.Count) {
+                    $hasTags = { param($item) -not @($tagNames | Where-Object { -not (Get-SnapshotValue $item "tags.$_") }).Count }
+                    $untagged = @($items | Where-Object { -not (& $hasTags $_) })
+                    $items = @($items | Where-Object { & $hasTags $_ })
+                    $label = "$label tagged $($tagNames -join ', ')"
+                }
                 $min = Get-SnapshotValue $rule 'min'
                 $count = Get-SnapshotValue $rule 'count'
                 $need = if ($null -ne $min) { [int]$min } elseif ($null -ne $count) { [int]$count } else { 1 }
                 $ok = if ($null -ne $min) { $items.Count -ge $need } else { $items.Count -eq $need }
                 $wording = if ($null -ne $min) { "at least $need" } else { "exactly $need" }
-                & $add $id "$wording x $label" @($items | ForEach-Object { $_.name } | Select-Object -First 8) $ok "Found $($items.Count)."
+                $found = "Found $($items.Count)."
+                if ($untagged.Count) { $found += " Without every required tag: $(@($untagged | ForEach-Object { $_.name }) -join ', ')." }
+                & $add $id "$wording x $label" @($items | ForEach-Object { $_.name } | Select-Object -First 8) $ok $found
             }
         }
     }
@@ -316,6 +345,17 @@ function Test-DemoEstateParity {
         foreach ($machine in $machines) {
             & $add "fleet/$($machine.name)/vm" 'Azure VM exists' ($machine.name -in $vmNames) ($machine.name -in $vmNames) ''
             & $add "fleet/$($machine.name)/arc" 'Arc machine exists' ($machine.name -in $arcNames) ($machine.name -in $arcNames) ''
+            # Tags are compared only when both sides captured them: a manifest from before the fleet output carried
+            # role and osTier, or a snapshot from before the Arc list kept tags, cannot be judged.
+            $wantRole = [string](Get-SnapshotValue $machine 'role')
+            $wantTier = [string](Get-SnapshotValue $machine 'osTier')
+            $arcEntry = @($arcState.Data | Where-Object { $_.name -eq $machine.name }) | Select-Object -First 1
+            if ($wantRole -and $wantTier -and $arcEntry -and (Test-SnapshotKey $arcEntry 'tags')) {
+                $tagMap = ConvertTo-DemoTagMap (Get-SnapshotValue $arcEntry 'tags')
+                $found = foreach ($tagName in 'role', 'osTier') { "$tagName=$(if ($tagMap.ContainsKey($tagName)) { $tagMap[$tagName] } else { '(missing)' })" }
+                $wanted = "role=$wantRole, osTier=$wantTier"
+                & $add "fleet/$($machine.name)/tags" "Arc machine tags $wanted" ($found -join ', ') (($found -join ', ') -ceq $wanted) 'The role/osTier tags the workbooks filter on are missing or wrong; Deploy merges them and skips a host that already matches.'
+            }
         }
         $azureVmNames = @(@(Get-SnapshotValue $fleet.Data 'azureVmNames') | Where-Object { $_ })
         foreach ($name in $azureVmNames) {

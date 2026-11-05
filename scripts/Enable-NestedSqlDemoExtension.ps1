@@ -25,13 +25,13 @@ Invoke-Command -VMName $VmName -Credential $GuestCredential -ScriptBlock {
     $agent = "$env:ProgramFiles\AzureConnectedMachineAgent\azcmagent.exe"
     $block = & $agent config get extensions.blocklist --json | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'Extension block list read failed' }
-    $entries = @($block.Data.Trim().Trim([char[]]'[]') -split ',' | ForEach-Object Trim)
+    $entries = @($block.Data.Trim().Trim([char[]]'[]') -split ',' | ForEach-Object { $_.Trim() })
     if ($entries -contains 'Microsoft.AzureData/WindowsAgent.SqlServer') {
         & $agent config set extensions.blocklist 'Microsoft.AzureData/WindowsAgent.SqlServer' --remove --json
         if ($LASTEXITCODE -ne 0) { throw 'SQL-only unblock failed' }
         $block = & $agent config get extensions.blocklist --json | ConvertFrom-Json
     }
-    $entries = @($block.Data.Trim().Trim([char[]]'[]') -split ',' | ForEach-Object Trim)
+    $entries = @($block.Data.Trim().Trim([char[]]'[]') -split ',' | ForEach-Object { $_.Trim() })
     if ($LASTEXITCODE -ne 0 -or $entries -contains 'Microsoft.AzureData/WindowsAgent.SqlServer') { throw 'SQL block removal not verified' }
     $block
 }

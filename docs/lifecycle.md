@@ -45,7 +45,10 @@ Missing registrations must be approved and registered separately. Baseline
 providers include KeyVault, DevTestLab and Consumption. Optional Container Apps
 requires Microsoft.App and the `containerapp` CLI extension; AKS additionally needs
 ContainerService, ManagedIdentity, Resources, Storage and ContainerInstance for its
-deployment script. `Test-Prerequisites.ps1 @target`, Deploy and the build wrapper's
+deployment script. A nested SQL parent (security type `Standard`) also needs the
+subscription feature `Microsoft.Compute/UseStandardSecurityType`, registered by an
+authorized operator once ([nested-sql-demo.md](nested-sql-demo.md#prepare-the-parent)).
+`Test-Prerequisites.ps1 @target`, Deploy and the build wrapper's
 P0 all read the same set for the skin's workload toggles.
 The retired mixed SQL path no longer requests AzureArcData registration;
 optional real SQL preparation does not enable Arc SQL.
@@ -92,7 +95,7 @@ Define the guest once in the private skin:
 ```json
 "nestedSqlGuest": {
   "enabled": true,
-  "parentVmName": "sql-parent",
+  "parentVmName": "win-sql-02",
   "guestVmName": "sql-guest",
   "arcMachineName": "sql-guest"
 }
@@ -100,8 +103,10 @@ Define the guest once in the private skin:
 
 These are names in the confirmed demo groups, not credentials or arbitrary
 resource IDs. Defaults leave it disabled. Use the same skin for every operation.
-The exact configured Windows parent may already be in the retained fleet; a
-separately created parent is selected only from that same infra group.
+The exact configured Windows parent may already be in the retained fleet (the default
+fleet's `win-sql-02`, which Deploy then creates as `Standard_D4s_v5` with a 128 GiB data
+disk and security type `Standard`, see [cost.md](cost.md#qualified-retail-comparison));
+a separately created parent is selected only from that same infra group.
 
 Activate restores outbound networking, starts the parent, starts an Off/Saved
 Hyper-V guest without restarting a Running guest, then waits for the guest's
@@ -110,7 +115,10 @@ forced power-off), waits for Off, then deallocates compute. If guest shutdown
 fails, it warns and still attempts spend-reducing parking of all targeted compute;
 that is not a guest-data-consistency claim. Remove makes one bounded (ten-minute)
 graceful stop of a running guest; if that stop fails it warns and continues,
-because the parent, its disks and the guest are deleted with the group anyway. A
+because the parent, its disks and the guest are deleted with the group anyway. It
+skips the stop when the guest never became an Arc machine (an unfinished build)
+and treats a parent without the Hyper-V role or a guest that does not exist as
+nothing to stop. A
 parked parent needs no guest boot for removal. Definitions/disks/credentials are
 retained on park/wake, not recreated.
 
@@ -172,8 +180,20 @@ generated **after the VM start time**: the moment activation requested the start
 the start of the attempt for a host that was already running or starting. A host
 with no Heartbeat at the deadline is `pending` for that host only. A VM that is no
 longer running, an Arc identity that never connects, or no Heartbeat together with
-a `Failed` AMA extension fails. Expected wake is about 12-15 minutes (VM start 3-4,
-NAT 1-2, Windows Heartbeat up to about 9) rather than 30-45+.
+a `Failed` AMA extension fails. Observed wake: 11 min 55 s (5 November 2026, Linux hosts
+ready about 3 minutes after their start, Windows hosts about 7.5) and 14 min 54 s
+(2 November); expect about 12-15 minutes (VM start 3-4, NAT 1-2, Windows Heartbeat up
+to about 9) rather than 30-45+.
+
+The Arc `status` is the slowest signal to move, in both directions. After a
+deallocation the Arc machines kept reading `Connected` for 11-16 minutes (observed;
+Microsoft documents a heartbeat every five minutes and `Disconnected` "within 15 to 30
+minutes" of the last one, see [agent status](https://learn.microsoft.com/azure/azure-arc/servers/overview#agent-status)),
+so an Arc row that reads `Connected` just after a start proves nothing. Trust the
+Heartbeat that was generated after the start; it is the condition that decides the wait.
+After a park longer than that, the next wake meets machines that read `Disconnected`.
+Learn says the status changes back to `Connected` on the next heartbeat; this lab has
+not yet shown that reverse transition (see [validation boundaries](#validation-boundaries)).
 
 **No Run Command is used for host checks by default.** Run Command queues behind VM
 extension updates (Defender MDE, AMA, Change Tracking), so N blocked Linux VMs used
@@ -209,7 +229,10 @@ including retrying a failed assessment phase after compute is already running.
 It conflicts with `-SkipPatchAssessment`; native VMs are not Arc assessment
 targets. The activation result records `not-required` when no hosts need default
 submission. This is not proof of earlier assessment success or freshness.
-Submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
+Submission is **not** assessment completion. The first assessment also makes the Update
+Manager identity add one `WindowsOsUpdateExtension` or `LinuxOsUpdateExtension` Arc
+extension per host (eight on the eight-host lab). They are not drift: an inventory count
+taken before and after the first wake rises by that many. `-SkipPatchAssessment` opts out;
 if Azure returns `OperationConflict` because an assess/patch operation is already
 running, activation warns and records `already-in-progress` in its per-host
 assessment output. It does not retry, cancel or claim completion. Other errors,
@@ -232,7 +255,14 @@ The AI must poll the read-only readiness command to pass before continuing the
 presentation, dependent SRE readiness or the conversational incident offer;
 activation exit 0 alone does not prove telemetry has arrived.
 Completion must come from stdout with no failed/Error-level result; a marker in
-stderr alone is not success. `-WhatIf` neither invokes guests nor writes this report.
+stderr alone is not success. `-WhatIf` neither invokes guests nor writes this report;
+it lists what a real run would do from the inventory and network it read (the NAT
+gateway and public IP it would create and tag, each VM with what happens to it, the
+nested guest, AKS, the Container App revisions and the shared wait). The tags are the
+lab's own (owner, purpose, costcenter, env and the skin's `tags`): Bicep stops declaring
+the NAT gateway and public IP once they exist, so Activate writes them again on the pair
+it recreates and checks them on every run. A tagging failure warns and never stops the
+wake, and parity reports an untagged pair.
 
 Fresh deployment creates NAT/PIP before backing compute/extension provisioning;
 it does not rely on implicit default outbound. Redeployment preserves an existing
@@ -253,6 +283,17 @@ parking steps intact: do not wake/redeploy to undo a partial stop. Retry the sam
 target to finish remaining known transitions (for example a failed PIP deletion).
 Network sharing is inspected again before removal after compute has stopped.
 
+Hibernate prints a time-stamped line for each phase, so its seven minutes are not
+silent. Its `-WhatIf` lists what each workload would do (each VM with its power state,
+the nested guest, AKS, the Container App revisions, the NAT gateway and public IP)
+instead of one generic sentence; it takes about 80 seconds on eight VMs because the
+full inventory is read first. `-ResultPath <PRIVATE_EXISTING_DIRECTORY>\hibernation-attempt.json`
+keeps the same evidence Activate's does outside git: the steps with their times, each
+VM's power state before parking, the revisions deactivated, the network outcome and the
+closing Hibernated readiness rows. The file is written when the run starts and again
+when it ends, passed or failed; a folder that does not exist is refused before anything
+is parked. Use a new file per attempt.
+
 Hibernated **required** acceptance is VM deallocation, deployed AKS
 Stopped/Succeeded and no active Container App revision. Named NAT/PIP absence
 is reported as **non-required cost diagnostics**: unsafe binding conflicts or
@@ -271,6 +312,24 @@ enabled as before and may incur evaluation/notification costs. Safe restoration
 would require preserving exact previous enabled state and reconciling concurrent
 changes/companion routing; a generic disable/enable would be unsafe. Evaluate a
 separate explicit pause only if measured savings justify that added state.
+
+**Every Hibernate fires the Sev2 missing-heartbeat alert.** The rule
+`alert-<prefix>-host-missing-heartbeat` looks for a host whose last Heartbeat is older
+than 10 minutes, so it fires about 8-10 minutes after the VMs are deallocated (observed
+7.7-9.7 minutes after the VMs read deallocated, 11.5 minutes after the last Heartbeat)
+and notifies the one e-mail receiver on the action group. It cleared itself 16-21
+minutes after it fired, and after the second Hibernate it did so while every host was
+still silent, so a cleared alert is not evidence that the hosts came back (the rule's
+15-minute query window probably explains it; that was not tested on a real outage).
+Nothing is paused and the rule is not faulty.
+A short park fires it during the next Activate too, until the last Windows host's
+Heartbeat returns (observed: cleared about 12 minutes after). The nested guest sends no
+Heartbeat rows, so the rule never covers it. E-mail delivery was not verified. This is
+why the companion SRE agent is parked first and woken last: an agent that is active
+during a Hibernate would receive this Sev2 as a live incident. Muting it while parked
+(an alert processing rule that suppresses the action group, created by Hibernate and
+removed by Activate; see [alert processing rules](https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-processing-rules))
+is an owner decision and is not implemented.
 
 Before parking, preserve the confirmed target, exact skin/fleet files and their
 hashes, prefix/region, deployment-manifest identities and optional revision/fault
@@ -292,7 +351,13 @@ billable. See [AKS stop/start](https://learn.microsoft.com/azure/aks/start-stop-
 and [Container App revision management](https://learn.microsoft.com/azure/container-apps/revisions-manage).
 
 Removal waits for both resource groups **and** named subscription policies/budget
-to disappear; a rerun skips already-absent objects. Optional `-ForceDeleteWorkspace`
+to disappear; a rerun skips already-absent objects. The wait is `-TimeoutMinutes`
+(default 60, at most 120) and normally takes 25-35 minutes, because a Container Apps
+environment stays in `ScheduledForDelete` for about 25. Each change to the list of
+objects still present is printed. When the limit passes first, Remove exits 2
+(deletion still in progress, nothing retried), skips the prune and Defender steps
+that need verified removal, and the same command run again finishes them.
+Exit codes are 0 removed and verified, 1 error, 2 still deleting. Optional `-ForceDeleteWorkspace`
 first permanently deletes `law-<prefix>` (irreversible, under its own confirmation):
 without it the workspace is only soft-deleted for 14 days and re-creating the same
 name recovers its old data. `Removed` read-only verification
@@ -307,13 +372,71 @@ Default removal deliberately retains the tenant onboarding identity; opt-in SP
 deletion does not claim application-object deletion. No purge is performed.
 Review these exclusions/delayed billing separately; do not promise a zero bill.
 
+### What still happens to a parked estate
+
+Observed on 5-6 November 2026 from read-only reads of an estate that stayed parked for
+about three hours. None of it is a lab fault and none of it needs action; it is listed
+so that nobody chases it in the activity log of a parked lab.
+
+- **Arc status** reads `Disconnected` 11-16 minutes after the stop. Resource Health for a
+  parked Arc machine flaps between `Available` and `Unavailable` and disagreed with the
+  `status` field for 16-20 minutes, so read `status`, not Resource Health. Hibernated
+  readiness has no Arc row, so the delayed flip cannot fail it. The reverse reconnection
+  at the next wake is not yet proven.
+- **No Defender push** arrives while the VMs are deallocated: three hourly slots passed
+  with no event. That says nothing about the push after a wake
+  ([below](#linux-vms-and-the-defender-mdelinux-install-lock)).
+- **The Sev2 heartbeat alert** fires and clears itself, as described above.
+- **Platform patch writes**: a platform update service writes the patch extensions on the
+  Arc machines about every 4.5 hours. A write to a parked machine stays `Running` for
+  about 31 minutes and then fails with `HCRP400` "The Hybrid Compute machine is not
+  connected to Azure."
+- **Linux VM extensions** (AMA, Change Tracking, `MDE.Linux`) read ARM `Updating` for at
+  least 86 minutes after a Hibernate that cancelled a stuck Defender write. Their effect
+  at the next Activate is not known.
+- **Activity-log noise**: hourly `upgradeExtensions` `HCRP404` failures on the Linux Arc
+  machines, Advisor recommendations for names that are not in the subscription, and
+  `Failed` `deployIfNotExists` evaluations of the repo's own `nist-<prefix>` assignment
+  after every VM write. See
+  [troubleshooting](troubleshooting.md#activity-log-noise-on-an-idle-or-parked-estate)
+  and [the policy entry](troubleshooting.md#failed-deployifnotexists-policy-events-follow-every-vm-write).
+- **Disk tier**: a governance automation can convert the disks to Standard HDD while the
+  estate is parked, and the next Deploy then refuses the tier. See
+  [troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself).
+
+### Adding an optional workload to a running estate
+
+The incremental path works: set the workload's flag (`workloads.deployContainerApps`,
+`deployAks`, `deployAzureVMs` in the private skin, or the matching `-Deploy...` switch) **in the
+same step as the Deploy that creates it**, then run the same Deploy again. It adds only the new
+resources (for Container Apps: the environment, the fault app, the restart alert and the Arc-path
+MDE extensions); no VM is restarted and no disk, the vault, the subnet, the NAT gateway or the
+Defender plan is touched. Do not set the flag earlier: lifecycle commands and read-only
+readiness compare the skin with the retained manifest, so with the flag already `true` and
+nothing deployed yet, readiness ends with exit 1 and one `readiness/error` row, "Skin requires
+deployContainerApps, but no retained workload manifest exists. Reconcile deployment before
+lifecycle operations." That is expected, not damage; deploy the workload, then run readiness.
+Expect these side effects of any Deploy pass, not only this one:
+
+- The Container Apps environment alone takes 17-23 minutes and can sit in `Waiting` for 20 or
+  more ([container-app-fault.md](container-app-fault.md#deploy)).
+- A VM behind a pending Defender extension operation can hold the deployment for much longer
+  ([troubleshooting](troubleshooting.md#a-linux-vm-stays-updating-behind-a-defender-mdelinux-install-lock)).
+- The DevTest auto-shutdown schedules are set to the skin's `operations.autoShutdownTime`
+  again; Deploy warns first and names any live schedule that differs.
+- The machines' `role` and `osTier` tags are checked and written only where they differ,
+  merged with any other tag.
+
 ## Credentials and partial deployments
 
 Routine redeployment never resets the onboarding SP credential. Existing VMs
 reuse `vm-admin-password` from their existing Key Vault; if that secret was never
-stored, supply the **current** password as `-AdminPassword` (SecureString).
-Do not supply a new password as a convenience: credential rotation is a separate
-approved operation. Fresh deployments save the generated password to Key Vault.
+stored or the vault cannot be read from the workstation, supply the **current**
+password as `-AdminPassword` (SecureString) or as the file an earlier run saved
+with `-AdminPasswordPath` (below). Do not supply a new password as a convenience:
+credential rotation is a separate approved operation. Fresh deployments generate
+the password, save it to Key Vault through Azure Resource Manager and, when
+`-AdminPasswordPath` is given, to that file first.
 For `Deploy-ArcDemo.ps1`, new Arc onboarding runs through
 `Initialize-DemoOnboardingIdentity` once the Arc resource group exists. An
 existing `sp-<prefix>-onboard` keeps its credentials: they are never read,
@@ -321,14 +444,34 @@ reset or changed. Deploy re-grants its `Azure Connected Machine Onboarding` role
 at the Arc group (a deleted group takes the old assignment with it), adds a
 one-day credential through Graph, uses it only for onboarding and removes it in
 `finally`, then checks the original key IDs are unchanged. Without an SP, it is
-created with that role as before and its secret is used for that run only.
+created with that role as before; the one-year credential that creation adds is used
+for that run only and then removed, by its exact key ID and only when it was absent
+before the creation and is named `rbac`, so no long-lived credential is left behind.
+An estate built by an older Deploy still carries that credential: parity reports it
+as `tenant/no-long-lived-credentials`, and deleting it
+(`az ad app credential delete --id <appId> --key-id <keyId>`) is the owner's decision;
+no script deletes an existing credential.
 `-OnboardingSecret` (SecureString) is an optional override for an operator who
 cannot manage the application's credentials; it skips the one-day credential.
 Never commit or log either secret.
 
 Deploy selects a retained vault using the saved `keyVaultName` deployment output
-and preserves its public-network-access mode. A private-only vault requires the
-current `-AdminPassword`; Deploy does not open it for workstation secret reads.
+and preserves its public-network-access mode. After a fresh build that stopped part
+way (no Succeeded manifest yet) it adopts only the vault named by its own Failed or
+Canceled `arc-demo-<timestamp>` deployment, never another one, and it refuses to start
+while one of its own deployments is still Running. A private-only vault requires the
+current password (`-AdminPassword` or the `-AdminPasswordPath` file); Deploy does
+not open it for workstation secret reads. A tenant policy can make every new vault
+private-only seconds after creation (see
+[troubleshooting](troubleshooting.md#the-key-vault-is-private-only-and-az-keyvault-secret-is-refused-forbiddenbyconnection)),
+which is why the first save goes through Azure Resource Manager and why the file exists.
+**`-AdminPasswordPath`**: the file lives outside the git worktree, in an existing
+folder (the build wrapper passes `vm-admin-credential.clixml` in its
+[private folder](private-config.md)). A fresh build writes it before any Azure write;
+on Windows it is a DPAPI-protected export that only the same user on the same PC can read
+(elsewhere PowerShell does not encrypt it). A later run uses it only when
+`-AdminPassword` is absent and the vault is not readable or holds no secret; a readable vault
+wins, and a fresh build replaces a stale file. It is never printed or logged.
 This protects the existing estate, not a nested-build prerequisite. The
 [nested build](nested-sql-demo.md) needs no vault and, like Deploy, no supplied
 onboarding secret: it uses the same one-day credential flow.
@@ -336,13 +479,17 @@ onboarding secret: it uses the same one-day credential flow.
 Mandatory compute/Arc waits throw on timeout; inspection errors terminate. Native CLI
 failures terminate; authentication/authorization errors are never interpreted as
 resource absence. The one retried write is the first Key Vault save of the generated
-password: it retries `Forbidden`/transient errors for up to ten minutes while the
-deployer's new role assignment propagates, and any other error stops at once.
+password: it goes through Azure Resource Manager (no data-plane role has to propagate) and
+retries only throttling, 5xx and connection errors, with a bounded backoff; any other
+error stops at once.
 Extension jobs must complete successfully; guest commands need
 an exact completion marker as well as a nonfailed provisioning result. Only the
 activation AMA wait permits the explicit `ARC_DEMO_PENDING` stdout marker;
 other guest operations cannot use it to bypass completion. Temporary
-credential-bearing files and jobs are removed even after failure.
+credential-bearing files and jobs are removed even after failure. Deploy submits the
+Bicep deployment with `--no-wait` and polls it, so the parameters file (which holds the
+admin password in plain text in the user's temp folder) is deleted as soon as Azure accepts
+the request, seconds after it is written, not after the whole build.
 
 Routine deployment preserves an existing Container App's `SIMULATE_CRASH` value
 and does not re-bootstrap the sample workload on an existing AKS cluster.
@@ -392,10 +539,15 @@ Check statuses: `pass`, `fail`, `pending`, `skipped`. Exit codes: **0** all requ
 checks pass; **1** required failure or inspection/configuration error; **2** required
 eventual-consistency checks still pending at the deadline. Consumers correlate
 `resourceId`, not display names or counts. Preserve raw JSON as dated evidence,
-outside committed source because it contains live environment identifiers.
+outside committed source because it contains live environment identifiers:
+`-OutputPath <file>` writes that same JSON to a file (creating its folder, whatever
+`-OutputFormat` shows) and the exit code is unchanged, so no separate capture is needed.
 
 Checks cover retained groups, core resources/workbook presence, exact VM power,
-Arc connection, recent Heartbeat by expected ARM ID, supported extension
+Arc connection, the `role` and `osTier` tags on every Arc machine (required `tags/*`
+rows, compared with the deployment manifest), recent Heartbeat by expected ARM ID
+(its `observed` text carries the time of the latest Heartbeat and its age), the VM's
+ARM provisioning state (soft `provisioning/*` rows) and supported extension
 provisioning (soft, non-required `extension/*` diagnostics), DCRA identities, NAT
 attachment/presence, AKS power/provisioning and
 active Container App revision health. `RunningAtMinScale`/`RunningAtMaxScale` are
@@ -415,7 +567,12 @@ A `Failed` AMA extension with no recent Heartbeat makes the **required**
 `heartbeat/*` row `fail` rather than pending: a failed agent is not telemetry lag.
 This is **infrastructure/monitor readiness**, not proof of every guest workload,
 Kubernetes pod, policy compliance result, CT inventory cycle, or completed patch
-assessment or Defender sensor/AV/EDR health. Demonstrate those separately; never
+assessment or Defender sensor/AV/EDR health. It does not see the SQL engine, the orders
+workload, the SQL lock-timeout alert, the nested guest's Arc SQL instance (`nested/arc` is
+the Arc connection only) or the content of most workbooks, and no row compares the Arc
+roster that the capacity and optimisation workbooks recorded at their last publish
+with the machines that exist now. The build wrapper's P5, P6 and P11 cover parts of that;
+a `pass` here is not "demo ready". Demonstrate those separately; never
 manufacture fault data to pass.
 
 ## Linux monitoring and support stance
@@ -458,6 +615,44 @@ EDR/event-delivery validation, or change policy to make the story greener.
 The earlier timeout's underlying cause is not established. Keep timestamped ARM,
 guest health and existing log evidence separate. No reinstall/retry/removal,
 service restart, VM restart or AV-mode change follows from diagnosis alone.
+
+### Linux VMs and the Defender MDE.Linux install lock
+
+A defect in the vendor's MDE.Linux handler can leave a Linux VM `Updating` for about
+90 minutes while the guest is healthy: every real `enable` leaves a 36-minute orphan
+install lock, and a Defender push inside that window is never completed. The
+[troubleshooting entry](troubleshooting.md#a-linux-vm-stays-updating-behind-a-defender-mdelinux-install-lock)
+has the cause and the recovery. For the lifecycle this means:
+
+- Every boot of a Linux VM runs a real `enable`, so a Defender push within 36 minutes
+  after an Activate can leave that VM `Updating`. With the observed hourly push and
+  independent timing that is roughly three in five VMs (derived from the 36-of-60-minute
+  window, not measured; the push cadence did not stay hourly after one recovery, so treat
+  it as an upper bound). It happened to all three Linux VMs after the Activate of 5 November
+  2026: a push 26 minutes after they finished starting left them `Updating` with
+  Heartbeats fresh, and the next Hibernate cancelled it 16.5 minutes later (left alone the
+  platform would have timed the write out about 91 minutes after it began). A Run Command,
+  a tag edit or a Deploy re-PUT during the window adds another `enable` and lengthens it, so
+  do none of them on those VMs while they are `Updating`: wait, or Hibernate, and never
+  redeploy. Activation is unaffected: it passes a host on VM running, Arc
+  `Connected` and a fresh Heartbeat, and shows the extension state as a soft warning.
+  Nothing pushes to a deallocated estate (three hourly slots passed with no event while it was
+  parked), and one slot after a wake does not show that the cadence after a wake is hourly.
+- Readiness reports the VM's ARM provisioning state and `MDE.Linux` state as non-required
+  `provisioning/*` and `extension/*` rows with a pointer to the entry; they never gate.
+- Hibernate on `Updating` Linux VMs is proven (5 November 2026). With all three Linux VMs
+  `Updating` behind a Defender write that had been open for about 14 minutes, every
+  deallocation was accepted at once, with no 409 and no queueing; the stuck writes show
+  `Canceled` in the activity log 11-15 seconds before the VMs first read deallocated, and the
+  run exited 0 in 416.4 seconds. Hibernate submits every deallocation without waiting, then
+  waits up to 20 minutes for each VM to read deallocated; a VM that is still not deallocated
+  fails the run with an error (never "verified stopped") and keeps the progress made, and a
+  rerun after the VM settles finishes the job. The DevTest auto-shutdown and a governance
+  deallocation against `Updating` VMs were not exercised: the estate was already deallocated
+  by then.
+- Deploy warns before it submits when a VM is already `Updating`, then polls with progress.
+  A tag edit or a re-PUT of a Linux VM is a write that can seed the stall, so Deploy skips
+  the Arc tag write when the tags already match.
 
 ## Validation boundaries
 
@@ -527,7 +722,9 @@ This proves one short retained-estate park/wake, including fresh post-start
 Heartbeats without the old explicit service restarts. Arc records still read
 `Connected` before wake while their backing VMs were parked, so an observed
 `Disconnected` to `Connected` transition, long-park reconnection and guest service
-health were not proven. Fresh deployment, double-deploy idempotency, AKS,
+health were not proven. The
+[5-6 November proof](#park-wake-and-park-again-5-6-november-2026) later showed the
+`Disconnected` half; the reconnection is still open. Fresh deployment, double-deploy idempotency, AKS,
 assessment completion, full removal and rebuild remain outside this proof;
 drift, denial and partial-failure paths remain mocked. The estate was left awake.
 
@@ -541,3 +738,50 @@ stderr and explicit-null JSON regressions remain. Mocks cannot prove Azure
 allocation, guest boot timing, RunCommand delivery/truncation, eventual ARM
 consistency or ingestion latency. Approve a disposable smoke cycle separately;
 see [cost.md](cost.md#proposed-disposable-smoke-cycle-not-executed).
+
+### Park, wake and park again: 5-6 November 2026
+
+An explicitly approved cycle on a rebuilt eight-host estate (nine Arc machines with the
+nested guest) ran Hibernate, Activate and Hibernate again. Durations are wall-clock from
+the scripts' own timing, not promises. The 2 November figures above came from a different
+estate and are kept as dated evidence.
+
+| Phase | Result | Duration | 2 November figure |
+| --- | --- | --- | --- |
+| Hibernate `-WhatIf`, twice | exit 0; one generic line then (a per-workload plan now) | 75.6 s and 81.6 s | n/a |
+| Hibernate | exit 0, Hibernated status pass | 435.6 s (7 min 16 s) | 8 min 35.2 s |
+| Independent Hibernated readiness | pass, 12 of 12 rows | 0.9 min | n/a |
+| Activate | exit 0, result pass, readiness pass | 715.4 s (11 min 55 s) | 14 min 54.1 s |
+| Independent Active readiness | pass, 80 rows, no required or soft row failing | 2.7 min | n/a |
+| SQL engine status, nested guest test, Arc SQL inventory | pass | 76.7 s, 36.8 s, 13 s | n/a |
+| Live parity | pass, 57 of 57 checks, with the [Graph workaround](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge) | 151 s | n/a |
+| Hibernate again, three Linux VMs `Updating` | exit 0, Hibernated status pass | 416.4 s (6 min 56 s) | n/a |
+| Independent Hibernated readiness | pass, 12 of 12 rows | 0.8 min | n/a |
+
+What this proves, for this estate and these dates:
+
+- All eight deallocations were accepted together with no 409 or queueing; Windows VMs read
+  deallocated within about a minute and Linux VMs within about three.
+- Hibernate preserved the DevTest schedules, the Defender plan and extensions, the fault
+  flag, the disks, the vault, the Arc identities and extensions and the alert rules.
+- Everything came back after Activate with no manual action: the SQL engine and orders
+  worker, the nested guest's Arc agent and SQL extension, the Arc SQL inventory (four system
+  databases online) and the Container App revision.
+- Hibernate with the three Linux VMs `Updating` from a Defender push is accepted at once
+  with no 409 and cancels the stuck writes. The post-Activate Defender stall is real (a push
+  26 minutes after boot stalled all three Linux VMs) and cleared on that Hibernate.
+- The Arc machines read `Disconnected` 11-16 minutes after the stop and stayed so, and
+  nothing pushed to the estate while it was deallocated
+  ([what still happens to a parked estate](#what-still-happens-to-a-parked-estate)).
+
+Still not proven:
+
+- The reverse transition. The Activate in this cycle began about three minutes after the
+  first Hibernate ended, before any machine read `Disconnected`, and the machines were not
+  woken after the second park. Only an Activate after a long park shows whether the Arc
+  machines reconnect without help; the wake wait's Arc `Connected` and Heartbeat-after-start
+  conditions decide it.
+- Whether the ARM `Updating` state that the Linux VM extensions kept after the deallocate
+  matters at the next Activate, and whether a platform patch write that is still pending
+  when an Activate starts overlaps the boot-time `MDE.Linux` lock.
+- Delivery of the heartbeat alert e-mail.

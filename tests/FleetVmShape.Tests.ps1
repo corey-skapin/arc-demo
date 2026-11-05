@@ -101,6 +101,55 @@ Describe 'Nested SQL parent shape from the skin' {
     }
 }
 
+Describe 'Redeploy never re-sends a security type to a VM that already exists' {
+    BeforeAll {
+        $config = [pscustomobject]@{ ParentVmName = 'win-sql-02'; ParentVmSize = 'Standard_D4s_v5'; ParentDataDiskGb = 128; ParentDataDiskStorageAccountType = 'StandardSSD_LRS' }
+    }
+    It 'keeps Standard on a nested parent that is being created' {
+        $declared = @(Get-DemoFleetWithNestedParent -Fleet @((New-FleetEntry -Name 'win-sql-01'), (New-FleetEntry -Name 'win-sql-02')) -NestedSqlGuest $config)
+        foreach ($existing in @(), @('win-sql-01')) {
+            $result = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet $declared -ExistingVmName $existing)
+            $result.Count | Should -Be 2
+            $result[1].name | Should -Be 'win-sql-02'
+            $result[1].securityType | Should -Be 'Standard'
+            $result[1].vmSize | Should -Be 'Standard_D4s_v5'
+            { Test-DemoFleet $result } | Should -Not -Throw
+        }
+    }
+    It 'omits the security type of a retained parent but still declares its size and data disk' {
+        $declared = @(Get-DemoFleetWithNestedParent -Fleet @(New-FleetEntry -Name 'win-sql-02') -NestedSqlGuest $config)
+        $declared[0].securityType | Should -Be 'Standard'
+        $result = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet $declared -ExistingVmName @('WIN-SQL-02'))
+        $result.Count | Should -Be 1
+        $result[0].PSObject.Properties.Name | Should -Not -Contain 'securityType'
+        $result[0].vmSize | Should -Be 'Standard_D4s_v5'
+        @($result[0].dataDisks).Count | Should -Be 1
+        $result[0].dataDisks[0].name | Should -Be 'nested-data'
+        { Test-DemoFleet $result } | Should -Not -Throw
+    }
+    It 'omits an explicit security type or a hashtable entry only when that VM exists' {
+        $retained = New-FleetEntry -Name 'win-app-01' -Extra @{ securityType = 'TrustedLaunch' }
+        $created = New-FleetEntry -Name 'win-app-02' -Extra @{ securityType = 'TrustedLaunch' }
+        $table = @{ name = 'win-app-03'; osType = 'Windows'; deploymentMode = 'azure-vm'; securityType = 'Standard' }
+        $result = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet @($retained, $created, $table) -ExistingVmName @('win-app-01', 'win-app-03'))
+        $result.Count | Should -Be 3
+        $result[0].name | Should -Be 'win-app-01'
+        $result[0].PSObject.Properties.Name | Should -Not -Contain 'securityType'
+        $result[1].securityType | Should -Be 'TrustedLaunch'
+        $result[2].name | Should -Be 'win-app-03'
+        $result[2].PSObject.Properties.Name | Should -Not -Contain 'securityType'
+    }
+    It 'returns entries that declare no security type, and an empty fleet, untouched' {
+        $plain = New-FleetEntry -Name 'win-app-01'
+        @(Get-DemoFleetWithoutRetainedSecurityType -Fleet @($plain) -ExistingVmName @('win-app-01'))[0] | Should -Be $plain
+        @(Get-DemoFleetWithoutRetainedSecurityType -Fleet @() -ExistingVmName @('win-app-01')).Count | Should -Be 0
+    }
+    It 'is applied by Deploy after the parent is declared and before the fleet is validated' {
+        $deploy = Get-Content -LiteralPath (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -Raw
+        $deploy | Should -Match '(?s)Get-DemoFleetWithNestedParent -Fleet.*Get-DemoFleetWithoutRetainedSecurityType -Fleet \$onPremFleet -ExistingVmName @\(\$existingVms \| ForEach-Object \{ \$_\.name \}\).*Test-DemoFleet -Fleet \$onPremFleet'
+    }
+}
+
 Describe 'Redeploy never silently resizes a VM or detaches a data disk' {
     BeforeAll {
         function New-ExistingVm {
@@ -148,6 +197,40 @@ Describe 'Redeploy never silently resizes a VM or detaches a data disk' {
     It 'fails on an unreadable size rather than guessing' {
         $broken = [pscustomobject]@{ name = 'win-sql-02'; hardwareProfile = $null }
         { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @($broken) -DefaultVmSize 'Standard_B2as_v2' } | Should -Throw '*Cannot read the size*'
+    }
+    Context 'while the VM is deallocated and its model reports no disk size or tier' {
+        BeforeAll {
+            function New-ModelessDisk { [pscustomobject]@{ name = 'win-sql-02-nested-data'; lun = 0; caching = 'None'; managedDisk = [pscustomobject]@{ id = '/fixture/disks/win-sql-02-nested-data' } } }
+        }
+        It 'asks the disk resource and passes when it matches the declaration' {
+            Mock Invoke-DemoAz -ModuleName Common { '{"name":"win-sql-02-nested-data","diskSizeGb":128,"sku":{"name":"StandardSSD_LRS"}}' }
+            { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } | Should -Not -Throw
+            Should -Invoke Invoke-DemoAz -ModuleName Common -Times 1 -Exactly -ParameterFilter { $Arguments[0] -eq 'disk' -and $Arguments[1] -eq 'show' -and '/fixture/disks/win-sql-02-nested-data' -in $Arguments }
+        }
+        It 'refuses a disk that a governance automation converted, and says what to declare' {
+            Mock Invoke-DemoAz -ModuleName Common { '{"name":"win-sql-02-nested-data","diskSizeGb":128,"sku":{"name":"Standard_LRS"}}' }
+            $message = try { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } catch { $_.Exception.Message }
+            $message | Should -Match 'differs from its declaration \(existing lun 0, 128 GiB, Standard_LRS\)'
+            $message | Should -Match 'nestedSqlGuest\.parentDataDiskGb and parentDataDiskStorageAccountType'
+            $message | Should -Match 'The OS disk tier changed by itself'
+        }
+        It 'refuses a disk whose resource shows another size' {
+            Mock Invoke-DemoAz -ModuleName Common { '{"name":"win-sql-02-nested-data","diskSizeGb":256,"sku":{"name":"StandardSSD_LRS"}}' }
+            $message = try { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } catch { $_.Exception.Message }
+            $message | Should -Match 'differs from its declaration \(existing lun 0, 256 GiB, StandardSSD_LRS\)'
+            $message | Should -Not -Match 'governance automation'
+        }
+        It 'surfaces a denied disk read instead of treating the missing values as a pass' {
+            Mock Invoke-DemoAz -ModuleName Common { throw 'AuthorizationFailed: disk read denied' }
+            { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } | Should -Throw '*disk read denied*'
+        }
+        It 'reads no disk resource when the running VM model already reports the size and the tier' {
+            Mock Invoke-DemoAz -ModuleName Common { throw 'unexpected disk read' }
+            $disk = New-AttachedDisk
+            $disk.managedDisk | Add-Member -NotePropertyName id -NotePropertyValue '/fixture/disks/win-sql-02-nested-data'
+            { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @($disk)) -DefaultVmSize 'Standard_B2as_v2' } | Should -Not -Throw
+            Should -Invoke Invoke-DemoAz -ModuleName Common -Times 0
+        }
     }
 }
 
@@ -221,6 +304,7 @@ Describe 'Deploy wiring for the declared nested parent' {
     }
     It 'previews the parent with its size, security type and disk and checks each size' {
         Invoke-FleetPreview -SkinPath $script:nestedSkin
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter { @($Features) -contains 'Microsoft.Compute/UseStandardSecurityType' }
         $fleet = @($global:FleetPreviewParameters.parameters.onPremFleet.value)
         $parent = $fleet | Where-Object name -eq 'win-sql-02'
         $parent.vmSize | Should -Be 'Standard_D4s_v5'
@@ -236,6 +320,7 @@ Describe 'Deploy wiring for the declared nested parent' {
     }
     It 'leaves a skin without a nested guest on the shared size and disks' {
         Invoke-FleetPreview -SkinPath $script:plainSkin
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter { @($Features).Count -eq 0 }
         $fleet = @($global:FleetPreviewParameters.parameters.onPremFleet.value)
         $fleet.PSObject.Properties.Name | Should -Not -Contain 'dataDisks'
         ($fleet | Where-Object name -eq 'win-sql-02').PSObject.Properties.Name | Should -Not -Contain 'vmSize'

@@ -291,6 +291,7 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
                 Nat = $NatAttached; Calls = [System.Collections.Generic.List[string]]::new(); GuestRunningGuests = 0
                 Volume = $Prepared; HyperVInstalled = $Prepared; HypervisorRunning = $Prepared; Network = $Prepared; Media = $mediaPresent
                 ForeignD = $false; ResizeFails = $false; MediaHashOk = $true; RestartKeepsHypervisorOff = $false; OpticalDrive = $false
+                Restarted = $false; InspectFailuresAfterRestart = 0
             }
         }
         $script:skin = Join-Path $TestDrive 'nested-skin.json'
@@ -309,6 +310,7 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         $script:record = Join-Path $TestDrive ('accept-' + [guid]::NewGuid().ToString('N') + '.json')
         $global:PrepWorld = New-FakeWorld
         Mock Import-Module {}
+        Mock Start-Sleep {}
         Mock Initialize-DemoContext {}
         Mock Test-DemoComputeCapacity {}
         Mock Get-DemoNetworkState {
@@ -330,9 +332,9 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
                     $w.Calls.Add('vm resize ' + $Arguments[[Array]::IndexOf($Arguments, '--size') + 1]); $w.Size = $Arguments[[Array]::IndexOf($Arguments, '--size') + 1]; return
                 }
                 'vm start' { $w.Calls.Add('vm start'); $w.Power = 'VM running'; return }
-                'vm restart' { $w.Calls.Add('vm restart'); if ($w.HyperVInstalled -and -not $w.RestartKeepsHypervisorOff) { $w.HypervisorRunning = $true }; return }
+                'vm restart' { $w.Calls.Add('vm restart'); $w.Restarted = $true; if ($w.HyperVInstalled -and -not $w.RestartKeepsHypervisorOff) { $w.HypervisorRunning = $true }; return }
                 'disk show' {
-                    $name = $Arguments[[Array]::IndexOf($Arguments, '-n') + 1]
+                    $name = if ('--ids' -in $Arguments) { ($Arguments[[Array]::IndexOf($Arguments, '--ids') + 1] -split '/')[-1] } else { $Arguments[[Array]::IndexOf($Arguments, '-n') + 1] }
                     if (-not $w.Disks.ContainsKey($name)) { return $null }
                     return ($w.Disks[$name] | ConvertTo-Json -Compress)
                 }
@@ -362,6 +364,10 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
             $media = @($Settings.media | ForEach-Object { @{ id = $_.id; path = "D:\NestedSQL\Media\$($_.fileName)"; present = $w.Media; bytes = $(if ($w.Media) { $_.bytes } else { 0 }); sha256Matches = $(if ($w.Media -and $Settings.hashMedia) { $w.MediaHashOk } else { $null }) } })
             switch ($Action) {
                 'Inspect' {
+                    if ($w.Restarted -and $w.InspectFailuresAfterRestart -gt 0) {
+                        $w.InspectFailuresAfterRestart--
+                        throw 'Guest action Inspect failed on win-sql-02: Cannot connect to CIM server. A system shutdown is in progress.'
+                    }
                     return ([pscustomobject]@{
                         volume = @{ present = $w.Volume; fileSystem = 'NTFS'; label = 'NestedSQL'; sizeBytes = 137438953472; freeBytes = 130GB; lun = 0; vmsFolder = $w.Volume; mediaFolder = $w.Volume }
                         hyperV = @{ installed = $w.HyperVInstalled; vmms = $(if ($w.HypervisorRunning) { 'Running' } else { 'Stopped' }); hypervisorPresent = $w.HypervisorRunning; vmHostOk = $w.HypervisorRunning; runningGuests = $w.GuestRunningGuests }
@@ -441,6 +447,31 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         $global:PrepWorld.RestartKeepsHypervisorOff = $true
         { & $script:prepare @script:common -Phase HyperV -Confirm:$false } | Should -Throw '*not running after the restart*'
     }
+    It 'inspects twice, a minute apart, after the restart before it calls Hyper-V ready' {
+        $global:PrepWorld = New-FakeWorld -Prepared $true
+        $global:PrepWorld.HypervisorRunning = $false
+        $result = & $script:prepare @script:common -Phase HyperV -Confirm:$false
+        ($result.phases | Where-Object phase -eq 'HyperV').status | Should -Be 'changed'
+        Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 60 }
+        $calls = @($global:PrepWorld.Calls)
+        @($calls[($calls.IndexOf('vm restart') + 1)..($calls.Count - 1)] | Where-Object { $_ -eq 'guest Inspect' }).Count | Should -BeGreaterOrEqual 2
+    }
+    It 'rides out the second restart that Windows makes on its own after the first boot' {
+        $global:PrepWorld = New-FakeWorld -Prepared $true
+        $global:PrepWorld.HypervisorRunning = $false
+        $global:PrepWorld.InspectFailuresAfterRestart = 2
+        $result = & $script:prepare @script:common -Phase HyperV -Confirm:$false
+        ($result.phases | Where-Object phase -eq 'HyperV').status | Should -Be 'changed'
+        Should -Invoke Start-Sleep -Times 2 -Exactly -ParameterFilter { $Seconds -eq 30 }
+        Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 60 }
+    }
+    It 'surfaces the guest''s own error when it never answers after the restart' {
+        $global:PrepWorld = New-FakeWorld -Prepared $true
+        $global:PrepWorld.HypervisorRunning = $false
+        $global:PrepWorld.InspectFailuresAfterRestart = 1000
+        { & $script:prepare @script:common -Phase HyperV -Confirm:$false } | Should -Throw '*Cannot connect to CIM server. A system shutdown is in progress.*'
+        Should -Invoke Start-Sleep -Times 20 -Exactly -ParameterFilter { $Seconds -eq 30 }
+    }
     It 'refuses without both terms switches before any mutation' {
         { & $script:prepare @script:common -AcceptSqlDeveloperTerms -Confirm:$false } | Should -Throw '*AcceptWindowsEvaluationTerms*'
         $global:PrepWorld.Calls | Should -BeNullOrEmpty
@@ -488,6 +519,18 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         $global:PrepWorld.Attached = @(@{ name = 'win-sql-02-nested-data'; lun = 0; caching = 'None'; diskSizeGb = 256; managedDisk = @{ storageAccountType = 'StandardSSD_LRS' } })
         { & $script:prepare @script:common -Phase Disk -Confirm:$false } | Should -Throw '*never resizes, converts or moves*'
         @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' }) | Should -BeNullOrEmpty
+    }
+    It 'judges a deallocated parent''s data disk by the disk resource, because its VM model reports no size or tier' {
+        $global:PrepWorld = New-FakeWorld -Declared $true
+        $global:PrepWorld.Power = 'VM deallocated'
+        $global:PrepWorld.Attached = @(@{ name = 'win-sql-02-nested-data'; lun = 0; caching = 'None'; managedDisk = @{ id = '/fixture/disks/win-sql-02-nested-data' } })
+        $global:PrepWorld.Disks['win-sql-02-nested-data'] = @{ name = 'win-sql-02-nested-data'; diskSizeGb = 128; sku = @{ name = 'StandardSSD_LRS' }; managedBy = '/fixture/win-sql-02' }
+        $result = & $script:prepare @script:common -Phase Disk -Confirm:$false
+        ($result.phases | Where-Object phase -eq 'Disk').status | Should -Be 'satisfied'
+        @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' -or $_ -like 'vm *' }) | Should -BeNullOrEmpty
+        $global:PrepWorld.Disks['win-sql-02-nested-data'].sku.name = 'Standard_LRS'
+        { & $script:prepare @script:common -Phase Disk -Confirm:$false } | Should -Throw '*never resizes, converts or moves*'
+        @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' -or $_ -like 'vm *' }) | Should -BeNullOrEmpty
     }
     It 'Verify never starts a parked parent and reports a failing check instead of a build input' {
         $global:PrepWorld = New-FakeWorld -Prepared $true

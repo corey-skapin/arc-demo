@@ -19,7 +19,7 @@ exit $codes[[Math]::Min($index, $codes.Count - 1)]
 '@
     # name -> parameters, whether it supports ShouldProcess (and so -Confirm), optional body
     $script:ArcStubs = [ordered]@{
-        'Deploy-ArcDemo.ps1' = @{ Params = $target + 'AutoShutdownTime', 'DeployerPrincipalId'; Process = $true }
+        'Deploy-ArcDemo.ps1' = @{ Params = $target + 'AutoShutdownTime', 'DeployerPrincipalId', 'AdminPasswordPath'; Process = $true }
         'Prepare-NestedSqlParent.ps1' = @{ Params = $target + 'NamePrefix', 'Phase', 'MediaManifestPath', 'AcceptWindowsEvaluationTerms', 'AcceptSqlDeveloperTerms', 'AcceptanceRecordPath', 'ResultPath', 'BuildInputPath'; Process = $true }
         'New-NestedSqlDemo.ps1' = @{ Params = $nested; Process = $true }
         'Stage-DemoMedia.ps1' = @{ Params = $target + 'MachineName', 'Media', 'Destination', 'AcceptWindowsEvaluationTerms', 'AcceptSqlDeveloperTerms', 'ManifestPath', 'AcceptanceRecordPath', 'ResultPath'; Process = $true }
@@ -292,6 +292,65 @@ Describe 'Ordered plan' {
         (Get-BuildRow (Get-BuildTest (New-BuildFixture) -State $state) 'P2').Needs | Should -HaveCount 0
     }
 
+    It 'runs the two workbook steps again when P2 or P4 finished after they did, and says why' {
+        $f = New-BuildFixture
+        $state = New-ArcDemoBuildState $script:Sub $script:Ten 'build-test'
+        $state.steps['P6.1'] = @{ status = 'done'; endedUtc = '2026-11-05T08:00:00.0000000Z' }
+        foreach ($id in 'P6.2', 'P6.3') { $state.steps[$id] = @{ status = 'done'; endedUtc = '2026-11-05T08:00:00.0000000Z' } }
+        $state.steps['P4'] = @{ status = 'done'; endedUtc = '2026-11-05T07:00:00.0000000Z' }
+        $t = Get-BuildTest $f -State $state
+        foreach ($id in 'P6.1', 'P6.2', 'P6.3') { (Get-BuildRow $t $id).Status | Should -Be 'done' }
+
+        $state.steps['P4'].endedUtc = '2026-11-05T09:30:00.0000000Z'
+        $t = Get-BuildTest $f -State $state
+        (Get-BuildRow $t 'P6.1').Status | Should -Be 'done'
+        foreach ($id in 'P6.2', 'P6.3') {
+            (Get-BuildRow $t $id).Status | Should -Be 'ready'
+            (Get-BuildRow $t $id).Notes | Should -Match 'P4 finished later'
+            $id | Should -BeIn $t.Context.PlannedSteps
+        }
+
+        # A state file read back from JSON holds [datetime] values.
+        $path = Join-Path $TestDrive 'stale-state.json'
+        Save-ArcDemoBuildState -Path $path -State $state
+        $again = Read-ArcDemoBuildState -Path $path -SubscriptionId $script:Sub -TenantId $script:Ten -Prefix 'build-test'
+        $again.steps['P4']['endedUtc'] | Should -BeOfType [datetime]
+        (Get-BuildRow (Get-BuildTest $f -State $again) 'P6.2').Status | Should -Be 'ready'
+
+        # P2 counts too, and a step that did not finish does not make the roster stale.
+        $state.steps['P4'].endedUtc = '2026-11-05T07:00:00.0000000Z'
+        $state.steps['P2'] = @{ status = 'done'; endedUtc = '2026-11-05T08:30:00.0000000Z' }
+        (Get-BuildRow (Get-BuildTest $f -State $state) 'P6.3').Status | Should -Be 'ready'
+        $state.steps['P2'].status = 'failed'
+        (Get-BuildRow (Get-BuildTest $f -State $state) 'P6.3').Status | Should -Be 'done'
+        (Get-BuildRow (Get-BuildTest $f -State $state) 'P6.3').Notes | Should -HaveCount 0
+    }
+
+    It 'does not offer the SQL lock-timeout alert before the SQL engine is confirmed, unless P5.4 runs first in the same selection' {
+        $f = New-BuildFixture
+        $alone = Get-BuildTest $f -Only 'P6.1'
+        (Get-BuildRow $alone 'P6.1').Status | Should -Be 'blocked'
+        (Get-BuildRow $alone 'P6.1').Blockers | Should -Match 'real SQL engine is not confirmed.*P5.4'
+        (Get-BuildRow (Get-BuildTest $f -From P5 -To P6) 'P6.1').Status | Should -Be 'ready'
+        $null = New-Item -ItemType Directory -Path (Join-Path $f.Repo '.local') -Force
+        $proof = Join-Path $f.Repo '.local/sql-engine-status.json'
+        Set-Content $proof '{"evidence":{"status":"pending"}}'
+        (Get-BuildRow (Get-BuildTest $f -Only 'P6.1') 'P6.1').Status | Should -Be 'blocked'
+        Set-Content $proof '{"evidence":{"status":"pass"}}'
+        (Get-BuildRow (Get-BuildTest $f -Only 'P6.1') 'P6.1').Status | Should -Be 'ready'
+    }
+
+    It 'selects one step by its ID with -Only, as well as a whole phase' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $steps = @(Get-ArcDemoBuildSteps -Context $t.Context)
+        (Select-ArcDemoBuildStep -Steps $steps -Only 'P6.2', 'P6.3').Id | Should -Be @('P6.2', 'P6.3')
+        (Select-ArcDemoBuildStep -Steps $steps -Only 'P6').Id | Should -Be @('P6.1', 'P6.2', 'P6.3')
+        (Select-ArcDemoBuildStep -Steps $steps -Only 'P7').Id | Should -Be @('P7')
+        $only = (Get-Command (Join-Path $script:Repo 'scripts/Invoke-ArcDemoBuild.ps1')).Parameters['Only'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] }
+        foreach ($id in @($steps.Id) + @($steps.Phase | Select-Object -Unique)) { $id | Should -BeIn $only.ValidValues }
+    }
+
     It 'skips done steps, always re-checks read-only steps and re-runs everything with -Force' {
         $f = New-BuildFixture
         $state = New-ArcDemoBuildState $script:Sub $script:Ten 'build-test'
@@ -487,6 +546,7 @@ Describe 'Step runner' {
         $calls[0].v_SkinPath | Should -Be $t.Context.Config.ArcSkinPath
         $calls[0].v_Confirm | Should -Be 'False'
         $calls[0].keys | Should -Not -Contain 'AutoShutdownTime'
+        $calls[0].v_AdminPasswordPath | Should -Be (Join-Path $f.Private 'vm-admin-credential.clixml')
         $calls[1].script | Should -Be 'Test-ArcDemoReadiness.ps1'
         $calls[1].keys | Should -Not -Contain 'Confirm'
         $calls[1].v_DesiredState | Should -Be 'Active'
@@ -554,6 +614,21 @@ Describe 'Step runner' {
         $parity['Feature'] | Should -Be @('ContainerApps', 'NestedSql', 'RealSql', 'OperationalWorkbooks', 'Sre')
     }
 
+    It 'stops P6.1 at run time, retryable and without calling the script, when P5.4 left no passing proof' {
+        $f = New-BuildFixture
+        $env:BUILD_TEST_LOG = $f.Log
+        $t = Get-BuildTest $f -Only 'P6.1'
+        $step = (Get-BuildRow $t 'P6.1').Definition
+        { Invoke-ArcDemoBuildStep -Step $step -Context $t.Context -State $t.State } | Should -Throw '*real SQL engine is not confirmed*'
+        $t.State.steps['P6.1'].status | Should -Be 'blocked'
+        @(Get-BuildCall $f) | Should -HaveCount 0
+        $null = New-Item -ItemType Directory -Path (Join-Path $f.Repo '.local') -Force
+        Set-Content (Join-Path $f.Repo '.local/sql-engine-status.json') '{"evidence":{"status":"pass"}}'
+        Invoke-ArcDemoBuildStep -Step $step -Context $t.Context -State $t.State
+        $t.State.steps['P6.1'].status | Should -Be 'done'
+        (Get-BuildCall $f)[0].script | Should -Be 'Set-SqlIncidentAlert.ps1'
+    }
+
     It 'runs a read-only step with -NoState without writing state or evidence' {
         $f = New-BuildFixture
         $env:BUILD_TEST_LOG = $f.Log
@@ -591,6 +666,52 @@ Describe 'Step runner' {
         $evidence | Should -Not -Match $secret
         $evidence | Should -Match '<redacted>'
         (Get-Content $t.Context.Config.StatePath -Raw) | Should -Not -Match $secret
+    }
+
+    It 'resolves the nested guest Administrator credential from the argument, then the private folder file, then a prompt, and never writes one' {
+        $f = New-BuildFixture
+        $given = [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'given-credential' -AsPlainText -Force))
+        $t = Get-BuildTest $f -Credential $given
+        Mock Get-Credential { throw 'prompt must not be used' } -ModuleName BuildPlan
+        (Get-BuildGuestCredential -Context $t.Context).GetNetworkCredential().Password | Should -Be 'given-credential'
+
+        $t = Get-BuildTest $f
+        $file = Join-Path $f.Private 'nested-guest-credential.clixml'
+        [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'saved-credential' -AsPlainText -Force)) | Export-Clixml -LiteralPath $file
+        (Get-BuildGuestCredential -Context $t.Context).GetNetworkCredential().Password | Should -Be 'saved-credential'
+        Should -Invoke Get-Credential -ModuleName BuildPlan -Times 0
+
+        Remove-Item -LiteralPath $file
+        Mock Get-Credential { [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'prompted-credential' -AsPlainText -Force)) } -ModuleName BuildPlan
+        (Get-BuildGuestCredential -Context $t.Context).GetNetworkCredential().Password | Should -Be 'prompted-credential'
+        Should -Invoke Get-Credential -ModuleName BuildPlan -Times 1 -Exactly
+        Test-Path -LiteralPath $file | Should -BeFalse
+    }
+    It 'refuses a saved guest credential that is not a credential, and explains how to supply one when the session cannot prompt' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $file = Join-Path $f.Private 'nested-guest-credential.clixml'
+        'not a credential' | Export-Clixml -LiteralPath $file
+        { Get-BuildGuestCredential -Context $t.Context } | Should -Throw '*is not a credential export*'
+        Remove-Item -LiteralPath $file
+        Mock Get-Credential { throw 'A command that prompts the user failed because the host program does not support user interaction.' } -ModuleName BuildPlan
+        { Get-BuildGuestCredential -Context $t.Context } | Should -Throw '*cannot prompt*Pass -GuestCredential, or save one with Export-Clixml to*nested-guest-credential.clixml*Nothing was started*'
+    }
+    It 'uses the saved guest credential at P4 without prompting and keeps it out of the evidence' {
+        $f = New-BuildFixture
+        $env:BUILD_TEST_LOG = $f.Log
+        [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'saved-credential-text' -AsPlainText -Force)) | Export-Clixml -LiteralPath (Join-Path $f.Private 'nested-guest-credential.clixml')
+        $t = Get-BuildTest $f
+        Mock Get-Credential { throw 'prompt must not be used' } -ModuleName BuildPlan
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz {
+            if ($Arguments[0] -eq 'vm') { return 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }
+            if ($Arguments[0] -eq 'ad') { return '[{"displayName":"sp-build-test-onboard","appId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}]' }
+            throw "Unexpected az call: $($Arguments -join ' ')"
+        } -ModuleName BuildPlan
+        Invoke-ArcDemoBuildStep -Step (Get-BuildRow $t 'P4').Definition -Context $t.Context -State $t.State
+        (Get-BuildCall $f)[0].keys | Should -Contain 'GuestCredential'
+        (Get-Content (Get-ChildItem $t.Context.Config.EvidenceDirectory -Filter 'P4-*.json').FullName -Raw) | Should -Not -Match 'saved-credential-text'
     }
 
     It 'stops P4 when the parent VM ID or exactly one onboarding identity cannot be resolved' {
@@ -696,6 +817,101 @@ Describe 'Presenter handoff' {
         $t.State.steps['P10'].status | Should -Be 'done'
     }
 
+    It 'writes pipeline strings and arrays of them as plain text, never as {"Length":N}' {
+        $piped = @('Online', 'Offline') | ForEach-Object { $_ }
+        $safe = ConvertTo-BuildSafeValue ([pscustomobject]@{ State = $piped[0]; Names = $piped; Nested = @([pscustomobject]@{ Name = ($piped | Select-Object -First 1) }) })
+        $json = $safe | ConvertTo-Json -Depth 6 -Compress
+        $json | Should -Not -Match 'Length'
+        $json | Should -Be '{"State":"Online","Names":["Online","Offline"],"Nested":[{"Name":"Online"}]}'
+    }
+
+    It 'adds the optional chapters it can verify, and names the ones it cannot instead of failing' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $dash = [string][char]0x2014
+        $tagOf = { param($name) ("Arc $dash $name" -replace '[^A-Za-z0-9]', '-').ToLowerInvariant() }
+        $script:optionalList = @(
+            @{ id = "$scope/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"; tags = @{ workbookTag = 'build-test---estate-overview' } }
+            @{ id = "$scope/Microsoft.Insights/workbooks/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"; tags = @{ workbookTag = (& $tagOf 'Machine Intelligence Center') } }
+            @{ id = "$scope/Microsoft.Insights/workbooks/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"; tags = @{ workbookTag = (& $tagOf 'Compliance, Security & Governance') } }
+            @{ id = "$scope/Microsoft.Insights/workbooks/cccccccc-cccc-cccc-cccc-cccccccccccc"; tags = @{ workbookTag = (& $tagOf 'Asset Inventory') } }
+        ) | ConvertTo-Json -Depth 4 -AsArray
+        $script:instanceMissing = "$scope/Microsoft.AzureArcData/sqlServerInstances/guest-vm"
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz {
+            if ($Arguments[0] -eq 'resource' -and $Arguments[1] -eq 'list') { return $script:optionalList }
+            if ($Arguments[0] -eq 'resource' -and $Arguments[1] -eq 'show') { if ($Arguments[3] -eq $script:instanceMissing) { return $null } else { return '{}' } }
+            throw "Unexpected az call: $($Arguments -join ' ')"
+        } -ModuleName BuildPlan
+        $left = [System.Collections.Generic.List[string]]::new()
+        $document = New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left
+        $document['dataCollectionRuleResourceId'] | Should -Be "$scope/Microsoft.Insights/dataCollectionRules/dcr-arc-demo"
+        $document['machineIntelligenceWorkbookResourceId'] | Should -BeLike '*aaaaaaaa-aaaa*'
+        $document['complianceWorkbookResourceId'] | Should -BeLike '*bbbbbbbb-bbbb*'
+        $document['assetInventoryWorkbookResourceId'] | Should -BeLike '*cccccccc-cccc*'
+        $document.Keys | Should -Not -Contain 'sqlEstateWorkbookResourceId'
+        $document['nestedSqlMachineResourceId'] | Should -Be "$scope/Microsoft.HybridCompute/machines/guest-vm"
+        $document['nestedSqlParentMachineResourceId'] | Should -Be "$scope/Microsoft.HybridCompute/machines/parent-vm"
+        $document.Keys | Should -Not -Contain 'nestedSqlInstanceResourceId'
+        @($left) | Should -Be @('the SQL Estate workbook steps', "the nested guest's SQL Server instance link")
+    }
+
+    It 'leaves every nested chapter out, without failing, when the guest is not an Arc machine yet' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]'
+        $script:guestMachine = "$scope/Microsoft.HybridCompute/machines/guest-vm"
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz {
+            if ($Arguments[1] -eq 'list') { return $script:onlyEstate }
+            if ($Arguments[3] -eq $script:guestMachine) { return $null }
+            '{}'
+        } -ModuleName BuildPlan
+        $left = [System.Collections.Generic.List[string]]::new()
+        $document = New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left
+        @($document.Keys | Where-Object { $_ -like 'nestedSql*' }) | Should -HaveCount 0
+        $left | Should -Contain 'the nested Arc SQL chapter'
+        $left | Should -Not -Contain "the nested guest's SQL Server instance link"
+    }
+
+    It 'does not look for a nested guest when the skin has none, and refuses two workbooks with one tag' {
+        $f = New-BuildFixture -NoNested
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]'
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz { if ($Arguments[1] -eq 'list') { return $script:onlyEstate }; '{}' } -ModuleName BuildPlan
+        $left = [System.Collections.Generic.List[string]]::new()
+        $null = New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left
+        ($left -join ';') | Should -Not -Match 'nested'
+        Should -Invoke Invoke-DemoAz -ModuleName BuildPlan -Times 0 -ParameterFilter { $Arguments[0] -eq 'resource' -and $Arguments[3] -like '*/machines/guest-vm' }
+        $dash = [string][char]0x2014
+        $dupe = ("Arc $dash Asset Inventory" -replace '[^A-Za-z0-9]', '-').ToLowerInvariant()
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}},{"id":"' + $scope + '/Microsoft.Insights/workbooks/a1","tags":{"workbookTag":"' + $dupe + '"}},{"id":"' + $scope + '/Microsoft.Insights/workbooks/a2","tags":{"workbookTag":"' + $dupe + '"}}]'
+        { New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left } | Should -Throw '*at most one workbook tagged*'
+    }
+
+    It 'prints the chapters left out, records them in the step result, and the real generator links the chapters it was given' {
+        $f = New-BuildFixture -RealPresenter
+        $env:BUILD_TEST_LOG = $f.Log
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]'
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz { if ($Arguments[1] -eq 'list') { return $script:onlyEstate }; '{}' } -ModuleName BuildPlan
+        Mock Write-Warn {} -ModuleName BuildPlan
+        $result = Invoke-ArcDemoBuildStep -Step (Get-BuildRow $t 'P10').Definition -Context $t.Context -State $t.State
+        Should -Invoke Write-Warn -ModuleName BuildPlan -Times 1 -ParameterFilter { $Message -like 'Optional chapters left out*Machine Intelligence Center*SQL Estate*' }
+        $evidence = Get-Content (Get-ChildItem $t.Context.Config.EvidenceDirectory -Filter 'P10-*.json').FullName -Raw | ConvertFrom-Json
+        @($evidence.result.chaptersLeftOut) | Should -Contain 'the compliance workbook steps'
+        $guide = Get-Content (Join-Path $f.Repo '.local/presenter-runsheet.md') -Raw
+        $guide | Should -Not -Match 'No nested Arc SQL guest is recorded'
+        $guide | Should -Not -Match 'No data collection rule is recorded'
+        $guide | Should -Match 'The Machine Intelligence Center workbook is not recorded'
+    }
+
     It 'adds the SQL presenter fields only when the saved status proof says pass' {
         $f = New-BuildFixture
         $t = Get-BuildTest $f
@@ -714,6 +930,32 @@ Describe 'Presenter handoff' {
         $document = New-ArcDemoPresenterContext -Context $t.Context -State $t.State
         $document['sqlMachineResourceId'] | Should -Be "$scope/Microsoft.HybridCompute/machines/sql-host"
         $document['sqlIncidentAlertResourceId'] | Should -Be "$scope/Microsoft.Insights/scheduledQueryRules/al-build-test-sql-lock-timeout"
+    }
+
+    It 'records the time of the last passing readiness (P7), not the moment P10 runs, and says now only without one' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        Mock Invoke-DemoAz {
+            if ($Arguments[1] -eq 'list') { return ('[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]') }
+            '{}'
+        } -ModuleName BuildPlan
+        $started = [DateTime]::UtcNow
+        $withoutP7 = New-ArcDemoPresenterContext -Context $t.Context -State $t.State
+        ([DateTime]::Parse($withoutP7.recordedAtUtc).ToUniversalTime()) | Should -BeGreaterOrEqual $started.AddSeconds(-1)
+        $checked = [DateTime]::UtcNow.AddHours(-3)
+        $evidence = Join-Path $f.Private 'P7-fixture.json'
+        @{ output = @{ schemaVersion = 1; checkedAtUtc = $checked.ToString('o') } } | ConvertTo-Json -Depth 4 | Set-Content $evidence
+        $t.State.steps['P7'] = @{ status = 'done'; evidence = $evidence }
+        (New-ArcDemoPresenterContext -Context $t.Context -State $t.State).recordedAtUtc | Should -Be $checked.ToString('o')
+        $t.State.steps['P7'].status = 'failed'
+        ([DateTime]::Parse((New-ArcDemoPresenterContext -Context $t.Context -State $t.State).recordedAtUtc).ToUniversalTime()) | Should -BeGreaterThan $checked.AddHours(2)
+        $t.State.steps['P7'].status = 'done'
+        @{ output = @{ checkedAtUtc = [DateTime]::UtcNow.AddHours(5).ToString('o') } } | ConvertTo-Json -Depth 4 | Set-Content $evidence
+        ([DateTime]::Parse((New-ArcDemoPresenterContext -Context $t.Context -State $t.State).recordedAtUtc).ToUniversalTime()) | Should -BeLessThan ([DateTime]::UtcNow.AddHours(1))
+        Set-Content $evidence 'not json'
+        { New-ArcDemoPresenterContext -Context $t.Context -State $t.State } | Should -Not -Throw
     }
 
     It 'writes nothing when an expected resource or the Estate Overview workbook is missing' {
@@ -741,6 +983,22 @@ Describe 'Build window' {
         Get-ArcDemoBuildWindowWarning -Minutes 60 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now ([datetime]::Parse('2026-11-02T20:00:00Z').ToUniversalTime()) | Should -BeNullOrEmpty
         Get-ArcDemoBuildWindowWarning -Minutes 60 -TimeZoneId 'No Such Zone' -Now $now | Should -Match 'Cannot evaluate'
     }
+
+    It 'applies an allowance for slow platform operations, says so, and tells the reader how to keep a later shutdown' {
+        $now = [datetime]::Parse('2026-11-02T16:00:00Z').ToUniversalTime()
+        # 150 typical minutes end at 18:30, inside the window; with a 50% allowance they would end at 19:45.
+        Get-ArcDemoBuildWindowWarning -Minutes 150 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now $now | Should -BeNullOrEmpty
+        $warning = Get-ArcDemoBuildWindowWarning -Minutes 150 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now $now -Allowance 1.5
+        $warning | Should -Match 'About 150 minutes of VM-dependent steps, plus a 50% allowance for slow or repeated platform operations \(225 minutes\), would cross the 19:00 auto-shutdown'
+        $warning | Should -Match 'Deploy sets this schedule again on every run, so a time changed by hand is reverted'
+        $warning | Should -Match 'autoShutdownTime in the build config \(or operations\.autoShutdownTime in the skin\)'
+        Get-ArcDemoBuildWindowWarning -Minutes 100 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now $now -Allowance 1.5 | Should -BeNullOrEmpty
+    }
+
+    It 'plans the preflight window with that allowance' {
+        $text = Get-Content -LiteralPath (Join-Path $script:Repo 'scripts/lib/BuildPlan.psm1') -Raw
+        $text | Should -Match 'Get-ArcDemoBuildWindowWarning -Minutes \$Context\.RemainingMinutes -ShutdownTime \$time -TimeZoneId \$zone -Allowance 1\.5'
+    }
 }
 
 Describe 'Build preflight' {
@@ -757,6 +1015,14 @@ Describe 'Build preflight' {
         Should -Invoke Test-Prerequisites -ModuleName BuildPlan -Times 1 -Exactly -ParameterFilter {
             'containerapp' -in $RequiredExtensions -and 'Microsoft.App' -in $Providers -and 'Microsoft.ContainerService' -notin $Providers
         }
+    }
+    It 'checks the Standard security type feature only when the skin declares a nested parent' {
+        $f = New-BuildFixture
+        $null = Invoke-ArcDemoBuildPreflight -Context (Get-BuildTest $f).Context
+        Should -Invoke Test-Prerequisites -ModuleName BuildPlan -Times 1 -Exactly -ParameterFilter { 'Microsoft.Compute/UseStandardSecurityType' -in $Features }
+        $f = New-BuildFixture -NoNested
+        $null = Invoke-ArcDemoBuildPreflight -Context (Get-BuildTest $f).Context
+        Should -Invoke Test-Prerequisites -ModuleName BuildPlan -Times 1 -Exactly -ParameterFilter { @($Features).Count -eq 0 }
     }
     It 'checks the AKS providers, and no Container Apps prerequisite, when the skin deploys only AKS' {
         $f = New-BuildFixture

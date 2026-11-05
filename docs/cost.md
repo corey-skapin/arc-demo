@@ -25,7 +25,11 @@ Price the selected rule/region/notifications separately rather than treating
 the self-recovering incident or automatic investigation as free.
 
 The observed eight-host lab already uses Standard HDD OS disks: five 127 GiB
-Windows disks and three 30 GiB Linux disks. Its successful warm activation and
+Windows disks and three 30 GiB Linux disks. It is not recorded whether that lab
+was built on HDD or converted to it: on a governed subscription a tenant
+automation can convert a parked estate's disks to Standard HDD without an owner
+choice ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
+Its successful warm activation and
 fresh 79-check Monitor snapshot show that this tier can support the current
 inventory/telemetry rehearsal. They do not benchmark cold boot, sustained SQL
 I/O, patch throughput, active AV scanning or a customer production workload.
@@ -36,7 +40,9 @@ by automatic conversion to equivalent Standard SSD with possible disruption.
 The fresh-deployment default therefore remains `StandardSSD_LRS`.
 An existing HDD lab can deliberately retain its current tier with
 `-OsDiskStorageAccountType Standard_LRS` or private skin
-`compute.osDiskStorageAccountType`. The same setting is passed to both simulated
+`compute.osDiskStorageAccountType`, and so can one whose disks were converted
+while it was parked (plus `nestedSqlGuest.parentDataDiskStorageAccountType` for the
+nested parent's data disk). The same setting is passed to both simulated
 Arc and optional native VM modules. Plan HDD migration before retirement.
 
 The deployment wrapper verifies targeted existing OS disks and refuses a tier
@@ -61,7 +67,7 @@ inventing a precise all-in total.
 | Five Windows `Standard_B2as_v2` | AUD 0.1482/VM-hour, Windows product, no license benefit assumed | AUD 0.7410/hour |
 | Three Linux `Standard_B2as_v2` | AUD 0.1353/VM-hour, non-Windows product | AUD 0.4059/hour |
 | All eight VMs | AUD 1.1469/hour combined | AUD 837.24 at 730 hours, or 201.85 at 176 hours (22 x 8-hour sessions) |
-| Nested SQL parent: one `Standard_D4s_v5` Windows host replaces one `Standard_B2as_v2` | AUD 0.604/VM-hour against 0.1482 (27 October 2026 retail; the D-series size is needed for nested virtualization) | The eight-VM line becomes about AUD 1.60/hour while running |
+| Nested SQL parent: one `Standard_D4s_v5` Windows host replaces one `Standard_B2as_v2` | AUD 0.604/VM-hour against 0.1482 (27 October 2026 retail; the D-series size is needed for nested virtualization). With the default fleet this is `win-sql-02`: when the skin enables `nestedSqlGuest`, Deploy creates that VM at this size with security type `Standard`, so it is the one VM outside the burstable assumption | The eight-VM line becomes about AUD 1.60/hour while running |
 | Parent data disk, 128 GiB | `StandardSSD_LRS` E10 18.5996/month (Standard HDD S10 13.4209) | Retained while parked; no included temp disk on this size |
 | Preparing a fresh parent (`Prepare-NestedSqlParent.ps1`) | About half an hour of the D4s_v5 rate while it runs (by hand it took about 31 minutes wall clock), plus NAT gateway data processing at AUD 0.06/GB (2 November 2026 retail) for the one-off 5.8 GiB installer-media download | About AUD 0.30 of runtime plus about AUD 0.35 of NAT data processing, once; no resource beyond the size and disk above |
 | Retained HDD disk capacity | 5 x S10 (128 GiB billing tier) at 13.4209 + 3 x S4 (32 GiB) at 3.5011/month | AUD 77.61/month |
@@ -167,6 +173,10 @@ retention cost ([retention guidance](https://learn.microsoft.com/azure/azure-mon
 This does not make new ingestion, longer retention or enabled log alerts free.
 Automatic alert pausing is deliberately deferred: blindly re-enabling rules on
 wake would lose prior disabled state or override concurrent routing decisions.
+The cost of leaving them enabled is the evaluation and notification charges, plus a
+surprise: each Hibernate fires the Sev2 missing-heartbeat alert about 8-10 minutes
+after the VMs stop, and it clears itself 16-21 minutes after it fired, once with every host
+still silent ([lifecycle](lifecycle.md#what-still-happens-to-a-parked-estate)).
 
 ## Proposed disposable smoke cycle (not executed)
 

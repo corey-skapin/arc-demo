@@ -3,7 +3,10 @@
 ## Present the demo
 
 Open **`.local/presenter-runsheet.md`** from the repo root and follow it top to
-bottom. [runsheet.md](runsheet.md) is the single source template; the operator
+bottom. To see what the finished lab looks like first, the README's
+[What you get](../README.md#what-you-get) shows the six published workbooks from a
+rebuilt lab estate (the images are in [images/](images/)).
+[runsheet.md](runsheet.md) is the single source template; the operator
 [generates the guide](runbook.md#prepare-the-local-presenter-guide) from saved
 local context. Generation is offline, not a current-health check. To run the Arc
 and SRE halves from one page, the operator also passes the SRE guide

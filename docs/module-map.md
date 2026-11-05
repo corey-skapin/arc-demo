@@ -17,7 +17,7 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 | `bicep/modules/network.bicep` | VNet/subnet/NSG; creates fresh NAT/PIP before compute or preserves the existing NAT attachment |
 | `bicep/modules/keyvault.bicep` | Shared admin-credential vault and deployer RBAC |
 | `bicep/modules/workspace.bicep` | Log Analytics and VMInsights/ChangeTracking solutions |
-| `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; `New-CoreDcrBody` in the deploy wrapper owns selectors, including the source/event-specific LOB informational heartbeat |
+| `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; `New-CoreDcrBody` in `Deploy-ArcDemo.ps1` (an inline hashtable sent by native REST PUT, not Bicep) owns the core DCR's six Windows event selectors: Application and System levels 1-3, the Security audit keyword, and the Information events `ArcLobBridgeApp` 4000 and `ArcSqlEngineDemo` 6000 and 6001. The SQL incident event 6201 needs no selector of its own: it is written as an `Error` entry, which the Application level 1-3 selector already collects; 6000 and 6001 are Information, so they need theirs |
 | `bicep/modules/alerts.bicep` | Action Group and missing-Heartbeat alert |
 | `bicep/modules/defender.bicep`, `tests/DefenderPlan.Tests.ps1` | Subscription Defender for Servers P2, deployed only while the live plan is not already Standard (`deployDefenderVmPlan`, set by Deploy); an enabled plan and its extensions are never re-PUT |
 | `bicep/modules/policy.bicep` | Named MCSB/NIST assignments |
@@ -32,7 +32,7 @@ the customer-facing Arc records and observability plane are in the other group.
 
 | Entry point | Responsibility |
 | --- | --- |
-| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions and the providers/CLI extensions the skin's workload toggles need (`Get-DemoPrerequisiteSet`, shared with Deploy and the wrapper's P0); reports every gap in one error, installs/registers nothing |
+| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions and the providers, subscription features (`Microsoft.Compute/UseStandardSecurityType` for a nested parent) and CLI extensions the skin's workload toggles need (`Get-DemoPrerequisiteSet`, shared with Deploy and the wrapper's P0); reports every gap in one error, installs/registers nothing |
 | `scripts/New-NestedSqlDemoGuest.ps1`, `Connect-NestedSqlDemoGuest.ps1`, `Install-NestedSqlDemoEngine.ps1` | Primary scratch Windows/SQL/Arc guest build; private credentials and approved media |
 | `scripts/New-NestedSqlDemo.ps1`, `Invoke-NestedSqlDemoStep.ps1`, `scripts/lib/NestedSqlDemo.psm1` | Working build sequence (its onboarding credential comes from the shared identity helper), protected parent-side step transport and retained Windows answer-file generator; no retired V1-V3 controller layers |
 | `scripts/Test-NestedSqlDemoGuest.ps1`, `Enable-NestedSqlDemoExtension.ps1`, `Remove-NestedSqlDemoGuest.ps1` | Actual guest/SQL checks, Arc SQL extension and explicit scratch-guest teardown |
@@ -42,15 +42,15 @@ the customer-facing Arc records and observability plane are in the other group.
 | `Invoke-DemoGuestAction`, `Get-DemoGuestTarget`, `Get-DemoMediaManifest` in `Common.psm1` | Run one action of a repo guest script (`scripts/guest/`, Windows PowerShell 5.1) through classic Run Command with base64 settings and one structured result line; resolve one retained Windows VM from the exact inventory; load the validated media manifest |
 | `scripts/Prepare-NestedSqlParent.ps1`, `scripts/guest/Initialize-NestedSqlParentHost.ps1`, `tests/NestedSqlParentPrepare.Tests.ps1` | One idempotent, `-WhatIf`-capable run that prepares the nested SQL parent once Deploy has declared its size and data disk: Size, Disk, Volume (`D:`; the empty virtual DVD-ROM that a size without a temp disk puts there moves to `Z:`), HyperV (restart issued from Azure), Network (internal switch and NAT), Media (through `Stage-DemoMedia.ps1`) and a Verify that writes the build input for `New-NestedSqlDemo.ps1`. Refuses any other `D:` holder, an overlapping range, Trusted Launch, a running nested guest and any unsafe disk change. Tested against a simulated Azure/guest world and rehearsed end to end, with a park/wake check, on a scratch `Standard_D4s_v5` (not yet through Deploy or on an Arc-onboarded parent) |
 | `.github/workflows/lint.yml` Windows job | Executes nested guest and real SQL regressions with mocked Windows APIs |
-| `scripts/Deploy-ArcDemo.ps1` | Selected-provider/CLI-extension and per-size SKU/quota checks (one `-Requirements` call covers every size); refuses to resize a retained VM or detach/convert its data disks; declares the nested parent's size and disk from the skin; stale-manifest handling after Remove; Bicep preview/create with allocation-failure guidance (never a size/region switch); retrying Key Vault secret write; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness (waits up to 20 minutes for Windows Heartbeats) |
+| `scripts/Deploy-ArcDemo.ps1` | Selected-provider/feature/CLI-extension and per-size SKU/quota checks (one `-Requirements` call covers every size); refuses to resize a retained VM or detach/convert its data disks; declares the nested parent's size and disk from the skin; stale-manifest handling after Remove; resumes an unfinished build from its own Failed deployment's vault and refuses to start over a Running one; Bicep preview, then a non-blocking submit (`--no-wait`) polled with progress, a transient-error check before any resubmit and a bounded wait that never stops the deployment, with allocation-failure guidance (never a size/region switch); Key Vault secret write through ARM and a protected `-AdminPasswordPath` copy of the generated password saved before any Azure write; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness (waits up to 20 minutes for Windows Heartbeats) |
 | `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL (including the optional nested guest, LOB alert, data collection rule and the Machine Intelligence, Compliance, Asset Inventory and SQL Estate workbook links) from the single tracked `docs/runsheet.md` template; with `-SreGuidePath` it also writes `.local/full-demo-runsheet.md` (whole-demo table, the Arc guide, the SRE guide's own text as "The night shift (SRE half)" and one close); no Azure calls or lifecycle changes |
-| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads, one shared Heartbeat/Arc/ARM wait with a single global deadline (no Run Command host checks by default; opt-in `-GuestChecks`), concurrent nested-guest start, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness |
-| `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
-| `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with bounded completion; bounded nested-guest stop that warns and continues; optional identity/Defender changes, `-ForceDeleteWorkspace` (first, irreversible) and `-PruneDeploymentHistory` (own manifest records only) |
+| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads, one shared Heartbeat/Arc/ARM wait with a single global deadline (no Run Command host checks by default; opt-in `-GuestChecks`), concurrent nested-guest start, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness; tags the NAT gateway and public IP it recreates with the lab tags (a failure only warns); `-WhatIf` lists each step from the inventory it read |
+| `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data; time-stamped progress, a per-workload `-WhatIf` plan and optional `-ResultPath` evidence (steps, power states, revisions, network outcome, closing readiness) |
+| `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with a bounded, progress-printing wait (`-TimeoutMinutes`, default 60; exit 2 while deletion is still in progress); bounded nested-guest stop that warns and continues and is skipped for a guest that never became an Arc machine; optional identity/Defender changes, `-ForceDeleteWorkspace` (first, irreversible) and `-PruneDeploymentHistory` (own manifest records only) |
 | `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table; Active (Ready alias), compute-only Hibernated with network cost diagnostics, Removed; bounded retries, exit 0/1/2 |
-| `scripts/lib/Common.psm1` | Skin/fleet validation (optional per-entry size, security type, data disks), checked CLI/REST with subscription pinning, tenant-only directory guards and CLI 2.91 not-found text, retained inventory, retained VM size/disk guards and per-size demand, bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota (CLI string quotas read as numbers; `-Requirements` adds several sizes per family), allocation guidance, retrying Key Vault secret write, stale-manifest selection, readiness checks |
+| `scripts/lib/Common.psm1` | Skin/fleet validation (optional per-entry size, security type, data disks), checked CLI/REST with subscription pinning, tenant-only directory guards and CLI 2.91 not-found text, retained inventory, retained VM size/disk guards (a deallocated VM's data disks are judged by the disk resource, and a tier mismatch says exactly what to declare) and per-size demand, the lab tag set (`Get-DemoResourceTags`), the `-WhatIf` plans (`Get-DemoParkPreview`, `Get-DemoWakePreview`), bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota (CLI string quotas read as numbers; `-Requirements` adds several sizes per family), allocation guidance, Key Vault secret write through ARM (transient-only retry) and the DPAPI secret file helpers, stale-manifest selection, readiness checks |
 | `Get-DemoNestedSqlGuestConfig`, `Invoke-DemoNestedSqlGuest`, `Wait-DemoNestedSqlArcConnected` in `Common.psm1`, `tests/NestedSqlLifecycle.Tests.ps1` | One skin-defined nested guest, normal graceful shutdown/start and bounded Arc connection wait across Activate/Hibernate/Remove |
-| `Initialize-DemoOnboardingIdentity`, `Invoke-DemoOnboardingCredential` and the Graph helpers in `Common.psm1`, `tests/OnboardingIdentity.Tests.ps1` | Shared by Deploy and the nested build: an existing onboarding SP keeps its credentials, its Arc-group role is ensured after the group exists, a one-day credential is minted through Graph, passed as a SecureString and removed in `finally` with the original key IDs verified; with no SP it is created with the role and nothing is stored |
+| `Initialize-DemoOnboardingIdentity`, `Invoke-DemoOnboardingCredential`, `Remove-DemoCreationCredential` and the Graph helpers in `Common.psm1`, `tests/OnboardingIdentity.Tests.ps1` | Shared by Deploy and the nested build: an existing onboarding SP keeps its credentials, its Arc-group role is ensured after the group exists, a one-day credential is minted through Graph, passed as a SecureString and removed in `finally` with the original key IDs verified; with no SP it is created with the role, its creation-time credential is used once and then removed (that key only) and nothing is stored |
 | `New-DemoArcLinuxOnboardScript`, `Get-DemoArcTestServiceEnvScript` in `Common.psm1`, `tests/LinuxArcOnboard.Tests.ps1` | Linux Arc onboarding script, always LF: `MSFT_ARC_TEST` for `azcmagent connect` plus a persistent systemd drop-in for `himdsd`, `extd` and `gcad` (best-effort restart of `extd`/`gcad` after connect). The drop-in step is idempotent and is also the one-off fix for a host onboarded by an older Deploy. Checked with `bash -n`; not yet run on a Linux host |
 | `scripts/Invoke-SqlEngineOnArc.ps1`, `samples/sql-engine/SqlEngineDemo.ps1` | Explicit one-host real SQL 2022 Developer installation/status/worker operations; approved media/terms, bounded startup and hash ownership; guarded emitter-only update preserves normal worker functions and migrates the owned checkpoint with rollback/backups; no Arc SQL, automatic reboot/repair or Defender changes |
 | `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; v2 actual error/wait/session evidence, bounded rollback and independently gated recovery, not synthetic proof or SRE remediation |
@@ -162,24 +162,40 @@ not a live fault or ingestion.
 
 `tests/Lifecycle.Tests.ps1` exercises waits, errors, config, mixed/native
 classification, retained additive manifests, ShouldProcess previews, guest/job
-failures and the JSON/exit-code contract without a cloud deployment.
+failures, Hibernate's `-ResultPath` evidence and progress lines, Activate's NAT/PIP
+tagging and the JSON/exit-code contract without a cloud deployment.
+`tests/LifecyclePreview.Tests.ps1` covers the park and wake plan lines, the guard that no
+script uses `ForEach-Object` with a bare member name (under `-WhatIf` that form prints a line
+per object and returns nothing, which emptied the Container App and AKS IDs), the job wait
+lines and the Hibernated Container App readiness row.
 `tests/GuestReadinessWait.Tests.ps1` covers the shared Activate wait on a simulated
 clock: all-fresh Heartbeats with Updating extensions, one pending host, deadline
 bounds for nine hosts, no Run Command by default, opt-in checks, the nested guest
 budget and the soft extension readiness rows.
 `tests/DeployRemoveHardening.Tests.ps1` covers, with CLI-2.91-shaped string
-fixtures and mocked Azure, the capacity check, extension/provider preflight,
-CLI not-found text, clean-subscription and stale-manifest Deploy, Key Vault write
-retry, allocation guidance and the Remove workspace/history options.
+fixtures and mocked Azure, the capacity check, provider/feature/extension preflight,
+CLI not-found text, clean-subscription and stale-manifest Deploy, the ARM Key Vault
+write and its transient-only retry, the saved admin password file, the resume of an
+unfinished build, allocation guidance and the Remove workspace/history options.
 `tests/FleetVmShape.Tests.ps1` covers the optional per-entry size/security/disk
-schema, the skin-declared nested parent, retained size/disk refusal and per-size
+schema, the skin-declared nested parent, retained size/disk refusal (including a
+deallocated VM whose model reports no disk size or tier) and per-size
 capacity demand, including the Deploy preview wiring.
 `tests/LinuxArcOnboard.Tests.ps1` renders the Linux onboarding script and checks the
 daemon drop-ins, their order around `azcmagent connect`, LF line endings and `bash -n`.
+`tests/ArcMachineTags.Tests.ps1` covers the ARM tags merge (`Set-DemoResourceTags`: one
+value per key, skip when matching, read-back), Deploy's use of it and the required
+`tags/*` readiness rows; parity's `fleet/<machine>/tags` rows are in `tests/EstateParity.Tests.ps1`.
+`tests/ReadinessEvidence.Tests.ps1` covers the Heartbeat time in the readiness evidence and the soft
+`provisioning/*` and `MDE` rows; `tests/DeployWarnings.Tests.ps1` covers Deploy's warnings before it submits
+(a VM that is not `Succeeded`, and the VM auto-shutdown schedules it is about to change).
+`tests/WaitDemoJobs.Tests.ps1` covers `Wait-DemoJobs` (the progress line names only the jobs still pending; it stops at the deadline
+without throwing or touching a running job) as used by Deploy's parallel Arc onboarding; `tests/NestedSqlGuestStop.Tests.ps1` covers
+the generated guest script, including Remove's stop-only `-AllowAbsent`.
 `tests/BuildPlan.Tests.ps1` covers the build wrapper's config, plan, approvals,
 resume state, runner and presenter handoff with stub scripts;
 `tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded
-denials) and the parity rules, both without Azure.
+denials) and the parity rules (including the lab tags on the NAT gateway and public IP), both without Azure.
 Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
 conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile

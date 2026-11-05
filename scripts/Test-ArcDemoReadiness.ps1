@@ -5,6 +5,12 @@
     JSON schemaVersion 1. Exit 0: required checks pass; 1: fail/error;
     2: eventual-consistency checks remain pending at the bounded deadline.
     extension/* rows are non-required soft diagnostics; the required heartbeat/* rows decide readiness.
+    With -TimeoutSeconds, polling continues while any required row is still pending, even when an
+    unrelated required row has already failed, so one bounded run ends with every row settled.
+    -SkipNestedGuest leaves out the nested/arc row. Deploy's own validation uses it: the nested guest is
+    built after Deploy (wrapper step P4), so its Arc machine cannot exist yet and must not fail the base estate.
+    -OutputPath also writes the JSON (whatever -OutputFormat shows) to that file, creating its folder, so one run
+    gives both the dated evidence and the exit code. The JSON names the subscription and tenant: keep it outside git.
     Never repairs, induces faults, changes context defaults or registers providers.
 #>
 [CmdletBinding()]
@@ -15,7 +21,9 @@ param(
     [string]$SkinPath = '',
     [ValidateSet('Active', 'Ready', 'Hibernated', 'Removed')][string]$DesiredState = 'Ready',
     [ValidateSet('Json', 'Table')][string]$OutputFormat = 'Table',
-    [ValidateRange(0, 1800)][int]$TimeoutSeconds = 0
+    [ValidateRange(0, 1800)][int]$TimeoutSeconds = 0,
+    [switch]$SkipNestedGuest,
+    [string]$OutputPath = ''
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
@@ -37,7 +45,7 @@ try {
                 -KeepParkedVmNames @(Get-DemoSkinValue $skin 'operations.keepParkedVmNames' @())
             if ($DesiredState -ne 'Hibernated') { Assert-DemoSkinInventory $skin $inventory }
             @(Get-DemoReadinessChecks -Inventory $inventory -NamePrefix $NamePrefix -DesiredState $DesiredState)
-            if ($nestedSqlGuest) {
+            if ($nestedSqlGuest -and -not $SkipNestedGuest) {
                 $id = "/subscriptions/$SubscriptionId/resourceGroups/rg-$NamePrefix/providers/Microsoft.HybridCompute/machines/$($nestedSqlGuest.ArcMachineName)"
                 $raw = Invoke-DemoAz -Arguments @('connectedmachine', 'show', '--ids', $id, '-o', 'json') -AllowNotFound
                 $machine = if ($raw) { $raw | ConvertFrom-Json }
@@ -49,7 +57,8 @@ try {
         $status = if (@($checks | Where-Object { $_.required -and $_.status -eq 'fail' }).Count) { 'fail' }
             elseif (@($checks | Where-Object { $_.required -and $_.status -eq 'pending' }).Count) { 'pending' }
             else { 'pass' }
-        if ($status -ne 'pending' -or [DateTime]::UtcNow -ge $deadline) { break }
+        # Keep polling while any required row is pending, even if an unrelated required row has already failed.
+        if (-not @($checks | Where-Object { $_.required -and $_.status -eq 'pending' }).Count -or [DateTime]::UtcNow -ge $deadline) { break }
         Start-Sleep -Seconds ([Math]::Min(15, [Math]::Max(1, [int]($deadline - [DateTime]::UtcNow).TotalSeconds)))
     } while ([DateTime]::UtcNow -lt $deadline)
 } catch {
@@ -65,6 +74,11 @@ $result = [ordered]@{
     subscriptionId = "$SubscriptionId"; tenantId = "$TenantId"
     resourceGroups = @("rg-$NamePrefix", "rg-$NamePrefix-infra")
     desiredState = $DesiredState; status = $status; checks = @($checks | Where-Object { $_ })
+}
+if ($OutputPath) {
+    $evidenceFile = [IO.Path]::GetFullPath($OutputPath, (Get-Location).ProviderPath)
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $evidenceFile)
+    $result | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $evidenceFile -Encoding utf8
 }
 if ($OutputFormat -eq 'Json') { $result | ConvertTo-Json -Depth 15 }
 else {

@@ -22,6 +22,16 @@ the window; do not run competing resets or lifecycle operations.
 
 ## Deploy
 
+Add this workload as a **second Deploy pass**: build the base estate first, and once that
+deployment has Succeeded set `workloads.deployContainerApps` in the private skin (or pass
+`-DeployContainerApps $true`) and run the same Deploy again; see
+[adding an optional workload](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
+The environment is the slowest single resource in the estate: it normally takes 17-23 minutes, sits in
+`Waiting` for 20 minutes or more and can fail on its own with a transient platform error
+([troubleshooting](troubleshooting.md#the-container-apps-environment-is-slow-or-fails-with-managedenvironmentprovisioningerror)).
+Built in the first pass, such a failure leaves the whole base estate unfinished; built as a second
+pass it affects only this optional workload, and the base estate stays complete.
+
 ```powershell
 .\scripts\Deploy-ArcDemo.ps1 `
   -SubscriptionId <subscription-id> `

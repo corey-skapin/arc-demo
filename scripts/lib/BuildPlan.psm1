@@ -74,7 +74,9 @@ function ConvertTo-BuildSafeValue {
         }
         return $copy
     }
-    if ($Value -is [pscustomobject]) {
+    # A string that came through a pipeline is PSObject-wrapped and also answers -is [pscustomobject]; copied property by
+    # property it would be written as {"Length":N}. Only a real custom object is copied that way.
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
         $copy = [ordered]@{}
         foreach ($property in $Value.PSObject.Properties) {
             $copy[$property.Name] = if ($property.Name -match '(?i)secret|password|token|credential') { '<redacted>' } else { ConvertTo-BuildSafeValue $property.Value ($Depth + 1) }
@@ -250,14 +252,15 @@ function New-BuildStep {
         [string]$RetryHint = '',
         [string]$SkipReason = '',
         [scriptblock]$SkipWhen,
-        [switch]$ResultStatus
+        [switch]$ResultStatus,
+        [string[]]$StaleAfter = @()
     )
     [pscustomobject]@{
         Id = $Id; Phase = ($Id -split '\.')[0]; Title = $Title; Repo = $Repo; Script = $Script; Minutes = $Minutes
         Mutating = [bool]$Mutating; Approvals = $Approvals; Arguments = $Arguments; ResolvedArguments = $ResolvedArguments
         Resolve = $Resolve; Run = $Run; Inputs = $Inputs; Capture = $Capture; ExitCodes = [bool]$ExitCodes; WaitMinutes = $WaitMinutes
         AlwaysRun = [bool]$AlwaysRun; NoRetry = [bool]$NoRetry; RetryHint = $RetryHint; SkipReason = $SkipReason
-        SkipWhen = $SkipWhen; ResultStatus = [bool]$ResultStatus
+        SkipWhen = $SkipWhen; ResultStatus = [bool]$ResultStatus; StaleAfter = @($StaleAfter)
         Kind = if ($Repo -eq 'internal') { 'internal' } else { 'script' }
     }
 }
@@ -329,6 +332,14 @@ function Get-BuildNestedBlocker {
     $values = Get-BuildNestedInput $Context
     $missing = @($script:NestedRequiredInputs | Where-Object { -not (Get-DemoSkinValue $values $_ '') })
     if ($missing) { "The nested SQL build input file is missing: $($missing -join ', ')." }
+}
+
+function Get-BuildSqlEngineProblem {
+    # The SQL lock-timeout alert watches the SQL engine, so it needs P5.4's saved proof that the engine answers.
+    param([Parameter(Mandatory)]$Context)
+    $proof = Join-BuildPath $Context.ArcRoot '.local/sql-engine-status.json'
+    if ((Test-Path -LiteralPath $proof -PathType Leaf) -and (Get-DemoSkinValue (Read-BuildJson $proof) 'evidence.status' '') -eq 'pass') { return }
+    'The real SQL engine is not confirmed yet (P5.4 saves .local/sql-engine-status.json with status pass), so the lock-timeout alert would watch nothing. Run P5 first; its Status step, P5.4, is read-only.'
 }
 
 function Get-BuildNestedArguments {
@@ -403,6 +414,32 @@ function Get-BuildOnboardingApplication {
     if ($found.Count -eq 1) { [guid]$found[0].appId }
 }
 
+function Get-BuildGuestCredential {
+    <#
+    .SYNOPSIS
+        The nested guest Administrator credential: -GuestCredential, else the private folder's
+        nested-guest-credential.clixml, else a prompt.
+    .DESCRIPTION
+        A [pscredential] cannot be passed to pwsh -File, so an unattended run reads the DPAPI-protected export from the
+        private folder (see docs/private-config.md for the two-line recipe that creates it). Nothing here writes a
+        credential. Only the nested guest build and its guest checks use it; Activate, Hibernate and Remove never do.
+    #>
+    param([Parameter(Mandatory)]$Context)
+    if ($Context.GuestCredential) { return $Context.GuestCredential }
+    $path = Join-Path $Context.Config.Root 'nested-guest-credential.clixml'
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try { $saved = Import-Clixml -LiteralPath $path }
+        catch { throw "The saved guest credential $path could not be read (a Windows export only opens for the user and PC that wrote it): $($_.Exception.Message)" }
+        if ($saved -isnot [pscredential]) { throw "The saved guest credential $path is not a credential export (Export-Clixml of a PSCredential)." }
+        return $saved
+    }
+    try {
+        Get-Credential -UserName Administrator -Message 'Approved Administrator credential for the nested guest (asked now so the build can run unattended; save one to nested-guest-credential.clixml in the private folder to skip this prompt)'
+    } catch {
+        throw "The nested guest (P4) needs an approved Administrator credential and this session cannot prompt for it ($($_.Exception.Message)). Pass -GuestCredential, or save one with Export-Clixml to $path (docs/private-config.md). Nothing was started."
+    }
+}
+
 function Resolve-BuildNestedArguments {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     Initialize-BuildContext $Context
@@ -411,10 +448,7 @@ function Resolve-BuildNestedArguments {
     if (-not [guid]::TryParse((@($raw) -join '').Trim(), [ref]$vmId)) { throw 'Could not read the nested parent VM ID from Azure.' }
     $application = Get-BuildOnboardingApplication $Context
     if (-not $application) { throw "Onboarding identity sp-$($Context.Prefix)-onboard was not found; the base deployment creates it." }
-    $credential = $Context.GuestCredential
-    if (-not $credential) {
-        $credential = Get-Credential -UserName Administrator -Message 'Approved guest Administrator credential for the nested guest (never stored)'
-    }
+    $credential = Get-BuildGuestCredential -Context $Context
     $Arguments['ParentVmId'] = $vmId
     $Arguments['OnboardingApplicationId'] = $application
     $Arguments['GuestCredential'] = $credential
@@ -472,7 +506,7 @@ function Get-ArcDemoBuildSteps {
         New-BuildStep -Id 'P2' -Title 'Base estate: Bicep, Arc, Monitor, DCRs, workbooks' -Script 'scripts\Deploy-ArcDemo.ps1' -Minutes 70 -Mutating `
             -Approvals CostStart -Arguments {
                 param($c)
-                $extra = @{}
+                $extra = @{ AdminPasswordPath = (Join-Path $c.Config.Root 'vm-admin-credential.clixml') }
                 if ($c.Config.AutoShutdownTime) { $extra['AutoShutdownTime'] = $c.Config.AutoShutdownTime }
                 if ($c.Config.DeployerPrincipalId) { $extra['DeployerPrincipalId'] = $c.Config.DeployerPrincipalId }
                 New-BuildArguments $c $c.Config.ArcSkinPath $extra
@@ -530,7 +564,9 @@ function Get-ArcDemoBuildSteps {
                     MachineName = $c.Config.RealSql.MachineName; Action = 'Status'; ResultPath = (Join-BuildPath $c.ArcRoot '.local/sql-engine-status.json')
                 }
             }
-        New-BuildStep -Id 'P6.1' -Title 'SQL lock-timeout incident alert' -Script 'scripts\Set-SqlIncidentAlert.ps1' -Minutes 2 -Mutating -SkipReason $noSql -Arguments {
+        New-BuildStep -Id 'P6.1' -Title 'SQL lock-timeout incident alert' -Script 'scripts\Set-SqlIncidentAlert.ps1' -Minutes 2 -Mutating -SkipReason $noSql `
+            -Inputs { param($c) if ('P5.4' -notin $c.PlannedSteps) { Get-BuildSqlEngineProblem $c } } `
+            -Resolve { param($c) $problem = Get-BuildSqlEngineProblem $c; if ($problem) { throw $problem } } -Arguments {
                 param($c)
                 New-BuildArguments $c $c.Config.ArcSkinPath @{
                     MachineName = $c.Config.RealSql.MachineName; Action = 'Deploy'
@@ -538,9 +574,9 @@ function Get-ArcDemoBuildSteps {
                     ActionGroupId = (Get-BuildArcResourceId $c 'Microsoft.Insights/actionGroups' "ag-$($c.Prefix)")
                 }
             }
-        New-BuildStep -Id 'P6.2' -Title 'Operational workbook: capacity' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks `
+        New-BuildStep -Id 'P6.2' -Title 'Operational workbook: capacity' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks -StaleAfter P2, P4 `
             -Arguments { param($c) New-BuildWorkbookArguments $c 'capacity' } -Capture { param($values, $output) Save-BuildWorkbookId $values 'capacityWorkbookResourceId' $output }
-        New-BuildStep -Id 'P6.3' -Title 'Operational workbook: optimisation' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks `
+        New-BuildStep -Id 'P6.3' -Title 'Operational workbook: optimisation' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks -StaleAfter P2, P4 `
             -Arguments { param($c) New-BuildWorkbookArguments $c 'optimisation' } -Capture { param($values, $output) Save-BuildWorkbookId $values 'optimisationWorkbookResourceId' $output }
         New-BuildStep -Id 'P7' -Title 'Arc readiness gate (Active, read-only)' -Script 'scripts\Test-ArcDemoReadiness.ps1' -Minutes 5 -AlwaysRun -ExitCodes -WaitMinutes 20 `
             -Arguments {
@@ -599,7 +635,7 @@ function Select-ArcDemoBuildStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object[]]$Steps, [string]$From, [string]$To, [string[]]$Only)
     if ($Only -and ($From -or $To)) { throw 'Use either -Only or -From/-To, not both.' }
-    if ($Only) { return @($Steps | Where-Object { $_.Phase -in $Only }) }
+    if ($Only) { return @($Steps | Where-Object { $_.Phase -in $Only -or $_.Id -in $Only }) }
     # [array]::IndexOf is case-sensitive while the phase parameters are not.
     $first = if ($From) { [array]::IndexOf($script:Phases, $From.ToUpperInvariant()) } else { 0 }
     $last = if ($To) { [array]::IndexOf($script:Phases, $To.ToUpperInvariant()) } else { $script:Phases.Count - 1 }
@@ -626,11 +662,27 @@ function Get-ArcDemoBuildPlan {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object[]]$Steps, [Parameter(Mandatory)]$State, [switch]$Force)
     $Context.State = $State
-    $isDone = { param($step) $State.steps.Contains($step.Id) -and $State.steps[$step.Id].status -eq 'done' -and -not $step.AlwaysRun -and -not $Force }
-    $Context.PlannedSteps = @($Steps | Where-Object { -not $_.SkipReason -and -not (& $isDone $_) } | ForEach-Object Id)
+    # A step that publishes a snapshot of what earlier steps built (the workbook roster) is out of date when one of
+    # those steps finished after it did, so a recorded 'done' is not trusted then.
+    $staleAfter = {
+        param($step)
+        if (-not $State.steps.Contains($step.Id)) { return $null }
+        $own = ConvertTo-DemoUtc $State.steps[$step.Id]['endedUtc']
+        foreach ($id in $step.StaleAfter) {
+            if (-not $State.steps.Contains($id) -or $State.steps[$id]['status'] -ne 'done') { continue }
+            $other = ConvertTo-DemoUtc $State.steps[$id]['endedUtc']
+            if ($own -and $other -and $other -gt $own) { return $id }
+        }
+        $null
+    }
+    $isDone = { param($step) $State.steps.Contains($step.Id) -and $State.steps[$step.Id].status -eq 'done' -and -not $step.AlwaysRun -and -not $Force -and -not (& $staleAfter $step) }
+    $Context.PlannedSteps = @($Steps | Where-Object { -not $_.SkipReason -and -not (& $isDone $_) } | ForEach-Object { $_.Id })
     foreach ($step in $Steps) {
         $blockers = [System.Collections.Generic.List[string]]::new()
+        $notes = [System.Collections.Generic.List[string]]::new()
         $record = if ($State.steps.Contains($step.Id)) { $State.steps[$step.Id] } else { $null }
+        $newer = if (-not $step.SkipReason -and -not $step.AlwaysRun -and $record -and $record.status -eq 'done') { & $staleAfter $step }
+        if ($newer) { $notes.Add("recorded as done, but $newer finished later, so what it published is out of date; it runs again.") }
         $status = 'ready'
         if ($step.SkipReason) { $status = 'skipped' }
         elseif (& $isDone $step) { $status = 'done' }
@@ -656,7 +708,7 @@ function Get-ArcDemoBuildPlan {
         $needs = if ($status -in @('ready', 'blocked')) { @($step.Approvals | Where-Object { -not $Context.Approved[$_] }) } else { @() }
         [pscustomobject]@{
             Step = $step.Id; Phase = $step.Phase; Title = $step.Title; Status = $status; Minutes = $step.Minutes; Mutating = $step.Mutating
-            Needs = $needs; Blockers = $blockers.ToArray(); Reason = $step.SkipReason; Definition = $step
+            Needs = $needs; Blockers = $blockers.ToArray(); Reason = $step.SkipReason; Notes = $notes.ToArray(); Definition = $step
         }
     }
 }
@@ -665,21 +717,27 @@ function Get-ArcDemoBuildWindowWarning {
     <#
     .SYNOPSIS
         Warns when the build would run across the DevTest auto-shutdown time.
+    .DESCRIPTION
+        -Allowance multiplies the plan's typical minutes, because platform operations are often slower or repeated.
+        Deploy owns the schedule and sets it again on every run, so a time changed by hand does not survive a rerun.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][int]$Minutes,
         [string]$ShutdownTime = '1900',
         [string]$TimeZoneId = 'Cen. Australia Standard Time',
-        [datetime]$Now = [datetime]::UtcNow
+        [datetime]$Now = [datetime]::UtcNow,
+        [ValidateRange(1.0, 4.0)][double]$Allowance = 1.0
     )
     try { $zone = [TimeZoneInfo]::FindSystemTimeZoneById($TimeZoneId) }
     catch { return "Cannot evaluate the auto-shutdown window: time zone '$TimeZoneId' is unknown on this machine." }
     $start = [TimeZoneInfo]::ConvertTimeFromUtc($Now.ToUniversalTime(), $zone)
     $shutdown = $start.Date.AddHours([int]$ShutdownTime.Substring(0, 2)).AddMinutes([int]$ShutdownTime.Substring(2, 2))
     if ($shutdown -le $start) { $shutdown = $shutdown.AddDays(1) }
-    if ($shutdown -lt $start.AddMinutes($Minutes)) {
-        "About $Minutes minutes of VM-dependent steps would cross the $($shutdown.ToString('HH:mm')) auto-shutdown ($TimeZoneId) and deallocate the hosts mid-build. Start earlier or set autoShutdownTime in the build config."
+    $planned = [int][Math]::Ceiling($Minutes * $Allowance)
+    if ($shutdown -lt $start.AddMinutes($planned)) {
+        $basis = if ($Allowance -gt 1) { "About $Minutes minutes of VM-dependent steps, plus a $([int][Math]::Round(($Allowance - 1) * 100))% allowance for slow or repeated platform operations ($planned minutes)," } else { "About $Minutes minutes of VM-dependent steps" }
+        "$basis would cross the $($shutdown.ToString('HH:mm')) auto-shutdown ($TimeZoneId) and deallocate the hosts mid-build. Deploy sets this schedule again on every run, so a time changed by hand is reverted: start earlier, or set autoShutdownTime in the build config (or operations.autoShutdownTime in the skin) before the build."
     }
 }
 
@@ -746,9 +804,11 @@ function Invoke-ArcDemoBuildPreflight {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context)
     $notes = [System.Collections.Generic.List[string]]::new()
-    $prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$Context.ContainerApps -Aks:$Context.Aks
+    $standardSecurityType = [bool](Get-DemoSkinValue $Context.Skin 'workloads.deployArcOnPrem' $true) -and
+        (Test-DemoStandardSecurityTypeRequired -Skin $Context.Skin -FleetPath (Get-DemoSkinValue $Context.Skin 'workloads.onPremFleetPath' '') -RepoRoot $Context.ArcRoot)
+    $prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$Context.ContainerApps -Aks:$Context.Aks -StandardSecurityType:$standardSecurityType
     $null = Test-Prerequisites -SubscriptionId "$($Context.SubscriptionId)" -TenantId "$($Context.TenantId)" -DeployerPrincipalId $Context.Config.DeployerPrincipalId `
-        -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions
+        -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions -Features $prerequisites.Features
     $notes.Add((Get-BuildRepoSummary $Context.ArcRoot 'Arc repo'))
     if ($Context.Config.Sre) { $notes.Add((Get-BuildRepoSummary $Context.Config.Sre.RepoPath 'SRE repo')) }
     $deleted = Invoke-AzRest -Method Get -Url "https://management.azure.com/subscriptions/$($Context.SubscriptionId)/providers/Microsoft.OperationalInsights/deletedWorkspaces?api-version=2020-08-01"
@@ -760,7 +820,7 @@ function Invoke-ArcDemoBuildPreflight {
     if ($Context.RemainingMinutes -gt 0) {
         $time = if ($Context.Config.AutoShutdownTime) { $Context.Config.AutoShutdownTime } else { [string](Get-DemoSkinValue $Context.Skin 'operations.autoShutdownTime' '1900') }
         $zone = [string](Get-DemoSkinValue $Context.Skin 'operations.autoShutdownTimezone' 'Cen. Australia Standard Time')
-        $window = Get-ArcDemoBuildWindowWarning -Minutes $Context.RemainingMinutes -ShutdownTime $time -TimeZoneId $zone
+        $window = Get-ArcDemoBuildWindowWarning -Minutes $Context.RemainingMinutes -ShutdownTime $time -TimeZoneId $zone -Allowance 1.5
         if ($window) { $notes.Add($window) }
     }
     foreach ($note in $notes) { Write-Step $note }
@@ -781,19 +841,47 @@ function Invoke-ArcDemoBuildIdentityCheck {
     [pscustomobject]@{ status = 'pass'; exists = [bool]$application }
 }
 
+function Test-BuildResourceExists {
+    param([Parameter(Mandatory)][string]$Id)
+    [bool](Invoke-DemoAz -Arguments @('resource', 'show', '--ids', $Id, '-o', 'json') -AllowNotFound)
+}
+
 function Assert-BuildResourceExists {
     param([Parameter(Mandatory)][string]$Id)
-    $raw = Invoke-DemoAz -Arguments @('resource', 'show', '--ids', $Id, '-o', 'json') -AllowNotFound
-    if (-not $raw) { throw "Expected resource is missing, so no presenter context is written: $Id" }
+    if (-not (Test-BuildResourceExists $Id)) { throw "Expected resource is missing, so no presenter context is written: $Id" }
+}
+
+function Get-BuildContextTime {
+    # The context describes what the last passing Active readiness (P7) saw, so it carries that check's time,
+    # which is the time in the evidence file, not the later moment P10 happens to run.
+    param([Parameter(Mandatory)]$State)
+    if ($State.steps.Contains('P7') -and $State.steps['P7'].status -eq 'done' -and $State.steps['P7'].Contains('evidence')) {
+        $evidence = [string]$State.steps['P7']['evidence']
+        if ($evidence -and (Test-Path -LiteralPath $evidence -PathType Leaf)) {
+            try {
+                $checked = ConvertTo-DemoUtc (Get-DemoSkinValue (Read-BuildJson $evidence) 'output.checkedAtUtc' '')
+                if ($checked -and $checked -le [DateTime]::UtcNow) { return $checked.ToString('o') }
+            } catch { Write-Verbose "P7 evidence has no usable checkedAtUtc: $($_.Exception.Message)" }
+        }
+    }
+    [DateTime]::UtcNow.ToString('o')
 }
 
 function New-ArcDemoPresenterContext {
     <#
     .SYNOPSIS
         Builds the nonsecret presenter context from exact Arc-group IDs, each verified to exist.
+    .DESCRIPTION
+        The required IDs and the capacity and optimisation workbooks must exist or nothing is written. The optional
+        chapters the wrapper can verify itself (the data collection rule, the four original workbooks, the nested guest, its
+        SQL instance and its parent) are added when their resource is found. One that is missing is added to -LeftOut instead,
+        so the guide cannot tell a presenter to skip a chapter whose resources exist, and a chapter that is left out is named.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$State)
+    param(
+        [Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$State,
+        [System.Collections.Generic.List[string]]$LeftOut = ([System.Collections.Generic.List[string]]::new())
+    )
     Initialize-BuildContext $Context
     $presenter = $Context.Config.Presenter
     $title = [string](Get-DemoSkinValue $Context.Skin 'labels.workbookTitle' ("$(Get-DemoSkinValue $Context.Skin 'labels.demoTitle' 'Arc Demo') $([char]0x2014) Estate Overview"))
@@ -805,7 +893,7 @@ function New-ArcDemoPresenterContext {
         schemaVersion = 1
         subscriptionId = "$($Context.SubscriptionId)"
         tenantId = "$($Context.TenantId)"
-        recordedAtUtc = [DateTime]::UtcNow.ToString('o')
+        recordedAtUtc = (Get-BuildContextTime $State)
         resourceGroups = [ordered]@{ arc = $Context.ArcGroup; infra = $Context.InfraGroup }
         workspaceResourceId = (Get-BuildArcResourceId $Context 'Microsoft.OperationalInsights/workspaces' "law-$($Context.Prefix)")
         workbookResourceId = $estate[0].id
@@ -828,6 +916,32 @@ function New-ArcDemoPresenterContext {
         if ($State.values.Contains($slot)) { $document[$slot] = $State.values[$slot] }
     }
     foreach ($key in @($document.Keys | Where-Object { $_ -match 'ResourceId$' })) { Assert-BuildResourceExists $document[$key] }
+    $offer = {
+        param([string]$Key, [string]$Id, [string]$Chapter)
+        if (Test-BuildResourceExists $Id) { $document[$Key] = $Id; return $true }
+        $LeftOut.Add($Chapter)
+        $false
+    }
+    $null = & $offer 'dataCollectionRuleResourceId' (Get-BuildArcResourceId $Context 'Microsoft.Insights/dataCollectionRules' 'dcr-arc-demo') 'the data collection rule beat'
+    $dash = [string][char]0x2014
+    foreach ($entry in @(
+        @('machineIntelligenceWorkbookResourceId', 'Machine Intelligence Center', 'the Machine Intelligence Center steps'),
+        @('complianceWorkbookResourceId', 'Compliance, Security & Governance', 'the compliance workbook steps'),
+        @('assetInventoryWorkbookResourceId', 'Asset Inventory', 'the Asset Inventory step'),
+        @('sqlEstateWorkbookResourceId', 'SQL Estate Dashboard', 'the SQL Estate workbook steps'))) {
+        # Deploy tags each workbook with its display name; the list above already proves a match exists.
+        $optionalTag = ("Arc $dash $($entry[1])" -replace '[^A-Za-z0-9]', '-').ToLowerInvariant()
+        $match = @($workbooks | Where-Object { $_.tags -and $_.tags.PSObject.Properties['workbookTag'] -and $_.tags.workbookTag -eq $optionalTag })
+        if ($match.Count -gt 1) { throw "Expected at most one workbook tagged $optionalTag; found $($match.Count)." }
+        if ($match.Count) { $document[$entry[0]] = $match[0].id } else { $LeftOut.Add($entry[2]) }
+    }
+    if ($Context.Nested) {
+        $guestMachine = Get-BuildArcResourceId $Context 'Microsoft.HybridCompute/machines' $Context.Nested.ArcMachineName
+        if (& $offer 'nestedSqlMachineResourceId' $guestMachine 'the nested Arc SQL chapter') {
+            $null = & $offer 'nestedSqlInstanceResourceId' (Get-BuildArcResourceId $Context 'Microsoft.AzureArcData/sqlServerInstances' $Context.Nested.GuestVmName) "the nested guest's SQL Server instance link"
+            $null = & $offer 'nestedSqlParentMachineResourceId' (Get-BuildArcResourceId $Context 'Microsoft.HybridCompute/machines' $Context.Nested.ParentVmName) "the nested guest's parent host link"
+        }
+    }
     $guide = if ($Context.Config.Sre) { Join-BuildPath $Context.Config.Sre.RepoPath '.local/presenter-runsheet.md' } else { '' }
     if ($guide -and (Test-Path -LiteralPath $guide -PathType Leaf)) { $document['companionSreRunsheetPath'] = $guide }
     $document
@@ -836,7 +950,11 @@ function New-ArcDemoPresenterContext {
 function Invoke-ArcDemoPresenterHandoff {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$State)
-    $document = New-ArcDemoPresenterContext -Context $Context -State $State
+    $leftOut = [System.Collections.Generic.List[string]]::new()
+    $document = New-ArcDemoPresenterContext -Context $Context -State $State -LeftOut $leftOut
+    if ($leftOut.Count) {
+        Write-Warn "Optional chapters left out of the presenter guide because their resources were not found: $($leftOut -join '; '). Build them, then run P10 again."
+    }
     $directory = Join-Path $Context.ArcRoot '.local'
     $null = New-Item -ItemType Directory -Path $directory -Force
     $file = Join-Path $directory 'demo-context.json'
@@ -852,7 +970,7 @@ function Invoke-ArcDemoPresenterHandoff {
             Write-Warn 'The SRE repo has no .local\demo-context.json yet; record it with the SRE handbook, then run its New-PresenterRunsheet.ps1.'
         }
     }
-    [pscustomobject]@{ status = 'pass'; contextPath = $file; resourceIds = @($document.Keys | Where-Object { $_ -match 'ResourceId$' }).Count }
+    [pscustomobject]@{ status = 'pass'; contextPath = $file; resourceIds = @($document.Keys | Where-Object { $_ -match 'ResourceId$' }).Count; chaptersLeftOut = $leftOut.ToArray() }
 }
 
 function Invoke-BuildLooseScript {
@@ -985,6 +1103,7 @@ function Write-ArcDemoBuildPlan {
         @{ n = 'Needs'; e = { (@($_.Needs | ForEach-Object { "-$($script:ApprovalSwitch[$_])" }) -join ' ') } }, Title | Format-Table -AutoSize | Out-Host
     foreach ($row in $Plan) {
         if ($row.Reason) { Write-Step "$($row.Step) skipped: $($row.Reason)" }
+        foreach ($note in $row.Notes) { Write-Step "$($row.Step): $note" }
         foreach ($blocker in $row.Blockers) { Write-Warn "$($row.Step) blocked: $blocker" }
     }
     foreach ($warning in $Warnings) { Write-Warn $warning }
@@ -997,4 +1116,5 @@ function Get-ArcDemoApprovalSwitch { $script:ApprovalSwitch }
 Export-ModuleMember -Function Read-ArcDemoBuildConfig, New-ArcDemoBuildContext, Get-ArcDemoBuildSteps, Select-ArcDemoBuildStep,
     Get-ArcDemoBuildPlan, Resolve-ArcDemoPlanSkip, Get-ArcDemoBuildWindowWarning, New-ArcDemoBuildState, Read-ArcDemoBuildState, Save-ArcDemoBuildState,
     Test-ArcDemoBuildStateFresh, Invoke-ArcDemoBuildPreflight, Invoke-ArcDemoBuildIdentityCheck, New-ArcDemoPresenterContext,
-    Invoke-ArcDemoPresenterHandoff, Invoke-ArcDemoBuildStep, Write-ArcDemoBuildPlan, Get-ArcDemoApprovalSwitch, ConvertTo-BuildSafeValue
+    Invoke-ArcDemoPresenterHandoff, Invoke-ArcDemoBuildStep, Write-ArcDemoBuildPlan, Get-ArcDemoApprovalSwitch, ConvertTo-BuildSafeValue,
+    Get-BuildGuestCredential

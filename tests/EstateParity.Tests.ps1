@@ -22,11 +22,12 @@ BeforeAll {
             (New-Res 'alert-par-test-lob-arc-app-fault' 'Microsoft.Insights/scheduledQueryRules')
             (New-Res 'guest-vm' 'Microsoft.AzureArcData/sqlServerInstances')
         ) + @(1..6 | ForEach-Object { New-Res "estate-$_" $book @{ workbookTag = "w$_" } }) + @(1..2 | ForEach-Object { New-Res "operational-$_" $book $operational })
+        $labTags = @{ owner = 'demo'; purpose = 'arc-demo'; costcenter = 'demo'; env = 'demo' }
         $infra = @(
             (New-Res 'vnet-par-test' 'Microsoft.Network/virtualNetworks')
             (New-Res 'nsg-par-test' 'Microsoft.Network/networkSecurityGroups')
-            (New-Res 'natgw-par-test' 'Microsoft.Network/natGateways')
-            (New-Res 'pip-natgw-par-test' 'Microsoft.Network/publicIPAddresses')
+            (New-Res 'natgw-par-test' 'Microsoft.Network/natGateways' $labTags)
+            (New-Res 'pip-natgw-par-test' 'Microsoft.Network/publicIPAddresses' $labTags)
             (New-Res 'kv-partest-abc123' 'Microsoft.KeyVault/vaults')
             (New-Res 'shutdown-computevm-win-a' 'Microsoft.DevTestLab/schedules')
             (New-Res 'ca-par-test-fault' 'Microsoft.App/containerApps')
@@ -57,7 +58,7 @@ BeforeAll {
                 subscription = & $ok ([ordered]@{
                     policyAssignments = @('mcsb-par-test', 'nist-par-test'); budgets = @('budget-par-test')
                     defender = @([ordered]@{ name = 'VirtualMachines'; tier = 'Standard'; subPlan = 'P2' }, [ordered]@{ name = 'Containers'; tier = 'Free'; subPlan = $null }) })
-                onboardingApp = & $ok ([ordered]@{ found = $true; credentials = @([ordered]@{ displayName = 'rbac'; keyId = 'k1'; startDateTime = '2026-10-09T00:00:00Z'; endDateTime = '2027-10-09T00:00:00Z' }) })
+                onboardingApp = & $ok ([ordered]@{ found = $true; credentials = @() })
                 sre = & $ok ([ordered]@{ exists = $true; identities = @([ordered]@{ name = 'sre-par-test-uami'; roleAssignments = @(
                     [ordered]@{ role = 'Contributor'; scope = "/subscriptions/$script:Sub/resourceGroups/rg-par-test" }
                     [ordered]@{ role = 'Monitoring Contributor'; scope = "/subscriptions/$script:Sub" }) }) })
@@ -80,7 +81,7 @@ Describe 'Expected-object list' {
         $ids | Should -HaveCount @($ids | Select-Object -Unique).Count
         foreach ($rule in $script:Expected.rules) {
             $kind = $rule.PSObject.Properties['kind']
-            if ($kind) { $kind.Value | Should -BeIn @('policy', 'budget', 'defender', 'identityRole', 'onboardingApp', 'noOneDayCredentials') }
+            if ($kind) { $kind.Value | Should -BeIn @('policy', 'budget', 'defender', 'identityRole', 'onboardingApp', 'noOneDayCredentials', 'noLongLivedCredentials') }
             else {
                 $rule.group | Should -BeIn @('arc', 'infra', 'sre')
                 $rule.type | Should -Match '^Microsoft\.[A-Za-z]+/[A-Za-z]+$'
@@ -113,6 +114,8 @@ Describe 'Parity evaluation' {
         @{ Name = 'workbooks are missing'; Expect = 'arc/workbooks'; Change = { param($s) $s.sections.groups.data.arc.resources = @($s.sections.groups.data.arc.resources | Where-Object type -ne 'Microsoft.Insights/workbooks') } }
         @{ Name = 'an operational workbook is missing'; Expect = 'arc/operational-workbooks'; Change = { param($s) $s.sections.groups.data.arc.resources = @($s.sections.groups.data.arc.resources | Where-Object name -ne 'operational-2') } }
         @{ Name = 'the NAT gateway is gone (a parked estate)'; Expect = 'infra/nat-gateway'; Change = { param($s) $s.sections.groups.data.infra.resources = @($s.sections.groups.data.infra.resources | Where-Object type -ne 'Microsoft.Network/natGateways') } }
+        @{ Name = 'the NAT gateway was recreated without the lab tags'; Expect = 'infra/nat-gateway'; Change = { param($s) ($s.sections.groups.data.infra.resources | Where-Object name -eq 'natgw-par-test').tags = $null } }
+        @{ Name = 'the NAT public IP lacks one lab tag'; Expect = 'infra/nat-public-ip'; Change = { param($s) ($s.sections.groups.data.infra.resources | Where-Object name -eq 'pip-natgw-par-test').tags.PSObject.Properties.Remove('costcenter') } }
         @{ Name = 'the SQL alert is missing'; Expect = 'arc/sql-alert'; Change = { param($s) $s.sections.groups.data.arc.resources = @($s.sections.groups.data.arc.resources | Where-Object name -ne 'al-par-test-sql-lock-timeout') } }
         @{ Name = 'the SRE agent group is absent'; Expect = 'sre/agent'; Change = { param($s) $s.sections.groups.data.sre.exists = $false } }
         @{ Name = 'a manifest host has no VM'; Expect = 'fleet/win-a/vm'; Change = { param($s) $s.sections.vms.data = @($s.sections.vms.data | Where-Object name -ne 'win-a') } }
@@ -126,6 +129,8 @@ Describe 'Parity evaluation' {
         @{ Name = 'the onboarding application is missing'; Expect = 'tenant/onboarding-app'; Change = { param($s) $s.sections.onboardingApp.data.found = $false } }
         @{ Name = 'a one-day build credential was left behind'; Expect = 'tenant/no-residual-credentials'
             Change = { param($s) $s.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'nested-guest-1'; keyId = 'k2'; startDateTime = '2026-11-02T00:00:00Z'; endDateTime = '2026-11-03T00:00:00Z' } } }
+        @{ Name = 'the application creation left a one-year credential behind'; Expect = 'tenant/no-long-lived-credentials'
+            Change = { param($s) $s.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'rbac'; keyId = 'k1'; startDateTime = '2026-10-09T00:00:00Z'; endDateTime = '2027-10-09T00:00:00Z' } } }
         @{ Name = 'the alert-access grant is missing'; Expect = 'subscription/alert-access-grant'; Change = { param($s) $s.sections.sre.data.identities[0].roleAssignments = @($s.sections.sre.data.identities[0].roleAssignments | Where-Object role -ne 'Monitoring Contributor') } }
         @{ Name = 'the alert-access grant is duplicated'; Expect = 'subscription/alert-access-grant'
             Change = { param($s) $s.sections.sre.data.identities[0].roleAssignments += [pscustomobject]@{ role = 'Monitoring Contributor'; scope = "/subscriptions/$($s.subscriptionId)" } } }
@@ -136,6 +141,18 @@ Describe 'Parity evaluation' {
         $result = Invoke-Parity $snapshot
         Get-Failed $result | Should -Contain $Expect
         $result.status | Should -Be 'fail'
+    }
+
+    It 'names the resource that lacks a lab tag and accepts any tag value, so a skin can set its own' {
+        $snapshot = New-HealthySnapshot
+        ($snapshot.sections.groups.data.infra.resources | Where-Object name -eq 'pip-natgw-par-test').tags.PSObject.Properties.Remove('env')
+        $check = (Invoke-Parity $snapshot).checks | Where-Object id -eq 'infra/nat-public-ip'
+        $check.status | Should -Be 'fail'
+        $check.expected | Should -Match 'tagged owner, purpose, costcenter, env'
+        $check.message | Should -Match 'Without every required tag: pip-natgw-par-test'
+        $custom = New-HealthySnapshot
+        ($custom.sections.groups.data.infra.resources | Where-Object name -eq 'natgw-par-test').tags.owner = 'someone-else'
+        Get-Failed (Invoke-Parity $custom) | Should -HaveCount 0
     }
 
     It 'allows the nested parent and explicitly kept-parked VMs, and ignores rules for features that are off' {
@@ -174,13 +191,76 @@ Describe 'Parity evaluation' {
         $snapshot = New-HealthySnapshot
         $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'nested-guest-1'; keyId = 'k2'; startDateTime = '2026-11-02T00:00:00Z'; endDateTime = '2026-11-03T00:00:00Z' }
         $snapshot = $snapshot | ConvertTo-Json -Depth 14 | ConvertFrom-Json
-        $snapshot.sections.onboardingApp.data.credentials[1].startDateTime | Should -BeOfType [datetime]
+        $snapshot.sections.onboardingApp.data.credentials[0].startDateTime | Should -BeOfType [datetime]
         $previous = [System.Threading.Thread]::CurrentThread.CurrentCulture
         try {
             [System.Threading.Thread]::CurrentThread.CurrentCulture = $info
             Get-Failed (Invoke-Parity $snapshot) | Should -Contain 'tenant/no-residual-credentials'
             $healthy = New-HealthySnapshot
             Get-Failed (Invoke-Parity $healthy) | Should -Not -Contain 'tenant/no-residual-credentials'
+        } finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $previous }
+    }
+
+    Context 'Arc machine tags' {
+        BeforeEach {
+            $script:tagged = New-HealthySnapshot
+            foreach ($machine in $script:tagged.sections.fleet.data.machines) {
+                $machine | Add-Member -NotePropertyName role -NotePropertyValue 'app' -Force
+                $machine | Add-Member -NotePropertyName osTier -NotePropertyValue 'WS2022' -Force
+            }
+            foreach ($arc in $script:tagged.sections.arcMachines.data) {
+                $arc | Add-Member -NotePropertyName tags -NotePropertyValue ([pscustomobject]@{ role = 'app'; osTier = 'WS2022'; owner = 'demo' }) -Force
+            }
+        }
+        It 'passes when every manifest host carries the manifest role and osTier' {
+            $result = Invoke-Parity $script:tagged
+            Get-Failed $result | Should -HaveCount 0
+            @($result.checks | Where-Object id -like 'fleet/*/tags') | Should -HaveCount 3
+            ($result.checks | Where-Object id -eq 'fleet/win-a/tags').observed | Should -Be 'role=app, osTier=WS2022'
+        }
+        It 'fails the host whose tags were folded into one value, and says what was found' {
+            $script:tagged.sections.arcMachines.data[0].tags = [pscustomobject]@{ owner = 'demo purpose=arc-demo role=app osTier=WS2022' }
+            $failed = Get-Failed (Invoke-Parity $script:tagged)
+            $failed | Should -Be @('fleet/win-a/tags')
+            (Invoke-Parity $script:tagged).checks | Where-Object id -eq 'fleet/win-a/tags' | ForEach-Object { $_.observed | Should -Be 'role=(missing), osTier=(missing)' }
+        }
+        It 'fails a wrong value, treating a tag name as case-insensitive and a value as exact' {
+            $script:tagged.sections.arcMachines.data[1].tags = [pscustomobject]@{ ROLE = 'app'; ostier = 'ws2022' }
+            Get-Failed (Invoke-Parity $script:tagged) | Should -Be @('fleet/lnx-a/tags')
+        }
+        It 'fails a host that has no tags at all' {
+            $script:tagged.sections.arcMachines.data[0].tags = $null
+            Get-Failed (Invoke-Parity $script:tagged) | Should -Be @('fleet/win-a/tags')
+        }
+        It 'cannot judge a snapshot that predates tag capture or a manifest without role and osTier' {
+            foreach ($arc in $script:tagged.sections.arcMachines.data) { $arc.PSObject.Properties.Remove('tags') }
+            @((Invoke-Parity $script:tagged).checks | Where-Object id -like 'fleet/*/tags') | Should -HaveCount 0
+            $older = New-HealthySnapshot
+            foreach ($arc in $older.sections.arcMachines.data) { $arc | Add-Member -NotePropertyName tags -NotePropertyValue ([pscustomobject]@{ owner = 'demo' }) -Force }
+            @((Invoke-Parity $older).checks | Where-Object id -like 'fleet/*/tags') | Should -HaveCount 0
+        }
+    }
+
+    It 'tells a leftover one-day credential from a long-lived one by the length of its life, on a snapshot read back from JSON, in <Culture>' -TestCases @(
+        @{ Culture = 'en-US' }, @{ Culture = 'de-DE' }
+    ) {
+        param($Culture)
+        try { $info = [cultureinfo]::GetCultureInfo($Culture) } catch { Set-ItResult -Skipped -Because "culture $Culture is not available on this machine"; return }
+        $snapshot = New-HealthySnapshot
+        $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'rbac'; keyId = 'k1'; startDateTime = '2026-10-09T00:00:00Z'; endDateTime = '2027-10-09T00:00:00Z' }
+        $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'two-days'; keyId = 'k3'; startDateTime = '2026-11-02T00:00:00Z'; endDateTime = '2026-11-04T00:00:00Z' }
+        $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'no-dates'; keyId = 'k4' }
+        $snapshot = $snapshot | ConvertTo-Json -Depth 14 | ConvertFrom-Json
+        $previous = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $info
+            $result = Invoke-Parity $snapshot
+            Get-Failed $result | Should -Contain 'tenant/no-long-lived-credentials'
+            Get-Failed $result | Should -Contain 'tenant/no-residual-credentials'
+            ($result.checks | Where-Object id -eq 'tenant/no-long-lived-credentials').observed | Should -Be @('rbac until 2027-10-09')
+            ($result.checks | Where-Object id -eq 'tenant/no-residual-credentials').observed | Should -Be @('two-days')
+            ($result.checks | Where-Object id -eq 'tenant/no-long-lived-credentials').message | Should -Match 'owner''s decision'
+            Get-Failed (Invoke-Parity (New-HealthySnapshot)) | Should -Not -Contain 'tenant/no-long-lived-credentials'
         } finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $previous }
     }
 
@@ -221,7 +301,7 @@ Describe 'Snapshot collection' {
                 'group exists' { return $(if ($Arguments[3] -like '*-sre') { 'false' } else { 'true' }) }
                 'resource list' { return '[{"name":"law-par-test","type":"Microsoft.OperationalInsights/workspaces","location":"australiaeast","tags":null}]' }
                 'vm list' { return '[{"name":"win-a","hardwareProfile":{"vmSize":"Standard_B2as_v2"},"powerState":"VM running","storageProfile":{"osDisk":{"osType":"Windows","managedDisk":{"storageAccountType":"StandardSSD_LRS"}},"dataDisks":[{"lun":0,"diskSizeGb":128,"managedDisk":{"storageAccountType":"StandardSSD_LRS"}}]}}]' }
-                'connectedmachine list' { return '[{"name":"win-a","status":"Connected","osType":"windows","agentVersion":"1.0"}]' }
+                'connectedmachine list' { return '[{"name":"win-a","status":"Connected","osType":"windows","agentVersion":"1.0","tags":{"role":"app","osTier":"WS2022","owner":"demo"}}]' }
                 'monitor data-collection' { return '[{"dataCollectionRuleId":"/subscriptions/x/resourceGroups/rg/providers/Microsoft.Insights/dataCollectionRules/dcr-par-test"}]' }
                 'monitor log-analytics' { return '{"retentionInDays":30,"sku":{"name":"PerGB2018"},"workspaceCapping":{"dailyQuotaGb":-1}}' }
                 'keyvault list' { return '[{"name":"kv-partest-abc123","properties":{"publicNetworkAccess":"Enabled"}}]' }
@@ -231,7 +311,7 @@ Describe 'Snapshot collection' {
                 'security pricing' { return '{"value":[{"name":"VirtualMachines","pricingTier":"Standard","subPlan":"P2"}]}' }
                 'ad app' { return '[{"displayName":"sp-par-test-onboard","passwordCredentials":[{"displayName":"rbac","keyId":"k1","startDateTime":"2026-10-09T00:00:00Z","endDateTime":"2027-10-09T00:00:00Z","secretText":"must-not-be-copied"}]},{"displayName":"sp-par-test-onboard-other","passwordCredentials":[]}]' }
                 'identity list' { return '[{"name":"sre-par-test-uami","principalId":"44444444-4444-4444-4444-444444444444"}]' }
-                'deployment sub' { return '[{"name":"old","properties":{"provisioningState":"Succeeded","timestamp":"2026-10-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"vmFleet":{"value":[{"name":"old-host","deployed":true}]}}}},{"name":"new","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"azureVmNames":{"value":["az-par-01"]},"vmFleet":{"value":[{"name":"win-a","osType":"Windows","deployed":true},{"name":"skipped","deployed":false}]}}}},{"name":"other","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-02T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-other"},"vmFleet":{"value":[{"name":"x","deployed":true}]}}}}]' }
+                'deployment sub' { return '[{"name":"old","properties":{"provisioningState":"Succeeded","timestamp":"2026-10-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"vmFleet":{"value":[{"name":"old-host","deployed":true}]}}}},{"name":"new","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"azureVmNames":{"value":["az-par-01"]},"vmFleet":{"value":[{"name":"win-a","osType":"Windows","role":"app","osTier":"WS2022","deployed":true},{"name":"skipped","deployed":false}]}}}},{"name":"other","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-02T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-other"},"vmFleet":{"value":[{"name":"x","deployed":true}]}}}}]' }
                 default { throw "Unexpected az call: $($Arguments -join ' ')" }
             }
         } -ModuleName EstateSnapshot
@@ -255,6 +335,10 @@ Describe 'Snapshot collection' {
         $snapshot.sections.onboardingApp.data.credentials[0].displayName | Should -Be 'rbac'
         $snapshot.sections.fleet.data.deployment | Should -Be 'new'
         $snapshot.sections.fleet.data.machines.name | Should -Be @('win-a')
+        $snapshot.sections.fleet.data.machines[0].role | Should -Be 'app'
+        $snapshot.sections.fleet.data.machines[0].osTier | Should -Be 'WS2022'
+        $snapshot.sections.arcMachines.data[0].tags.role | Should -Be 'app'
+        $snapshot.sections.arcMachines.data[0].tags.osTier | Should -Be 'WS2022'
         $snapshot.sections.fleet.data.azureVmNames | Should -Be @('az-par-01')
     }
 

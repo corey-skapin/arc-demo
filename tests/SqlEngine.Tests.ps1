@@ -65,6 +65,8 @@ Describe 'Real SQL guest safeguards and query evidence' {
         $hash = 'A' * 64
         Mock Get-Process { $null }
         Mock Test-DemoRebootPending { $false }
+        Mock Get-DemoRebootPendingDetail { 'PendingFileRenameOperations: C:\Windows\appcompat\Programs\Amcache.hve.tmp' }
+        Mock Wait-DemoArcAgentsReady {}
         Mock Assert-DemoSqlExtensionBlocked {}
         Mock Get-FileHash { @{ Hash = $hash } }
         Mock Start-Process { throw 'No installer may run in unit tests.' }
@@ -75,10 +77,21 @@ Describe 'Real SQL guest safeguards and query evidence' {
         Should -Invoke Start-Process -Times 0
     }
 
-    It 'does not bypass pending reboot/rename state' {
+    It 'does not bypass pending reboot/rename state, names what is pending and says what clears it' {
         Mock Test-DemoRebootPending { $true }
-        { Install-DemoEngine -MediaIsoPath 'C:\fixture.iso' -MediaSha256 $hash -AcceptDeveloperLicenseTerms -ArcSqlAutoConnectOptOutConfirmed } | Should -Throw '*pending rename*'
+        $thrown = $null
+        try { Install-DemoEngine -MediaIsoPath 'C:\fixture.iso' -MediaSha256 $hash -AcceptDeveloperLicenseTerms -ArcSqlAutoConnectOptOutConfirmed } catch { $thrown = $_.Exception.Message }
+        $thrown | Should -BeLike '*pending rename is recorded (PendingFileRenameOperations: C:\Windows\appcompat\Programs\Amcache.hve.tmp)*no automatic reboot or bypass*'
+        $thrown | Should -BeLike '*owner''s approval one graceful restart from Azure (az vm restart)*waits up to six minutes*troubleshooting.md*'
         Should -Invoke Start-Process -Times 0
+    }
+
+    It 'waits for the Arc agents only once the install guards pass, before the local SQL block is checked' {
+        Mock Test-DemoRebootPending { $true }
+        { Install-DemoEngine -MediaIsoPath 'C:\fixture.iso' -MediaSha256 $hash -AcceptDeveloperLicenseTerms -ArcSqlAutoConnectOptOutConfirmed } | Should -Throw
+        Should -Invoke Wait-DemoArcAgentsReady -Times 1 -Exactly
+        { Install-DemoEngine } | Should -Throw '*licence*'
+        Should -Invoke Wait-DemoArcAgentsReady -Times 1 -Exactly
     }
 
     It 'requires separate confirmation that Arc SQL automatic connection has been effectively opted out' {
@@ -401,6 +414,7 @@ Describe 'SQL setup outcomes with mocked Windows APIs' {
         $frameworkKey | Add-Member ScriptMethod GetValue { param($name, $defaultValue) return 528040 }
         Mock Get-Process { $null }
         Mock Test-DemoRebootPending { $false }
+        Mock Wait-DemoArcAgentsReady {}
         Mock Assert-DemoSqlExtensionBlocked {}
         Mock Get-FileHash { @{ Hash = $hash } }
         Mock Get-CimInstance {
@@ -780,6 +794,54 @@ Describe 'SQL-only Arc extension protection' {
     It 'blocks installation when actual local SQL protection is missing' {
         { Assert-DemoSqlExtensionBlocked } | Should -Throw '*not locally blocked*'
         Should -Invoke Invoke-DemoArcConfig -Times 0 -ParameterFilter { $Arguments[0] -eq 'set' }
+    }
+}
+
+Describe 'Pending reboot detail and the bounded wait for the Arc agents' {
+    BeforeEach {
+        $session = [pscustomobject]@{ Renames = @() }
+        $session | Add-Member ScriptMethod GetValue { param($name, $defaultValue) if ($name -eq 'PendingFileRenameOperations') { return $this.Renames } return 0 }
+        Mock Test-Path { $false }
+        Mock Get-Item { $session }
+    }
+
+    It 'lists the first pending rename sources without the NT prefix, so a routine leftover is recognisable' {
+        $session.Renames = @('\??\C:\Program Files (x86)\Microsoft\EdgeUpdate\Install\{X}', '', '\??\C:\Windows\appcompat\Programs\Amcache.hve.tmp', '', '\??\C:\Windows\Temp\nsv1A2B.tmp', '')
+        $detail = Get-DemoRebootPendingDetail
+        $detail | Should -BeLike 'PendingFileRenameOperations: C:\Program Files (x86)\Microsoft\EdgeUpdate\Install\{X}; C:\Windows\appcompat\Programs\Amcache.hve.tmp; C:\Windows\Temp\nsv1A2B.tmp'
+        $detail | Should -Not -BeLike '*\??\*'
+    }
+    It 'caps the listing at eight sources and counts the rest' {
+        $session.Renames = @(1..11 | ForEach-Object { "\??\C:\Temp\f$_.tmp"; '' })
+        $detail = Get-DemoRebootPendingDetail
+        $detail | Should -BeLike '*C:\Temp\f8.tmp; and 3 more'
+        $detail | Should -Not -BeLike '*f9.tmp*'
+    }
+    It 'names a servicing flag' {
+        Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*Component Based Servicing\RebootPending' }
+        Get-DemoRebootPendingDetail | Should -Be 'flag RebootPending'
+    }
+    It 'returns nothing when nothing is pending' {
+        Get-DemoRebootPendingDetail | Should -BeNullOrEmpty
+    }
+
+    It 'returns at once when the three Arc services and MonAgentCore are running' {
+        Mock Start-Sleep {}
+        Mock Get-CimInstance { @('himds', 'ExtensionService', 'GCArcService') | ForEach-Object { [pscustomobject]@{ Name = $_; State = 'Running' } } }
+        Mock Get-Process { [pscustomobject]@{ ProcessName = 'MonAgentCore'; Id = 1 } }
+        Wait-DemoArcAgentsReady
+        Should -Invoke Get-CimInstance -Times 1 -Exactly
+        Should -Invoke Start-Sleep -Times 0
+    }
+    It 'keeps looking while an Arc service or the AMA process is missing, then returns for the policy check to report it' {
+        Mock Start-Sleep {}
+        Mock Get-CimInstance { @('himds', 'ExtensionService', 'GCArcService') | ForEach-Object { [pscustomobject]@{ Name = $_; State = $(if ($_ -eq 'GCArcService') { 'Stopped' } else { 'Running' }) } } }
+        Mock Get-Process { [pscustomobject]@{ ProcessName = 'MonAgentCore'; Id = 1 } }
+        { Wait-DemoArcAgentsReady -TimeoutSeconds 1 } | Should -Not -Throw
+        Should -Invoke Get-CimInstance -Times 2
+        Mock Get-CimInstance { @('himds', 'ExtensionService', 'GCArcService') | ForEach-Object { [pscustomobject]@{ Name = $_; State = 'Running' } } }
+        Mock Get-Process { $null }
+        { Wait-DemoArcAgentsReady -TimeoutSeconds 1 } | Should -Not -Throw
     }
 }
 
