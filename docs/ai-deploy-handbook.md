@@ -34,7 +34,8 @@ optional Container App/AKS/SQL scenarios a prerequisite for the Arc story.
    VM/SP credentials, retained identities/data and workload fault flags. Never run a
    destructive lifecycle rehearsal against this in-use lab.
 3. Verify Active readiness independently, preserving dated JSON evidence outside
-   source. Pending telemetry is not a presenter-ready handoff. Monitor readiness
+   source (`Test-ArcDemoReadiness.ps1 -OutputPath <PRIVATE>\evidence\readiness-<UTC time>.json`
+   writes it and keeps the exit code). Pending telemetry is not a presenter-ready handoff. Monitor readiness
    does not establish app health, patch completion, policy compliance or full EDR.
 4. Save only the documented nonsecret presenter fields in .local/demo-context.json
    using the confirmed inputs and actual saved resource IDs. Follow the field

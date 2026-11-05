@@ -9,6 +9,8 @@
     unrelated required row has already failed, so one bounded run ends with every row settled.
     -SkipNestedGuest leaves out the nested/arc row. Deploy's own validation uses it: the nested guest is
     built after Deploy (wrapper step P4), so its Arc machine cannot exist yet and must not fail the base estate.
+    -OutputPath also writes the JSON (whatever -OutputFormat shows) to that file, creating its folder, so one run
+    gives both the dated evidence and the exit code. The JSON names the subscription and tenant: keep it outside git.
     Never repairs, induces faults, changes context defaults or registers providers.
 #>
 [CmdletBinding()]
@@ -20,7 +22,8 @@ param(
     [ValidateSet('Active', 'Ready', 'Hibernated', 'Removed')][string]$DesiredState = 'Ready',
     [ValidateSet('Json', 'Table')][string]$OutputFormat = 'Table',
     [ValidateRange(0, 1800)][int]$TimeoutSeconds = 0,
-    [switch]$SkipNestedGuest
+    [switch]$SkipNestedGuest,
+    [string]$OutputPath = ''
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
@@ -71,6 +74,11 @@ $result = [ordered]@{
     subscriptionId = "$SubscriptionId"; tenantId = "$TenantId"
     resourceGroups = @("rg-$NamePrefix", "rg-$NamePrefix-infra")
     desiredState = $DesiredState; status = $status; checks = @($checks | Where-Object { $_ })
+}
+if ($OutputPath) {
+    $evidenceFile = [IO.Path]::GetFullPath($OutputPath, (Get-Location).ProviderPath)
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $evidenceFile)
+    $result | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $evidenceFile -Encoding utf8
 }
 if ($OutputFormat -eq 'Json') { $result | ConvertTo-Json -Depth 15 }
 else {

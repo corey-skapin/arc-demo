@@ -353,7 +353,10 @@ Review [cost assumptions](cost.md) before agreeing to a budget.
 Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
 Arc-enabled with `MSFT_ARC_TEST=true` for this demo-only simulation. SQL-capable
 hosts do not imply SQL Server is installed. Optional flags are independent:
-`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`.
+`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. Add a slow
+optional workload (the Container Apps environment alone takes 17-23 minutes and can fail on its
+own) as a second pass once the base Deploy has Succeeded, so a failure there cannot strand the base:
+[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
 For custom tiers, use `-OnPremFleetPath <fleet.json>`; see
 [legacy fleet support](legacy-os-fleet.md). Represented legacy hosts are not
 reported as deployed.
@@ -408,12 +411,16 @@ migration separately before HDD OS support retirement. See [cost.md](cost.md).
 ## 4. Validate, then rehearse
 
 ```powershell
-.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600
+$stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json -TimeoutSeconds 600 `
+  -OutputPath "<PRIVATE>\evidence\readiness-$stamp.json"
 $LASTEXITCODE
 ```
 
 Exit 0 means required infrastructure/monitor checks pass, 1 is fail/error, 2 is
-still pending. Save the timestamped JSON outside source. Check policy, Defender,
+still pending. `-OutputPath` writes the same JSON to a file (creating its folder) and
+leaves the exit code alone, so one run gives the timestamped evidence; it names the
+subscription and tenant, so keep it in the private folder, outside source. Check policy, Defender,
 Update Manager assessment completion, CT inventory and optional workload behavior
 in their own surfaces; a provisioned extension is not proof of telemetry or
 completed assessment. Policy scores and CT cycles may take substantially longer

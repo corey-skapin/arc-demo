@@ -1237,6 +1237,37 @@ Describe 'Readiness CLI contract' {
         $result.workload | Should -Be 'arc-demo'
         $result.checks[0].resourceId | Should -Be '/expected/id'
     }
+    It 'writes the same JSON to -OutputPath, creating the folder, whatever the display format, and keeps the exit code' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'starting' 'pending' }
+        $file = Join-Path $TestDrive 'evidence\nested\readiness-20260101T000000Z.json'
+        $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath $file
+        $LASTEXITCODE | Should -Be 2
+        $saved = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+        $saved.schemaVersion | Should -Be 1
+        $saved.status | Should -Be 'pending'
+        $saved.checks[0].id | Should -Be 'fixture'
+        ($output -join "`n") | Should -Not -Match 'schemaVersion'
+        $jsonOutput = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -OutputPath $file
+        ((Get-Content -LiteralPath $file -Raw) | ConvertFrom-Json).status | Should -Be ($jsonOutput | ConvertFrom-Json).status
+    }
+    It 'writes no file when -OutputPath is not given' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'ready' 'pass' }
+        $cwd = Join-Path $TestDrive 'no-output-path'
+        $null = New-Item -ItemType Directory -Path $cwd
+        Push-Location $cwd
+        try { $null = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json }
+        finally { Pop-Location }
+        @(Get-ChildItem -LiteralPath $cwd -Recurse -File) | Should -HaveCount 0
+    }
+    It 'resolves a relative -OutputPath against the current location' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'ready' 'pass' }
+        $cwd = Join-Path $TestDrive 'relative-output-path'
+        $null = New-Item -ItemType Directory -Path $cwd
+        Push-Location $cwd
+        try { $null = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath '.\out\readiness.json' }
+        finally { Pop-Location }
+        Test-Path -LiteralPath (Join-Path $cwd 'out\readiness.json') | Should -BeTrue
+    }
     It 'returns exit 2 for pending at the zero-second deadline' {
         Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'starting' 'pending' }
         $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -TimeoutSeconds 0

@@ -460,6 +460,29 @@ timestamped app `runningStatus`, latest/latest-ready revision, active revision
 `healthState`/`runningState` and `SIMULATE_CRASH` **without updating them**. A stale
 snapshot or enum mismatch is not grounds to reset a workload fault.
 
+## The Container Apps environment is slow or fails with `ManagedEnvironmentProvisioningError`
+
+**Symptom** — a Deploy with Container Apps enabled spends 17-23 minutes on `cae-<prefix>`, which
+shows `Waiting` for 20 minutes or more; or, in one observed run, the deployment ended `Failed` with
+`ManagedEnvironmentProvisioningError: Fail to create managed environment because creation of the
+managed cluster failed, please retry later.` Everything else (VMs, network, vault, monitoring)
+was created; the fault app was not.
+
+**Cause** — the environment is the slowest single resource in the estate, so a long `Waiting` is
+normal and the console prints it as a running module. The error is a platform error the service
+itself calls retryable: the identical template and region created the environment in the runs
+before and after, the provider was registered and no leftover managed resource group or Service
+Health event existed. No defect in this repo is known.
+
+**Recovery** — confirm the state as in [a fresh Deploy failed part way](#a-fresh-deploy-failed-part-way),
+then rerun the same Deploy command: it adopts the failed deployment's vault, reuses the saved
+admin password and submits the template again. If it fails again on `cae-<prefix>`, check
+Service Health, wait and retry; deleting only that environment is the next step, and it needs
+the operator's approval (it holds nothing else and the fault app was never created). Do not
+Remove the estate for this. To keep a failure here from stranding the base estate, build
+the base first and add Container Apps as a second Deploy pass
+([lifecycle](lifecycle.md#adding-an-optional-workload-to-a-running-estate)).
+
 ## Preflight or redeployment now refuses a previously tolerated state
 
 Preflight no longer registers providers or skips RBAC for a supplied principal.

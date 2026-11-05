@@ -319,6 +319,29 @@ Default removal deliberately retains the tenant onboarding identity; opt-in SP
 deletion does not claim application-object deletion. No purge is performed.
 Review these exclusions/delayed billing separately; do not promise a zero bill.
 
+### Adding an optional workload to a running estate
+
+The incremental path works: set the workload's flag (`workloads.deployContainerApps`,
+`deployAks`, `deployAzureVMs` in the private skin, or the matching `-Deploy...` switch) **in the
+same step as the Deploy that creates it**, then run the same Deploy again. It adds only the new
+resources (for Container Apps: the environment, the fault app, the restart alert and the Arc-path
+MDE extensions); no VM is restarted and no disk, the vault, the subnet, the NAT gateway or the
+Defender plan is touched. Do not set the flag earlier: lifecycle commands and read-only
+readiness compare the skin with the retained manifest, so with the flag already `true` and
+nothing deployed yet, readiness ends with exit 1 and one `readiness/error` row, "Skin requires
+deployContainerApps, but no retained workload manifest exists. Reconcile deployment before
+lifecycle operations." That is expected, not damage; deploy the workload, then run readiness.
+Expect these side effects of any Deploy pass, not only this one:
+
+- The Container Apps environment alone takes 17-23 minutes and can sit in `Waiting` for 20 or
+  more ([container-app-fault.md](container-app-fault.md#deploy)).
+- A VM behind a pending Defender extension operation can hold the deployment for much longer
+  ([troubleshooting](troubleshooting.md#a-linux-vm-stays-updating-behind-a-defender-mdelinux-install-lock)).
+- The DevTest auto-shutdown schedules are set to the skin's `operations.autoShutdownTime`
+  again; Deploy warns first and names any live schedule that differs.
+- The machines' `role` and `osTier` tags are checked and written only where they differ,
+  merged with any other tag.
+
 ## Credentials and partial deployments
 
 Routine redeployment never resets the onboarding SP credential. Existing VMs
@@ -431,7 +454,9 @@ Check statuses: `pass`, `fail`, `pending`, `skipped`. Exit codes: **0** all requ
 checks pass; **1** required failure or inspection/configuration error; **2** required
 eventual-consistency checks still pending at the deadline. Consumers correlate
 `resourceId`, not display names or counts. Preserve raw JSON as dated evidence,
-outside committed source because it contains live environment identifiers.
+outside committed source because it contains live environment identifiers:
+`-OutputPath <file>` writes that same JSON to a file (creating its folder, whatever
+`-OutputFormat` shows) and the exit code is unchanged, so no separate capture is needed.
 
 Checks cover retained groups, core resources/workbook presence, exact VM power,
 Arc connection, the `role` and `osTier` tags on every Arc machine (required `tags/*`
@@ -457,7 +482,12 @@ A `Failed` AMA extension with no recent Heartbeat makes the **required**
 `heartbeat/*` row `fail` rather than pending: a failed agent is not telemetry lag.
 This is **infrastructure/monitor readiness**, not proof of every guest workload,
 Kubernetes pod, policy compliance result, CT inventory cycle, or completed patch
-assessment or Defender sensor/AV/EDR health. Demonstrate those separately; never
+assessment or Defender sensor/AV/EDR health. It does not see the SQL engine, the orders
+workload, the SQL lock-timeout alert, the nested guest's Arc SQL instance (`nested/arc` is
+the Arc connection only) or the content of most workbooks, and no row compares the Arc
+roster that the capacity and optimisation workbooks recorded at their last publish
+with the machines that exist now. The build wrapper's P5, P6 and P11 cover parts of that;
+a `pass` here is not "demo ready". Demonstrate those separately; never
 manufacture fault data to pass.
 
 ## Linux monitoring and support stance
