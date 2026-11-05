@@ -292,6 +292,51 @@ Describe 'Ordered plan' {
         (Get-BuildRow (Get-BuildTest (New-BuildFixture) -State $state) 'P2').Needs | Should -HaveCount 0
     }
 
+    It 'runs the two workbook steps again when P2 or P4 finished after they did, and says why' {
+        $f = New-BuildFixture
+        $state = New-ArcDemoBuildState $script:Sub $script:Ten 'build-test'
+        $state.steps['P6.1'] = @{ status = 'done'; endedUtc = '2026-11-05T08:00:00.0000000Z' }
+        foreach ($id in 'P6.2', 'P6.3') { $state.steps[$id] = @{ status = 'done'; endedUtc = '2026-11-05T08:00:00.0000000Z' } }
+        $state.steps['P4'] = @{ status = 'done'; endedUtc = '2026-11-05T07:00:00.0000000Z' }
+        $t = Get-BuildTest $f -State $state
+        foreach ($id in 'P6.1', 'P6.2', 'P6.3') { (Get-BuildRow $t $id).Status | Should -Be 'done' }
+
+        $state.steps['P4'].endedUtc = '2026-11-05T09:30:00.0000000Z'
+        $t = Get-BuildTest $f -State $state
+        (Get-BuildRow $t 'P6.1').Status | Should -Be 'done'
+        foreach ($id in 'P6.2', 'P6.3') {
+            (Get-BuildRow $t $id).Status | Should -Be 'ready'
+            (Get-BuildRow $t $id).Notes | Should -Match 'P4 finished later'
+            $id | Should -BeIn $t.Context.PlannedSteps
+        }
+
+        # A state file read back from JSON holds [datetime] values.
+        $path = Join-Path $TestDrive 'stale-state.json'
+        Save-ArcDemoBuildState -Path $path -State $state
+        $again = Read-ArcDemoBuildState -Path $path -SubscriptionId $script:Sub -TenantId $script:Ten -Prefix 'build-test'
+        $again.steps['P4']['endedUtc'] | Should -BeOfType [datetime]
+        (Get-BuildRow (Get-BuildTest $f -State $again) 'P6.2').Status | Should -Be 'ready'
+
+        # P2 counts too, and a step that did not finish does not make the roster stale.
+        $state.steps['P4'].endedUtc = '2026-11-05T07:00:00.0000000Z'
+        $state.steps['P2'] = @{ status = 'done'; endedUtc = '2026-11-05T08:30:00.0000000Z' }
+        (Get-BuildRow (Get-BuildTest $f -State $state) 'P6.3').Status | Should -Be 'ready'
+        $state.steps['P2'].status = 'failed'
+        (Get-BuildRow (Get-BuildTest $f -State $state) 'P6.3').Status | Should -Be 'done'
+        (Get-BuildRow (Get-BuildTest $f -State $state) 'P6.3').Notes | Should -HaveCount 0
+    }
+
+    It 'selects one step by its ID with -Only, as well as a whole phase' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $steps = @(Get-ArcDemoBuildSteps -Context $t.Context)
+        (Select-ArcDemoBuildStep -Steps $steps -Only 'P6.2', 'P6.3').Id | Should -Be @('P6.2', 'P6.3')
+        (Select-ArcDemoBuildStep -Steps $steps -Only 'P6').Id | Should -Be @('P6.1', 'P6.2', 'P6.3')
+        (Select-ArcDemoBuildStep -Steps $steps -Only 'P7').Id | Should -Be @('P7')
+        $only = (Get-Command (Join-Path $script:Repo 'scripts/Invoke-ArcDemoBuild.ps1')).Parameters['Only'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] }
+        foreach ($id in @($steps.Id) + @($steps.Phase | Select-Object -Unique)) { $id | Should -BeIn $only.ValidValues }
+    }
+
     It 'skips done steps, always re-checks read-only steps and re-runs everything with -Force' {
         $f = New-BuildFixture
         $state = New-ArcDemoBuildState $script:Sub $script:Ten 'build-test'
@@ -741,6 +786,101 @@ Describe 'Presenter handoff' {
         $document.PSObject.Properties.Name | Should -Not -Contain 'sqlMachineResourceId'
         Test-Path (Join-Path $f.Repo '.local/presenter-runsheet.md') | Should -BeTrue
         $t.State.steps['P10'].status | Should -Be 'done'
+    }
+
+    It 'writes pipeline strings and arrays of them as plain text, never as {"Length":N}' {
+        $piped = @('Online', 'Offline') | ForEach-Object { $_ }
+        $safe = ConvertTo-BuildSafeValue ([pscustomobject]@{ State = $piped[0]; Names = $piped; Nested = @([pscustomobject]@{ Name = ($piped | Select-Object -First 1) }) })
+        $json = $safe | ConvertTo-Json -Depth 6 -Compress
+        $json | Should -Not -Match 'Length'
+        $json | Should -Be '{"State":"Online","Names":["Online","Offline"],"Nested":[{"Name":"Online"}]}'
+    }
+
+    It 'adds the optional chapters it can verify, and names the ones it cannot instead of failing' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $dash = [string][char]0x2014
+        $tagOf = { param($name) ("Arc $dash $name" -replace '[^A-Za-z0-9]', '-').ToLowerInvariant() }
+        $script:optionalList = @(
+            @{ id = "$scope/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"; tags = @{ workbookTag = 'build-test---estate-overview' } }
+            @{ id = "$scope/Microsoft.Insights/workbooks/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"; tags = @{ workbookTag = (& $tagOf 'Machine Intelligence Center') } }
+            @{ id = "$scope/Microsoft.Insights/workbooks/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"; tags = @{ workbookTag = (& $tagOf 'Compliance, Security & Governance') } }
+            @{ id = "$scope/Microsoft.Insights/workbooks/cccccccc-cccc-cccc-cccc-cccccccccccc"; tags = @{ workbookTag = (& $tagOf 'Asset Inventory') } }
+        ) | ConvertTo-Json -Depth 4 -AsArray
+        $script:instanceMissing = "$scope/Microsoft.AzureArcData/sqlServerInstances/guest-vm"
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz {
+            if ($Arguments[0] -eq 'resource' -and $Arguments[1] -eq 'list') { return $script:optionalList }
+            if ($Arguments[0] -eq 'resource' -and $Arguments[1] -eq 'show') { if ($Arguments[3] -eq $script:instanceMissing) { return $null } else { return '{}' } }
+            throw "Unexpected az call: $($Arguments -join ' ')"
+        } -ModuleName BuildPlan
+        $left = [System.Collections.Generic.List[string]]::new()
+        $document = New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left
+        $document['dataCollectionRuleResourceId'] | Should -Be "$scope/Microsoft.Insights/dataCollectionRules/dcr-arc-demo"
+        $document['machineIntelligenceWorkbookResourceId'] | Should -BeLike '*aaaaaaaa-aaaa*'
+        $document['complianceWorkbookResourceId'] | Should -BeLike '*bbbbbbbb-bbbb*'
+        $document['assetInventoryWorkbookResourceId'] | Should -BeLike '*cccccccc-cccc*'
+        $document.Keys | Should -Not -Contain 'sqlEstateWorkbookResourceId'
+        $document['nestedSqlMachineResourceId'] | Should -Be "$scope/Microsoft.HybridCompute/machines/guest-vm"
+        $document['nestedSqlParentMachineResourceId'] | Should -Be "$scope/Microsoft.HybridCompute/machines/parent-vm"
+        $document.Keys | Should -Not -Contain 'nestedSqlInstanceResourceId'
+        @($left) | Should -Be @('the SQL Estate workbook steps', "the nested guest's SQL Server instance link")
+    }
+
+    It 'leaves every nested chapter out, without failing, when the guest is not an Arc machine yet' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]'
+        $script:guestMachine = "$scope/Microsoft.HybridCompute/machines/guest-vm"
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz {
+            if ($Arguments[1] -eq 'list') { return $script:onlyEstate }
+            if ($Arguments[3] -eq $script:guestMachine) { return $null }
+            '{}'
+        } -ModuleName BuildPlan
+        $left = [System.Collections.Generic.List[string]]::new()
+        $document = New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left
+        @($document.Keys | Where-Object { $_ -like 'nestedSql*' }) | Should -HaveCount 0
+        $left | Should -Contain 'the nested Arc SQL chapter'
+        $left | Should -Not -Contain "the nested guest's SQL Server instance link"
+    }
+
+    It 'does not look for a nested guest when the skin has none, and refuses two workbooks with one tag' {
+        $f = New-BuildFixture -NoNested
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]'
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz { if ($Arguments[1] -eq 'list') { return $script:onlyEstate }; '{}' } -ModuleName BuildPlan
+        $left = [System.Collections.Generic.List[string]]::new()
+        $null = New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left
+        ($left -join ';') | Should -Not -Match 'nested'
+        Should -Invoke Invoke-DemoAz -ModuleName BuildPlan -Times 0 -ParameterFilter { $Arguments[0] -eq 'resource' -and $Arguments[3] -like '*/machines/guest-vm' }
+        $dash = [string][char]0x2014
+        $dupe = ("Arc $dash Asset Inventory" -replace '[^A-Za-z0-9]', '-').ToLowerInvariant()
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}},{"id":"' + $scope + '/Microsoft.Insights/workbooks/a1","tags":{"workbookTag":"' + $dupe + '"}},{"id":"' + $scope + '/Microsoft.Insights/workbooks/a2","tags":{"workbookTag":"' + $dupe + '"}}]'
+        { New-ArcDemoPresenterContext -Context $t.Context -State $t.State -LeftOut $left } | Should -Throw '*at most one workbook tagged*'
+    }
+
+    It 'prints the chapters left out, records them in the step result, and the real generator links the chapters it was given' {
+        $f = New-BuildFixture -RealPresenter
+        $env:BUILD_TEST_LOG = $f.Log
+        $t = Get-BuildTest $f
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        $script:onlyEstate = '[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]'
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz { if ($Arguments[1] -eq 'list') { return $script:onlyEstate }; '{}' } -ModuleName BuildPlan
+        Mock Write-Warn {} -ModuleName BuildPlan
+        $result = Invoke-ArcDemoBuildStep -Step (Get-BuildRow $t 'P10').Definition -Context $t.Context -State $t.State
+        Should -Invoke Write-Warn -ModuleName BuildPlan -Times 1 -ParameterFilter { $Message -like 'Optional chapters left out*Machine Intelligence Center*SQL Estate*' }
+        $evidence = Get-Content (Get-ChildItem $t.Context.Config.EvidenceDirectory -Filter 'P10-*.json').FullName -Raw | ConvertFrom-Json
+        @($evidence.result.chaptersLeftOut) | Should -Contain 'the compliance workbook steps'
+        $guide = Get-Content (Join-Path $f.Repo '.local/presenter-runsheet.md') -Raw
+        $guide | Should -Not -Match 'No nested Arc SQL guest is recorded'
+        $guide | Should -Not -Match 'No data collection rule is recorded'
+        $guide | Should -Match 'The Machine Intelligence Center workbook is not recorded'
     }
 
     It 'adds the SQL presenter fields only when the saved status proof says pass' {

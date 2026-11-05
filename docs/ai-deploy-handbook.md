@@ -25,8 +25,12 @@ optional Container App/AKS/SQL scenarios a prerequisite for the Arc story.
    repair, provider registration, assessment, fault, email test or other write.
 2. Follow the runbook/lifecycle path for the approved operation; to build the whole
    estate from zero, use the plan-first ordered build wrapper in the runbook. Ask for
-   every approval the build will need once, up front: cost start, licence terms and
-   the SQL host's one graceful restart for a routine pending file rename (P5). Preserve
+   every approval the build will need once, up front: cost start, licence terms, the
+   nested guest's Administrator credential (a saved export or a prompt, see
+   private-config.md), the SQL host's one graceful restart for a routine pending file
+   rename (P5) and the one publication of the capacity and optimisation workbooks (P6;
+   each records the Arc roster and tags when published, so they come after the guest
+   exists). Preserve
    VM/SP credentials, retained identities/data and workload fault flags. Never run a
    destructive lifecycle rehearsal against this in-use lab.
 3. Verify Active readiness independently, preserving dated JSON evidence outside
@@ -35,7 +39,8 @@ optional Container App/AKS/SQL scenarios a prerequisite for the Arc story.
 4. Save only the documented nonsecret presenter fields in .local/demo-context.json
    using the confirmed inputs and actual saved resource IDs. Follow the field
    table in docs/runbook.md; do not copy credentials, whole manifests or private
-   runtime files. Keep the evidence timestamp accurate.
+   runtime files. Keep the evidence timestamp accurate. The build wrapper's P10
+   writes the fields it can verify and lists the optional chapters it left out.
 5. Run scripts/New-PresenterRunsheet.ps1. Hand over .local/presenter-runsheet.md,
    not an input card, a list of IDs to find or a second set of presentation steps.
    The guide is generated offline and does not itself verify current health.

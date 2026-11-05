@@ -9,7 +9,10 @@
 
     The default is a read-only plan. -Execute runs the steps that are not already recorded
     as done in the private state file, so a failed or interrupted run resumes where it
-    stopped. Billing, licence and IAM decisions are explicit switches, never implied:
+    stopped. A workbook step (P6.2, P6.3) records a snapshot of the Arc roster and tags, so
+    it runs again when P2 or P4 finished after it did. -Only takes a phase (P6) or one step
+    (P6.2, P6.3), for example `-Only P6.2, P6.3 -Force` to republish just the two workbooks
+    after a tag repair. Billing, licence and IAM decisions are explicit switches, never implied:
     -ApproveCostStart (P2), -AcceptWindowsEvaluationTerms and -AcceptSqlDeveloperTerms
     (P3, P5), -ApproveSreCreation (P9) and -ApproveSubscriptionGrant (the opt-in
     subscription-scope Azure Monitor alert-access grant for the SRE identity).
@@ -37,7 +40,8 @@ param(
     [Parameter(Mandatory)][string]$BuildConfigPath,
     [ValidateSet('P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11')][string]$From,
     [ValidateSet('P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11')][string]$To,
-    [ValidateSet('P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11')][string[]]$Only,
+    [ValidateSet('P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P5.1', 'P5.2', 'P5.3', 'P5.4', 'P6', 'P6.1', 'P6.2', 'P6.3', 'P7', 'P8', 'P8.1', 'P8.2',
+        'P9', 'P9.1', 'P9.2', 'P9.3', 'P10', 'P11', 'P11.1', 'P11.2')][string[]]$Only,
     [switch]$Execute,
     [switch]$Force,
     [switch]$Offline,

@@ -74,7 +74,9 @@ function ConvertTo-BuildSafeValue {
         }
         return $copy
     }
-    if ($Value -is [pscustomobject]) {
+    # A string that came through a pipeline is PSObject-wrapped and also answers -is [pscustomobject]; copied property by
+    # property it would be written as {"Length":N}. Only a real custom object is copied that way.
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
         $copy = [ordered]@{}
         foreach ($property in $Value.PSObject.Properties) {
             $copy[$property.Name] = if ($property.Name -match '(?i)secret|password|token|credential') { '<redacted>' } else { ConvertTo-BuildSafeValue $property.Value ($Depth + 1) }
@@ -250,14 +252,15 @@ function New-BuildStep {
         [string]$RetryHint = '',
         [string]$SkipReason = '',
         [scriptblock]$SkipWhen,
-        [switch]$ResultStatus
+        [switch]$ResultStatus,
+        [string[]]$StaleAfter = @()
     )
     [pscustomobject]@{
         Id = $Id; Phase = ($Id -split '\.')[0]; Title = $Title; Repo = $Repo; Script = $Script; Minutes = $Minutes
         Mutating = [bool]$Mutating; Approvals = $Approvals; Arguments = $Arguments; ResolvedArguments = $ResolvedArguments
         Resolve = $Resolve; Run = $Run; Inputs = $Inputs; Capture = $Capture; ExitCodes = [bool]$ExitCodes; WaitMinutes = $WaitMinutes
         AlwaysRun = [bool]$AlwaysRun; NoRetry = [bool]$NoRetry; RetryHint = $RetryHint; SkipReason = $SkipReason
-        SkipWhen = $SkipWhen; ResultStatus = [bool]$ResultStatus
+        SkipWhen = $SkipWhen; ResultStatus = [bool]$ResultStatus; StaleAfter = @($StaleAfter)
         Kind = if ($Repo -eq 'internal') { 'internal' } else { 'script' }
     }
 }
@@ -561,9 +564,9 @@ function Get-ArcDemoBuildSteps {
                     ActionGroupId = (Get-BuildArcResourceId $c 'Microsoft.Insights/actionGroups' "ag-$($c.Prefix)")
                 }
             }
-        New-BuildStep -Id 'P6.2' -Title 'Operational workbook: capacity' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks `
+        New-BuildStep -Id 'P6.2' -Title 'Operational workbook: capacity' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks -StaleAfter P2, P4 `
             -Arguments { param($c) New-BuildWorkbookArguments $c 'capacity' } -Capture { param($values, $output) Save-BuildWorkbookId $values 'capacityWorkbookResourceId' $output }
-        New-BuildStep -Id 'P6.3' -Title 'Operational workbook: optimisation' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks `
+        New-BuildStep -Id 'P6.3' -Title 'Operational workbook: optimisation' -Script 'scripts\Set-OperationalWorkbook.ps1' -Minutes 1 -Mutating -SkipReason $noBooks -StaleAfter P2, P4 `
             -Arguments { param($c) New-BuildWorkbookArguments $c 'optimisation' } -Capture { param($values, $output) Save-BuildWorkbookId $values 'optimisationWorkbookResourceId' $output }
         New-BuildStep -Id 'P7' -Title 'Arc readiness gate (Active, read-only)' -Script 'scripts\Test-ArcDemoReadiness.ps1' -Minutes 5 -AlwaysRun -ExitCodes -WaitMinutes 20 `
             -Arguments {
@@ -622,7 +625,7 @@ function Select-ArcDemoBuildStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object[]]$Steps, [string]$From, [string]$To, [string[]]$Only)
     if ($Only -and ($From -or $To)) { throw 'Use either -Only or -From/-To, not both.' }
-    if ($Only) { return @($Steps | Where-Object { $_.Phase -in $Only }) }
+    if ($Only) { return @($Steps | Where-Object { $_.Phase -in $Only -or $_.Id -in $Only }) }
     # [array]::IndexOf is case-sensitive while the phase parameters are not.
     $first = if ($From) { [array]::IndexOf($script:Phases, $From.ToUpperInvariant()) } else { 0 }
     $last = if ($To) { [array]::IndexOf($script:Phases, $To.ToUpperInvariant()) } else { $script:Phases.Count - 1 }
@@ -649,11 +652,27 @@ function Get-ArcDemoBuildPlan {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object[]]$Steps, [Parameter(Mandatory)]$State, [switch]$Force)
     $Context.State = $State
-    $isDone = { param($step) $State.steps.Contains($step.Id) -and $State.steps[$step.Id].status -eq 'done' -and -not $step.AlwaysRun -and -not $Force }
+    # A step that publishes a snapshot of what earlier steps built (the workbook roster) is out of date when one of
+    # those steps finished after it did, so a recorded 'done' is not trusted then.
+    $staleAfter = {
+        param($step)
+        if (-not $State.steps.Contains($step.Id)) { return $null }
+        $own = ConvertTo-DemoUtc $State.steps[$step.Id]['endedUtc']
+        foreach ($id in $step.StaleAfter) {
+            if (-not $State.steps.Contains($id) -or $State.steps[$id]['status'] -ne 'done') { continue }
+            $other = ConvertTo-DemoUtc $State.steps[$id]['endedUtc']
+            if ($own -and $other -and $other -gt $own) { return $id }
+        }
+        $null
+    }
+    $isDone = { param($step) $State.steps.Contains($step.Id) -and $State.steps[$step.Id].status -eq 'done' -and -not $step.AlwaysRun -and -not $Force -and -not (& $staleAfter $step) }
     $Context.PlannedSteps = @($Steps | Where-Object { -not $_.SkipReason -and -not (& $isDone $_) } | ForEach-Object Id)
     foreach ($step in $Steps) {
         $blockers = [System.Collections.Generic.List[string]]::new()
+        $notes = [System.Collections.Generic.List[string]]::new()
         $record = if ($State.steps.Contains($step.Id)) { $State.steps[$step.Id] } else { $null }
+        $newer = if (-not $step.SkipReason -and -not $step.AlwaysRun -and $record -and $record.status -eq 'done') { & $staleAfter $step }
+        if ($newer) { $notes.Add("recorded as done, but $newer finished later, so what it published is out of date; it runs again.") }
         $status = 'ready'
         if ($step.SkipReason) { $status = 'skipped' }
         elseif (& $isDone $step) { $status = 'done' }
@@ -679,7 +698,7 @@ function Get-ArcDemoBuildPlan {
         $needs = if ($status -in @('ready', 'blocked')) { @($step.Approvals | Where-Object { -not $Context.Approved[$_] }) } else { @() }
         [pscustomobject]@{
             Step = $step.Id; Phase = $step.Phase; Title = $step.Title; Status = $status; Minutes = $step.Minutes; Mutating = $step.Mutating
-            Needs = $needs; Blockers = $blockers.ToArray(); Reason = $step.SkipReason; Definition = $step
+            Needs = $needs; Blockers = $blockers.ToArray(); Reason = $step.SkipReason; Notes = $notes.ToArray(); Definition = $step
         }
     }
 }
@@ -806,19 +825,31 @@ function Invoke-ArcDemoBuildIdentityCheck {
     [pscustomobject]@{ status = 'pass'; exists = [bool]$application }
 }
 
+function Test-BuildResourceExists {
+    param([Parameter(Mandatory)][string]$Id)
+    [bool](Invoke-DemoAz -Arguments @('resource', 'show', '--ids', $Id, '-o', 'json') -AllowNotFound)
+}
+
 function Assert-BuildResourceExists {
     param([Parameter(Mandatory)][string]$Id)
-    $raw = Invoke-DemoAz -Arguments @('resource', 'show', '--ids', $Id, '-o', 'json') -AllowNotFound
-    if (-not $raw) { throw "Expected resource is missing, so no presenter context is written: $Id" }
+    if (-not (Test-BuildResourceExists $Id)) { throw "Expected resource is missing, so no presenter context is written: $Id" }
 }
 
 function New-ArcDemoPresenterContext {
     <#
     .SYNOPSIS
         Builds the nonsecret presenter context from exact Arc-group IDs, each verified to exist.
+    .DESCRIPTION
+        The required IDs and the capacity and optimisation workbooks must exist or nothing is written. The optional
+        chapters the wrapper can verify itself (the data collection rule, the four original workbooks, the nested guest, its
+        SQL instance and its parent) are added when their resource is found. One that is missing is added to -LeftOut instead,
+        so the guide cannot tell a presenter to skip a chapter whose resources exist, and a chapter that is left out is named.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$State)
+    param(
+        [Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$State,
+        [System.Collections.Generic.List[string]]$LeftOut = ([System.Collections.Generic.List[string]]::new())
+    )
     Initialize-BuildContext $Context
     $presenter = $Context.Config.Presenter
     $title = [string](Get-DemoSkinValue $Context.Skin 'labels.workbookTitle' ("$(Get-DemoSkinValue $Context.Skin 'labels.demoTitle' 'Arc Demo') $([char]0x2014) Estate Overview"))
@@ -853,6 +884,32 @@ function New-ArcDemoPresenterContext {
         if ($State.values.Contains($slot)) { $document[$slot] = $State.values[$slot] }
     }
     foreach ($key in @($document.Keys | Where-Object { $_ -match 'ResourceId$' })) { Assert-BuildResourceExists $document[$key] }
+    $offer = {
+        param([string]$Key, [string]$Id, [string]$Chapter)
+        if (Test-BuildResourceExists $Id) { $document[$Key] = $Id; return $true }
+        $LeftOut.Add($Chapter)
+        $false
+    }
+    $null = & $offer 'dataCollectionRuleResourceId' (Get-BuildArcResourceId $Context 'Microsoft.Insights/dataCollectionRules' 'dcr-arc-demo') 'the data collection rule beat'
+    $dash = [string][char]0x2014
+    foreach ($entry in @(
+        @('machineIntelligenceWorkbookResourceId', 'Machine Intelligence Center', 'the Machine Intelligence Center steps'),
+        @('complianceWorkbookResourceId', 'Compliance, Security & Governance', 'the compliance workbook steps'),
+        @('assetInventoryWorkbookResourceId', 'Asset Inventory', 'the Asset Inventory step'),
+        @('sqlEstateWorkbookResourceId', 'SQL Estate Dashboard', 'the SQL Estate workbook steps'))) {
+        # Deploy tags each workbook with its display name; the list above already proves a match exists.
+        $optionalTag = ("Arc $dash $($entry[1])" -replace '[^A-Za-z0-9]', '-').ToLowerInvariant()
+        $match = @($workbooks | Where-Object { $_.tags -and $_.tags.PSObject.Properties['workbookTag'] -and $_.tags.workbookTag -eq $optionalTag })
+        if ($match.Count -gt 1) { throw "Expected at most one workbook tagged $optionalTag; found $($match.Count)." }
+        if ($match.Count) { $document[$entry[0]] = $match[0].id } else { $LeftOut.Add($entry[2]) }
+    }
+    if ($Context.Nested) {
+        $guestMachine = Get-BuildArcResourceId $Context 'Microsoft.HybridCompute/machines' $Context.Nested.ArcMachineName
+        if (& $offer 'nestedSqlMachineResourceId' $guestMachine 'the nested Arc SQL chapter') {
+            $null = & $offer 'nestedSqlInstanceResourceId' (Get-BuildArcResourceId $Context 'Microsoft.AzureArcData/sqlServerInstances' $Context.Nested.GuestVmName) "the nested guest's SQL Server instance link"
+            $null = & $offer 'nestedSqlParentMachineResourceId' (Get-BuildArcResourceId $Context 'Microsoft.HybridCompute/machines' $Context.Nested.ParentVmName) "the nested guest's parent host link"
+        }
+    }
     $guide = if ($Context.Config.Sre) { Join-BuildPath $Context.Config.Sre.RepoPath '.local/presenter-runsheet.md' } else { '' }
     if ($guide -and (Test-Path -LiteralPath $guide -PathType Leaf)) { $document['companionSreRunsheetPath'] = $guide }
     $document
@@ -861,7 +918,11 @@ function New-ArcDemoPresenterContext {
 function Invoke-ArcDemoPresenterHandoff {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$State)
-    $document = New-ArcDemoPresenterContext -Context $Context -State $State
+    $leftOut = [System.Collections.Generic.List[string]]::new()
+    $document = New-ArcDemoPresenterContext -Context $Context -State $State -LeftOut $leftOut
+    if ($leftOut.Count) {
+        Write-Warn "Optional chapters left out of the presenter guide because their resources were not found: $($leftOut -join '; '). Build them, then run P10 again."
+    }
     $directory = Join-Path $Context.ArcRoot '.local'
     $null = New-Item -ItemType Directory -Path $directory -Force
     $file = Join-Path $directory 'demo-context.json'
@@ -877,7 +938,7 @@ function Invoke-ArcDemoPresenterHandoff {
             Write-Warn 'The SRE repo has no .local\demo-context.json yet; record it with the SRE handbook, then run its New-PresenterRunsheet.ps1.'
         }
     }
-    [pscustomobject]@{ status = 'pass'; contextPath = $file; resourceIds = @($document.Keys | Where-Object { $_ -match 'ResourceId$' }).Count }
+    [pscustomobject]@{ status = 'pass'; contextPath = $file; resourceIds = @($document.Keys | Where-Object { $_ -match 'ResourceId$' }).Count; chaptersLeftOut = $leftOut.ToArray() }
 }
 
 function Invoke-BuildLooseScript {
@@ -1010,6 +1071,7 @@ function Write-ArcDemoBuildPlan {
         @{ n = 'Needs'; e = { (@($_.Needs | ForEach-Object { "-$($script:ApprovalSwitch[$_])" }) -join ' ') } }, Title | Format-Table -AutoSize | Out-Host
     foreach ($row in $Plan) {
         if ($row.Reason) { Write-Step "$($row.Step) skipped: $($row.Reason)" }
+        foreach ($note in $row.Notes) { Write-Step "$($row.Step): $note" }
         foreach ($blocker in $row.Blockers) { Write-Warn "$($row.Step) blocked: $blocker" }
     }
     foreach ($warning in $Warnings) { Write-Warn $warning }

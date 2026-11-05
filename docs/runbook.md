@@ -41,6 +41,12 @@ actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
 | `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview or draft IDs. Adds optional links, not current-health or savings proof |
 | `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
 
+The ordered build wrapper's P10 captures these for you. It writes every field above that it can verify
+against Azure, including the data collection rule, the four original workbooks (found by their
+`workbookTag`) and the nested guest with its SQL instance and parent, and it prints and records the
+optional chapters it left out because the resource was not found. Fill in by hand only what it cannot
+know, such as the LOB alert rule.
+
 The assistant/operator writes the approved values once, then runs:
 
 ```powershell
@@ -146,7 +152,11 @@ a foreign existing workbook is never adopted. No whole-lab deployment, IAM or
 repair is used. Workbooks survive parking with the workspace, contain no active
 jobs and disappear with the Arc group on approved normal removal. Existing
 lifecycle/readiness gates are unchanged. Re-publishing changed source or
-refreshing roster/topology requires new approval, not an incidental wake.
+refreshing roster/topology requires new approval, not an incidental wake. The roster
+and the Arc tags it shows are a snapshot taken when the workbook is published, so a
+later onboarding, tag repair or new host needs another publish. The ordered build
+wrapper publishes both workbooks once, after the guest exists (its P6), and that
+approval belongs with the build's other up-front approvals.
 The roster is bounded to 1-50 exact Arc IDs because every item query embeds it.
 Each workbook links to the other (a draft to the draft, a published workbook to the published one), so publish both
 for the links to resolve; the portal URL carries the confirmed tenant.
@@ -233,11 +243,11 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 | P3 | `Prepare-NestedSqlParent.ps1`: the Hyper-V parent for the nested guest. Runs after Deploy with the lab Active (it refuses a parked lab) and writes the nested build input into the private folder. A reported `status` of `pending` or `fail` is not recorded as done, and it is safe to re-run | `-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms` |
 | P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is resolved at the start of `-Execute`: `-GuestCredential`, else `nested-guest-credential.clixml` in the [private folder](private-config.md#saving-the-nested-guest-credential), else a prompt. A session that cannot prompt stops there, before anything starts. The wrapper only reads it and keeps it out of the evidence | |
 | P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status`. A fresh host often reports a routine pending file rename at `Install`: ask the owner for one graceful `az vm restart` of the SQL host up front, with the other approvals, and see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename) | `-AcceptSqlDeveloperTerms` |
-| P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation) | |
+| P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation). Each workbook records the Arc roster and tags at publish time, so a from-zero build publishes them once, here, after the guest exists, and a rerun after P2 or P4 finished later publishes them again (the plan says so). To refresh just the two workbooks later, for example after a tag repair or a new host, run `-Only P6.2, P6.3 -Force`: it leaves the SQL alert (P6.1) alone | |
 | P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes. This is the gate that includes the nested guest's `nested/arc` row (Deploy's own validation leaves it out) | |
 | P8 | Companion repo: LOB alert rule and LOB app | |
 | P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`; `-ApproveSubscriptionGrant` adds the opt-in alert-access grant |
-| P10 | Presenter context and guide for this repo (the SRE guide only if its context exists) | |
+| P10 | Presenter context and guide for this repo (the SRE guide only if its context exists). It adds every optional chapter it can verify (the data collection rule, the four original workbooks found by their tag, the nested guest, its SQL instance and its parent) and prints and records the chapters it had to leave out because their resource was not found; build them, then run P10 again | |
 | P11 | `Export-ArcDemoInventory.ps1`, then `Test-ArcDemoParity.ps1` | |
 
 - The plan shows each step as `ready`, `done`, `skipped` (with the reason) or
@@ -257,7 +267,8 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
   failed, and need no approval; when the check cannot be read, they are `blocked`
   with the exact error. P9 therefore belongs after a confirmed removal; use
   `Initialize-SreConfiguration` for configuration-only changes to a running agent.
-- `-From`, `-To` and `-Only` take phase names; `-WhatIf` is the same as the plan;
+- `-From` and `-To` take phase names; `-Only` takes phases or single steps (`-Only P6.2, P6.3`);
+  `-WhatIf` is the same as the plan;
   pass `-Confirm:$false` for unattended runs. The plan's minutes are typical
   timings (about 3.5 hours end to end), not a promise. Billable resources start
   at P2; reprice with [cost.md](cost.md).
