@@ -403,6 +403,32 @@ function Get-BuildOnboardingApplication {
     if ($found.Count -eq 1) { [guid]$found[0].appId }
 }
 
+function Get-BuildGuestCredential {
+    <#
+    .SYNOPSIS
+        The nested guest Administrator credential: -GuestCredential, else the private folder's
+        nested-guest-credential.clixml, else a prompt.
+    .DESCRIPTION
+        A [pscredential] cannot be passed to pwsh -File, so an unattended run reads the DPAPI-protected export from the
+        private folder (see docs/private-config.md for the two-line recipe that creates it). Nothing here writes a
+        credential. Only the nested guest build and its guest checks use it; Activate, Hibernate and Remove never do.
+    #>
+    param([Parameter(Mandatory)]$Context)
+    if ($Context.GuestCredential) { return $Context.GuestCredential }
+    $path = Join-Path $Context.Config.Root 'nested-guest-credential.clixml'
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try { $saved = Import-Clixml -LiteralPath $path }
+        catch { throw "The saved guest credential $path could not be read (a Windows export only opens for the user and PC that wrote it): $($_.Exception.Message)" }
+        if ($saved -isnot [pscredential]) { throw "The saved guest credential $path is not a credential export (Export-Clixml of a PSCredential)." }
+        return $saved
+    }
+    try {
+        Get-Credential -UserName Administrator -Message 'Approved Administrator credential for the nested guest (asked now so the build can run unattended; save one to nested-guest-credential.clixml in the private folder to skip this prompt)'
+    } catch {
+        throw "The nested guest (P4) needs an approved Administrator credential and this session cannot prompt for it ($($_.Exception.Message)). Pass -GuestCredential, or save one with Export-Clixml to $path (docs/private-config.md). Nothing was started."
+    }
+}
+
 function Resolve-BuildNestedArguments {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     Initialize-BuildContext $Context
@@ -411,10 +437,7 @@ function Resolve-BuildNestedArguments {
     if (-not [guid]::TryParse((@($raw) -join '').Trim(), [ref]$vmId)) { throw 'Could not read the nested parent VM ID from Azure.' }
     $application = Get-BuildOnboardingApplication $Context
     if (-not $application) { throw "Onboarding identity sp-$($Context.Prefix)-onboard was not found; the base deployment creates it." }
-    $credential = $Context.GuestCredential
-    if (-not $credential) {
-        $credential = Get-Credential -UserName Administrator -Message 'Approved guest Administrator credential for the nested guest (never stored)'
-    }
+    $credential = Get-BuildGuestCredential -Context $Context
     $Arguments['ParentVmId'] = $vmId
     $Arguments['OnboardingApplicationId'] = $application
     $Arguments['GuestCredential'] = $credential
@@ -999,4 +1022,5 @@ function Get-ArcDemoApprovalSwitch { $script:ApprovalSwitch }
 Export-ModuleMember -Function Read-ArcDemoBuildConfig, New-ArcDemoBuildContext, Get-ArcDemoBuildSteps, Select-ArcDemoBuildStep,
     Get-ArcDemoBuildPlan, Resolve-ArcDemoPlanSkip, Get-ArcDemoBuildWindowWarning, New-ArcDemoBuildState, Read-ArcDemoBuildState, Save-ArcDemoBuildState,
     Test-ArcDemoBuildStateFresh, Invoke-ArcDemoBuildPreflight, Invoke-ArcDemoBuildIdentityCheck, New-ArcDemoPresenterContext,
-    Invoke-ArcDemoPresenterHandoff, Invoke-ArcDemoBuildStep, Write-ArcDemoBuildPlan, Get-ArcDemoApprovalSwitch, ConvertTo-BuildSafeValue
+    Invoke-ArcDemoPresenterHandoff, Invoke-ArcDemoBuildStep, Write-ArcDemoBuildPlan, Get-ArcDemoApprovalSwitch, ConvertTo-BuildSafeValue,
+    Get-BuildGuestCredential

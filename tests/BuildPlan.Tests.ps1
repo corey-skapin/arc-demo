@@ -594,6 +594,52 @@ Describe 'Step runner' {
         (Get-Content $t.Context.Config.StatePath -Raw) | Should -Not -Match $secret
     }
 
+    It 'resolves the nested guest Administrator credential from the argument, then the private folder file, then a prompt, and never writes one' {
+        $f = New-BuildFixture
+        $given = [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'given-credential' -AsPlainText -Force))
+        $t = Get-BuildTest $f -Credential $given
+        Mock Get-Credential { throw 'prompt must not be used' } -ModuleName BuildPlan
+        (Get-BuildGuestCredential -Context $t.Context).GetNetworkCredential().Password | Should -Be 'given-credential'
+
+        $t = Get-BuildTest $f
+        $file = Join-Path $f.Private 'nested-guest-credential.clixml'
+        [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'saved-credential' -AsPlainText -Force)) | Export-Clixml -LiteralPath $file
+        (Get-BuildGuestCredential -Context $t.Context).GetNetworkCredential().Password | Should -Be 'saved-credential'
+        Should -Invoke Get-Credential -ModuleName BuildPlan -Times 0
+
+        Remove-Item -LiteralPath $file
+        Mock Get-Credential { [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'prompted-credential' -AsPlainText -Force)) } -ModuleName BuildPlan
+        (Get-BuildGuestCredential -Context $t.Context).GetNetworkCredential().Password | Should -Be 'prompted-credential'
+        Should -Invoke Get-Credential -ModuleName BuildPlan -Times 1 -Exactly
+        Test-Path -LiteralPath $file | Should -BeFalse
+    }
+    It 'refuses a saved guest credential that is not a credential, and explains how to supply one when the session cannot prompt' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        $file = Join-Path $f.Private 'nested-guest-credential.clixml'
+        'not a credential' | Export-Clixml -LiteralPath $file
+        { Get-BuildGuestCredential -Context $t.Context } | Should -Throw '*is not a credential export*'
+        Remove-Item -LiteralPath $file
+        Mock Get-Credential { throw 'A command that prompts the user failed because the host program does not support user interaction.' } -ModuleName BuildPlan
+        { Get-BuildGuestCredential -Context $t.Context } | Should -Throw '*cannot prompt*Pass -GuestCredential, or save one with Export-Clixml to*nested-guest-credential.clixml*Nothing was started*'
+    }
+    It 'uses the saved guest credential at P4 without prompting and keeps it out of the evidence' {
+        $f = New-BuildFixture
+        $env:BUILD_TEST_LOG = $f.Log
+        [pscredential]::new('Administrator', (ConvertTo-SecureString -String 'saved-credential-text' -AsPlainText -Force)) | Export-Clixml -LiteralPath (Join-Path $f.Private 'nested-guest-credential.clixml')
+        $t = Get-BuildTest $f
+        Mock Get-Credential { throw 'prompt must not be used' } -ModuleName BuildPlan
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        Mock Invoke-DemoAz {
+            if ($Arguments[0] -eq 'vm') { return 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }
+            if ($Arguments[0] -eq 'ad') { return '[{"displayName":"sp-build-test-onboard","appId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}]' }
+            throw "Unexpected az call: $($Arguments -join ' ')"
+        } -ModuleName BuildPlan
+        Invoke-ArcDemoBuildStep -Step (Get-BuildRow $t 'P4').Definition -Context $t.Context -State $t.State
+        (Get-BuildCall $f)[0].keys | Should -Contain 'GuestCredential'
+        (Get-Content (Get-ChildItem $t.Context.Config.EvidenceDirectory -Filter 'P4-*.json').FullName -Raw) | Should -Not -Match 'saved-credential-text'
+    }
+
     It 'stops P4 when the parent VM ID or exactly one onboarding identity cannot be resolved' {
         $f = New-BuildFixture
         $env:BUILD_TEST_LOG = $f.Log

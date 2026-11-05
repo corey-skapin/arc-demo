@@ -351,10 +351,26 @@ function Wait-Until {
 }
 
 function New-StrongPassword {
+    <#
+    .SYNOPSIS
+        A random password with at least one upper-case letter, lower-case letter, digit and symbol (printable ASCII).
+    .DESCRIPTION
+        Drawn with a cryptographic RNG and shuffled, so every result meets the nested guest credential contract
+        (24 to 128 printable ASCII characters with all four classes) as well as the Azure VM rule.
+    #>
     [CmdletBinding()]
-    param([int]$Length = 24)
-    $chars = ((48..57) + (65..90) + (97..122) + @(33, 35, 36, 37, 38, 42, 64))
-    -join (($chars | Get-Random -Count $Length) | ForEach-Object { [char]$_ })
+    param([ValidateRange(8, 128)][int]$Length = 24)
+    $sets = @('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz', '0123456789', '!#$%&*@')
+    $all = -join $sets
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]
+    $chars = [System.Collections.Generic.List[char]]::new()
+    foreach ($set in $sets) { $chars.Add($set[$rng::GetInt32($set.Length)]) }
+    while ($chars.Count -lt $Length) { $chars.Add($all[$rng::GetInt32($all.Length)]) }
+    for ($i = $chars.Count - 1; $i -gt 0; $i--) {
+        $j = $rng::GetInt32($i + 1)
+        $swap = $chars[$i]; $chars[$i] = $chars[$j]; $chars[$j] = $swap
+    }
+    -join $chars
 }
 
 function New-KeyVaultName {

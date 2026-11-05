@@ -14,9 +14,11 @@
     (P3, P5), -ApproveSreCreation (P9) and -ApproveSubscriptionGrant (the opt-in
     subscription-scope Azure Monitor alert-access grant for the SRE identity).
 
-    When the nested guest (P4) will run, the Administrator credential is requested at
-    the start, not about an hour in; pass -GuestCredential for an unattended run. It is
-    never stored. The SRE preview and create steps (P9.1, P9.2) are skipped, not failed,
+    When the nested guest (P4) will run, the Administrator credential is resolved at
+    the start, not about an hour in: -GuestCredential, else a DPAPI-protected export
+    saved as nested-guest-credential.clixml in the private folder (docs/private-config.md
+    has the recipe, and a [pscredential] cannot be passed to pwsh -File), else a prompt.
+    The wrapper never writes it. The SRE preview and create steps (P9.1, P9.2) are skipped, not failed,
     when the SRE parent already exists, because Deploy-SreAgent.ps1 refuses an existing
     parent even with -WhatIf.
 
@@ -114,8 +116,9 @@ Write-ArcDemoBuildPlan -Plan $plan
 if (-not $todo) { Write-Ok 'Nothing to do: every selected step is already recorded as done or skipped.'; return }
 if (-not $PSCmdlet.ShouldProcess("$($context.Prefix): $($todo.Step -join ', ')", 'Run the ordered build (billable resources, credentials and IAM per the approved switches)')) { return }
 if ('P4' -in $todo.Step -and -not $context.GuestCredential) {
-    # Ask now rather than about an hour in, so the long build can run unattended. It is never stored.
-    $context.GuestCredential = Get-Credential -UserName Administrator -Message 'Approved Administrator credential for the nested guest (asked now so the build can run unattended; never stored)'
+    # Ask now rather than about an hour in, so the long build can run unattended: -GuestCredential, else the private
+    # folder's saved nested-guest-credential.clixml, else a prompt. This script never writes a credential.
+    $context.GuestCredential = Get-BuildGuestCredential -Context $context
     if (-not $context.GuestCredential) { throw 'The nested guest (P4) needs an approved Administrator credential. Nothing was started.' }
 }
 foreach ($row in $todo) {

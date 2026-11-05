@@ -143,8 +143,10 @@ disks.
 ## Build
 
 Run in PowerShell 7.4+ with the exact tenant/subscription already signed in.
-Supply the approved retained/new guest Administrator credential through a secure
-prompt, never in JSON or command-line text:
+Supply the approved retained/new guest Administrator credential from the secure
+prompt or the DPAPI-protected export described in
+[private-config.md](private-config.md#saving-the-nested-guest-credential), never in
+JSON or command-line text:
 
 ```powershell
 Import-Module .\scripts\lib\Common.psm1
@@ -158,7 +160,9 @@ $build.ResourceGroup = "rg-$prefix"
 $build.ParentVmName = $guest.ParentVmName
 $build.VmName = $guest.GuestVmName
 $build.VmRoot = "D:\NestedSQL\VMs\$($guest.GuestVmName)"
-$build.GuestCredential = Get-Credential -UserName Administrator -Message 'Approved guest Administrator credential'
+$saved = '<private folder>\nested-guest-credential.clixml'
+$build.GuestCredential = if (Test-Path -LiteralPath $saved) { Import-Clixml -LiteralPath $saved } else {
+    Get-Credential -UserName Administrator -Message 'Approved guest Administrator credential' }
 $life = @{ SubscriptionId = $build.SubscriptionId; TenantId = $build.TenantId;
     SkinPath = $skinPath; NamePrefix = $prefix }
 .\scripts\New-NestedSqlDemo.ps1 @build -SkinPath $skinPath -WhatIf

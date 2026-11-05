@@ -4,12 +4,13 @@ Everything private to one lab lives in **one folder outside git, outside every
 worktree and outside assistant session folders**. A worktree or session can be
 deleted; this folder is what lets a rebuild start from zero. Passwords, client
 secrets and tokens are never written in plain text: the onboarding credential is
-minted for one day and removed, and the one password the estate cannot do without,
-the generated VM admin password, is saved only as a DPAPI-protected
-`vm-admin-credential.clixml` (readable by the same Windows user on the same PC;
-elsewhere PowerShell does not encrypt it, so keep the folder user-only). Do not
-copy it to another machine: a hand-over needs `-AdminPassword` from whoever holds
-the password, or a rebuild.
+minted for one day and removed, and the passwords the estate cannot do without, the
+generated VM admin password and (for the optional nested guest) the guest Administrator
+credential you save once, are kept only as DPAPI-protected `.clixml` files
+(readable by the same Windows user on the same PC;
+elsewhere PowerShell does not encrypt them, so keep the folder user-only). Do not
+copy them to another machine: a hand-over needs `-AdminPassword` from whoever holds
+the VM admin password, or a rebuild.
 
 | File or folder | What it is | Written by |
 | --- | --- | --- |
@@ -19,6 +20,7 @@ the password, or a rebuild.
 | `sre-skin.json` | Private skin for the companion SRE repo | you |
 | `nested-sql-build.json` | Nonsecret inputs of the nested guest build (see [nested-sql-demo.md](nested-sql-demo.md)) | you, or the parent preparation step |
 | `vm-admin-credential.clixml` | The generated VM admin password (DPAPI-protected SecureString), for reruns of P2 when the Key Vault cannot be read from this PC or a build failed part way | `Deploy-ArcDemo.ps1` at P2, before any Azure write |
+| `nested-guest-credential.clixml` | Optional: the nested guest's Administrator credential (DPAPI-protected PSCredential) so P4 runs unattended. Without it P4 prompts, and a session that cannot prompt stops before anything starts | you, once ([recipe](#saving-the-nested-guest-credential)); the wrapper only reads it |
 | `build-state.json` | Which steps are done, with attempts and evidence paths | the wrapper |
 | `evidence/` | One JSON file per step, readiness results, inventory snapshots and `media-acceptance.json`, the recorded licence acceptance for the installer media | the wrapper, `Export-ArcDemoInventory.ps1`, the media scripts |
 | `sre-backups/` | One new SRE configuration backup per SRE deployment | the wrapper, for the SRE deploy script |
@@ -45,6 +47,27 @@ prefix.
 Leaving a section out skips its steps, with the reason shown in the plan.
 Nested SQL steps follow the skin's `nestedSqlGuest`, not the build config.
 
+## Saving the nested guest credential
+
+The nested guest (P4) needs an Administrator credential that you approve. A
+`[pscredential]` cannot be passed to `pwsh -File`, so an unattended run reads this
+export. Create it once on the PC that runs the wrapper, with a generated password that
+meets the guest contract (24 to 128 printable ASCII characters with an upper-case
+letter, a lower-case letter, a digit and a symbol). Nothing is printed or stored in
+the repo:
+
+```powershell
+Import-Module .\scripts\lib\Common.psm1
+[pscredential]::new('Administrator', (ConvertTo-SecureString (New-StrongPassword -Length 24) -AsPlainText -Force)) |
+    Export-Clixml -LiteralPath '<private folder>\nested-guest-credential.clixml'
+```
+
+Use your own approved password instead when the guest must keep a known one. To sign
+in at the guest console, copy the password without printing it:
+`(Import-Clixml '<private folder>\nested-guest-credential.clixml').GetNetworkCredential().Password | Set-Clipboard`.
+The wrapper never writes or rotates this file.
+Activate, Hibernate and Remove take no guest credential. A rebuilt guest needs a new file.
+
 ## What is checked
 
 Only the basics: the file is JSON with `schemaVersion` 1, no unknown field, the
@@ -57,4 +80,5 @@ script does not accept, or a missing input file. There is no schema framework.
 Copy anything private that only exists in a worktree's `.local` folder (skins,
 build inputs, media provenance, presenter context) into this folder first.
 Old DPAPI guest-credential files belong to the old guest and are obsolete after
-a rebuild; the new guest gets a new credential.
+a rebuild; the new guest gets a new credential: replace `nested-guest-credential.clixml`
+before the next P4.

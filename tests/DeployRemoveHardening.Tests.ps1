@@ -611,6 +611,30 @@ Describe 'Subscription deployment is submitted without blocking and polled with 
     }
 }
 
+Describe 'Generated passwords meet the credential contract' {
+    It 'always has an upper-case letter, a lower-case letter, a digit and a symbol, in printable ASCII, at the requested length' {
+        foreach ($length in 8, 24, 24, 64, 128) {
+            1..200 | ForEach-Object {
+                $password = New-StrongPassword -Length $length
+                $password.Length | Should -Be $length
+                $password | Should -MatchExactly '\A[\x21-\x7e]+\z'
+                $password | Should -MatchExactly '[A-Z]'
+                $password | Should -MatchExactly '[a-z]'
+                $password | Should -Match '[0-9]'
+                $password | Should -Match '[^A-Za-z0-9]'
+            }
+        }
+    }
+    It 'is not predictable: a hundred passwords are all different' {
+        @(1..100 | ForEach-Object { New-StrongPassword }).Count | Should -Be 100
+        @(1..100 | ForEach-Object { New-StrongPassword } | Sort-Object -Unique).Count | Should -Be 100
+    }
+    It 'is accepted by the nested guest answer-file builder contract' {
+        $secure = ConvertTo-SecureString (New-StrongPassword) -AsPlainText -Force
+        { Import-Module (Join-Path $repo 'scripts\lib\NestedSqlDemo.psm1') -Force; New-NestedSqlAnswerXml -ComputerName 'guest01' -AdministratorPassword $secure } | Should -Not -Throw
+    }
+}
+
 Describe 'Allocation failure guidance' {
     It 'explains a <Code> failure without switching size or region' -ForEach @(
         @{ Code = 'SkuNotAvailable'; Text = "Azure CLI deployment sub failed (exit 1): ERROR: {""code"": ""SkuNotAvailable"", ""message"": ""The requested VM size for resource 'Following SKUs have failed for Capacity Restrictions: Standard_B2as_v2' is currently not available in location 'australiaeast'.""}" }
