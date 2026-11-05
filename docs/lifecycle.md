@@ -113,7 +113,10 @@ forced power-off), waits for Off, then deallocates compute. If guest shutdown
 fails, it warns and still attempts spend-reducing parking of all targeted compute;
 that is not a guest-data-consistency claim. Remove makes one bounded (ten-minute)
 graceful stop of a running guest; if that stop fails it warns and continues,
-because the parent, its disks and the guest are deleted with the group anyway. A
+because the parent, its disks and the guest are deleted with the group anyway. It
+skips the stop when the guest never became an Arc machine (an unfinished build)
+and treats a parent without the Hyper-V role or a guest that does not exist as
+nothing to stop. A
 parked parent needs no guest boot for removal. Definitions/disks/credentials are
 retained on park/wake, not recreated.
 
@@ -295,7 +298,13 @@ billable. See [AKS stop/start](https://learn.microsoft.com/azure/aks/start-stop-
 and [Container App revision management](https://learn.microsoft.com/azure/container-apps/revisions-manage).
 
 Removal waits for both resource groups **and** named subscription policies/budget
-to disappear; a rerun skips already-absent objects. Optional `-ForceDeleteWorkspace`
+to disappear; a rerun skips already-absent objects. The wait is `-TimeoutMinutes`
+(default 60, at most 120) and normally takes 25-35 minutes, because a Container Apps
+environment stays in `ScheduledForDelete` for about 25. Each change to the list of
+objects still present is printed. When the limit passes first, Remove exits 2
+(deletion still in progress, nothing retried), skips the prune and Defender steps
+that need verified removal, and the same command run again finishes them.
+Exit codes are 0 removed and verified, 1 error, 2 still deleting. Optional `-ForceDeleteWorkspace`
 first permanently deletes `law-<prefix>` (irreversible, under its own confirmation):
 without it the workspace is only soft-deleted for 14 days and re-creating the same
 name recovers its old data. `Removed` read-only verification

@@ -211,9 +211,25 @@ Describe 'Nested SQL wiring in the normal entry points' {
         Mock Invoke-DemoNestedSqlGuest { throw 'shutdown failed' }
         Mock Write-Warn {}
         & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false
-        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $Action -eq 'Stop' -and $TimeoutSeconds -eq 600 }
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $Action -eq 'Stop' -and $TimeoutSeconds -eq 600 -and $AllowAbsent }
         Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*did not stop gracefully (shutdown failed)*deleted with rg-fixture-infra anyway*' }
         Should -Invoke Get-DemoRemovalChecks -Times 1
+    }
+
+    It 'skips the guest command, with an info line and no warning, when the guest never became an Arc machine' {
+        Mock Invoke-DemoAz { $null } -ParameterFilter { $Arguments[0] -eq 'connectedmachine' }
+        Mock Write-Warn {}
+        Mock Write-Step {}
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -Confirm:$false
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 0
+        Should -Invoke Write-Warn -Times 0
+        Should -Invoke Write-Step -Times 1 -ParameterFilter { $Message -like 'The nested guest arc-guest was never an Arc machine, so there is nothing to stop gracefully*' }
+        Should -Invoke Get-DemoRemovalChecks -Times 1
+    }
+
+    It 'never lets Hibernate treat a missing guest as stopped: only Remove passes -AllowAbsent' {
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') @target
+        Should -Invoke Invoke-DemoNestedSqlGuest -Times 1 -Exactly -ParameterFilter { $Action -eq 'Stop' -and -not $AllowAbsent }
     }
 
     It 'still refuses removal when the parent is in a transitional power state' {

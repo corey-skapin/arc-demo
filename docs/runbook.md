@@ -505,7 +505,14 @@ absence. It is `ConfirmImpact='High'` and prompts: after the user's separate app
 add `-Confirm:$false` when running from an unattended or AI-driven shell (Deploy,
 Hibernate and Activate do not prompt; the wrapper, `Prepare-NestedSqlParent.ps1` and
 the nested helpers do, like Remove). A running nested parent gets one bounded graceful guest stop that warns
-and continues if it fails. Two opt-in switches serve an intended clean same-prefix
+and continues if it fails; it is skipped when the guest never became an Arc machine, and a parent without
+the Hyper-V role has nothing to stop. Allow **25-35 minutes**: a Container Apps environment sits in
+`ScheduledForDelete` for about 25 minutes before its group can go. Remove prints `Still present: ...`
+whenever that list changes and waits `-TimeoutMinutes` (default 60, at most 120). If the wait ends first
+the deletion carries on in Azure and the script exits **2** (pending, not failed) without pruning or
+touching Defender; run `Test-ArcDemoReadiness.ps1 -DesiredState Removed` until it passes, or rerun
+the same Remove command, which skips what is already absent and then finishes those steps.
+Two opt-in switches serve an intended clean same-prefix
 rebuild: `-ForceDeleteWorkspace` first permanently deletes `law-<prefix>` (irreversible;
 otherwise re-creating that name within 14 days recovers the old workspace and its
 data) and `-PruneDeploymentHistory` deletes this demo's own old `arc-demo-<timestamp>`

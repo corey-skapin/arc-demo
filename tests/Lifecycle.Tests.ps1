@@ -1487,8 +1487,10 @@ Describe 'Removal convergence without broad cleanup' {
         Mock Invoke-AzRest { throw 'Already-absent budget must not be deleted again.' }
         Mock Get-DemoRemovalChecks { New-DemoCheck 'owned' '/fixture' 'absent' 'absent' 'pass' }
         Mock Wait-Until {
-            param($Condition)
-            if (-not (& $Condition)) { throw 'Owned resources still present.' }
+            param($Condition, [switch]$AllowTimeout)
+            if (& $Condition) { return $true }
+            if ($AllowTimeout) { return $false }
+            throw 'Owned resources still present.'
         }
         Mock Invoke-DemoAz {
             param($Arguments)
@@ -1503,9 +1505,14 @@ Describe 'Removal convergence without broad cleanup' {
         Should -Invoke Invoke-AzRest -Times 0
         Should -Invoke Get-DemoRemovalChecks -Times 1
     }
-    It 'does not declare success solely because both groups are gone' {
+    It 'does not declare success solely because both groups are gone: it exits pending and says what is left' {
         Mock Get-DemoRemovalChecks { New-DemoCheck 'budget' '/budget' 'absent' 'exists' 'pending' }
-        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -Confirm:$false } | Should -Throw '*still present*'
+        Mock Write-Ok {}
+        Mock Write-Warn {}
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -Confirm:$false
+        $LASTEXITCODE | Should -Be 2
+        Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*still in progress*still present: budget*' }
+        Should -Invoke Write-Ok -Times 0 -ParameterFilter { $Message -like 'Removed:*' }
     }
     It 'checks optional identity sharing before deleting policies budget or groups' {
         Mock Invoke-DemoAz { '[{"id":"identity-fixture","displayName":"sp-retail-demo-onboard"}]' } -ParameterFilter { $Arguments[0] -eq 'ad' }

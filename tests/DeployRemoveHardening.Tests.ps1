@@ -1021,8 +1021,10 @@ Describe 'Remove-ArcDemo workspace and deployment-history options' {
         Mock Write-Step {}
         Mock Get-DemoRemovalChecks { New-DemoCheck 'owned' '/fixture' 'absent' 'absent' 'pass' }
         Mock Wait-Until {
-            param($Condition)
-            if (-not (& $Condition)) { throw 'Owned resources still present.' }
+            param($Condition, [switch]$AllowTimeout)
+            if (& $Condition) { return $true }
+            if ($AllowTimeout) { return $false }
+            throw 'Owned resources still present.'
         }
         $state = @{
             events = [Collections.Generic.List[string]]::new()
@@ -1080,10 +1082,39 @@ Describe 'Remove-ArcDemo workspace and deployment-history options' {
         & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -PruneDeploymentHistory -Confirm:$false
         $state.events | Should -Be @('group-delete:rg-fixture', 'group-delete:rg-fixture-infra', 'deployment-delete:arc-demo-20261009-181623', 'deployment-delete:arc-demo-20261009-181139')
     }
-    It 'does not prune when removal verification fails' {
-        Mock Get-DemoRemovalChecks { New-DemoCheck 'budget' '/budget' 'absent' 'exists' 'pending' }
-        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -PruneDeploymentHistory -Confirm:$false } | Should -Throw '*still present*'
+    It 'does not prune or touch Defender, and exits pending with what is still present, when removal is still in progress at the deadline' {
+        Mock Get-DemoRemovalChecks { New-DemoCheck 'group/rg-fixture-infra' '/g' 'absent' 'exists' 'pending' }
+        Mock Write-Warn {}
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -PruneDeploymentHistory -DisableDefender -TimeoutMinutes 1 -Confirm:$false
+        $LASTEXITCODE | Should -Be 2
         $state.events | Should -Not -Contain 'deployment-delete:arc-demo-20261009-181623'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'security' -or ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'delete') }
+        Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter {
+            $Message -like '*still in progress after 1 minutes (still present: group/rg-fixture-infra)*Test-ArcDemoReadiness.ps1 -DesiredState Removed*rerun this command*'
+        }
+        Should -Invoke Wait-Until -Times 1 -Exactly -ParameterFilter { $TimeoutSeconds -eq 60 -and $AllowTimeout }
+        Should -Not -Invoke Write-Ok -ParameterFilter { $Message -like 'Removed:*' }
+    }
+    It 'waits 60 minutes by default and names each change in what is still present, once' {
+        $script:polls = 0
+        Mock Get-DemoRemovalChecks {
+            $script:polls++
+            if ($script:polls -eq 1) { return @((New-DemoCheck 'group/rg-fixture' '/g1' 'absent' 'exists' 'pending'), (New-DemoCheck 'group/rg-fixture-infra' '/g2' 'absent' 'exists' 'pending')) }
+            if ($script:polls -eq 2) { return @((New-DemoCheck 'group/rg-fixture-infra' '/g2' 'absent' 'exists' 'pending')) }
+            @((New-DemoCheck 'group/rg-fixture-infra' '/g2' 'absent' 'absent' 'pass'))
+        }
+        Mock Wait-Until {
+            param($Condition, [switch]$AllowTimeout)
+            while (-not (& $Condition)) { }
+            $true
+        }
+        & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -Confirm:$false
+        Should -Invoke Wait-Until -Times 1 -Exactly -ParameterFilter { $TimeoutSeconds -eq 3600 -and $IntervalSeconds -eq 20 }
+        Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -eq 'Still present: group/rg-fixture, group/rg-fixture-infra' }
+        Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -eq 'Still present: group/rg-fixture-infra' }
+    }
+    It 'does not accept a wait longer than two hours' {
+        { & (Join-Path $repo 'scripts\Remove-ArcDemo.ps1') @target -NamePrefix fixture -TimeoutMinutes 121 -Confirm:$false } | Should -Throw
     }
     It 'previews both options without any Azure call' {
         Mock Invoke-DemoAz { throw 'WhatIf must not call Azure' }

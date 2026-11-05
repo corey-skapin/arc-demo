@@ -737,21 +737,42 @@ function Get-DemoNestedSqlGuestConfig {
 }
 
 function Invoke-DemoNestedSqlGuest {
+    <#
+    .SYNOPSIS
+        Starts or gracefully stops the nested Hyper-V guest from the parent VM through Run Command.
+    .DESCRIPTION
+        -AllowAbsent (Stop only) treats a parent without the Hyper-V role, or without a guest of that name, as already
+        stopped instead of an error. Remove uses it: the parent and its disks are deleted anyway, so a guest that was
+        never built is not worth a failure.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$ParentMachine,
         [Parameter(Mandatory)][string]$GuestVmName,
         [Parameter(Mandatory)][ValidateSet('Start', 'Stop')][string]$Action,
         [switch]$AsJob,
+        [switch]$AllowAbsent,
         [ValidateRange(30, 3600)][int]$TimeoutSeconds = 900
     )
     if ($ParentMachine.OsType -ne 'Windows') { throw 'Nested SQL lifecycle requires the configured Windows parent VM.' }
     if ($GuestVmName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') { throw 'Nested SQL guest VM name is invalid.' }
+    if ($AllowAbsent -and $Action -ne 'Stop') { throw '-AllowAbsent only applies to Stop: a guest that must start has to exist.' }
     $guestScript = @'
 $ErrorActionPreference = 'Stop'
 $guestName = '__GUEST_NAME__'
 $action = '__ACTION__'
-$guest = @(Get-VM -Name $guestName -ErrorAction Stop)
+$allowAbsent = '__ALLOW_ABSENT__' -eq 'true'
+if ($allowAbsent -and -not (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
+    'The Hyper-V role is not installed on the parent, so there is no guest to stop.'
+    'ARC_DEMO_OK'
+    return
+}
+$guest = @(Get-VM -Name $guestName -ErrorAction $(if ($allowAbsent) { 'SilentlyContinue' } else { 'Stop' }))
+if ($guest.Count -eq 0 -and $allowAbsent) {
+    "No Hyper-V guest named $guestName exists on the parent, so there is nothing to stop."
+    'ARC_DEMO_OK'
+    return
+}
 if ($guest.Count -ne 1) { throw "Expected exactly one Hyper-V guest named $guestName." }
 $guest = $guest[0]
 if ($action -eq 'Start') {
@@ -777,7 +798,7 @@ do {
 } while ($true)
 'ARC_DEMO_OK'
 '@
-    $guestScript = $guestScript.Replace('__GUEST_NAME__', $GuestVmName).Replace('__ACTION__', $Action)
+    $guestScript = $guestScript.Replace('__GUEST_NAME__', $GuestVmName).Replace('__ACTION__', $Action).Replace('__ALLOW_ABSENT__', $(if ($AllowAbsent) { 'true' } else { 'false' }))
     Invoke-DemoGuestCommand -Machine $ParentMachine -Script $guestScript -AsJob:$AsJob -TimeoutSeconds $TimeoutSeconds
 }
 
