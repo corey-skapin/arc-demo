@@ -151,7 +151,7 @@ tag edit (a write now, a propagation write about 10 minutes later, and a Defende
 or a boot of the VM. `ExcludeMdeAutoUpdate=true` on the VM and the Arc machine did not stop the push. This is a
 defect in the vendor extension: nothing here removes, reinstalls or patches Defender.
 
-**What to do**
+**What to do** — it clears without action; while it lasts:
 
 - Treat it as a soft warning and present normally; the required `heartbeat/*` rows decide readiness.
 - Wait. The platform releases the open write at about 90 minutes and the VM becomes `Succeeded` with no action.
