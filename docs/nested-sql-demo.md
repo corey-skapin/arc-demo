@@ -27,7 +27,7 @@ Developer ISOs. All of it is code:
 | Part | Done by | Result |
 | --- | --- | --- |
 | Size, data disk, security type | `Deploy-ArcDemo.ps1`, from the skin's `nestedSqlGuest` block | `Standard_D4s_v5`, a 128 GiB `StandardSSD_LRS` disk at LUN 0, security type `Standard`; a later Deploy refuses to resize or detach them |
-| `D:` volume, Hyper-V role, switch and NAT, ISOs, build input | `Prepare-NestedSqlParent.ps1` | `D:` (NTFS, `NestedSQL`), Hyper-V running, `NestedSqlSwitch` and NAT `172.31.240.0/24`, both ISOs hash-verified in `D:\NestedSQL\Media`, `.local\nested-sql-build.json` |
+| `D:` volume, Hyper-V role, switch and NAT, ISOs, build input | `Prepare-NestedSqlParent.ps1` | `D:` (NTFS, `NestedSQL`), Hyper-V running, `NestedSqlSwitch` and NAT `172.31.240.0/24`, both ISOs hash-verified in `D:\NestedSQL\Media`, and the build input `nested-sql-build.json` in the [private build folder](private-config.md) (the wrapper passes it; by hand pass `-BuildInputPath`, whose default is `.local\nested-sql-build.json`) |
 
 Security type `Standard` needs the subscription feature
 `Microsoft.Compute/UseStandardSecurityType`. Without it Compute rejects the parent
@@ -41,17 +41,24 @@ UseStandardSecurityType`, then `az provider register --subscription <SUB> --name
 Microsoft.Compute --wait`. In the rebuild that found this the feature read `Registered`
 at once and both steps took under a minute; the provider refresh is what propagates it.
 
-Copy the selected skin to `.local\demo-skin.json`; set its `azure.namePrefix` to
-the actual demo prefix, name an existing Windows fleet VM as the parent and enable:
+Use the private skin `<PRIVATE>\arc-skin.json` in the [private build folder](private-config.md): the
+build wrapper reads that same file, and the step scripts below take it with `-SkinPath`. Copy
+`config\demo-skin.json` there first, set its `azure.namePrefix` to
+the actual demo prefix, name the Windows fleet VM that becomes the parent (`win-sql-02` in the
+default fleet) and enable:
 
 ```json
 "nestedSqlGuest": {
   "enabled": true,
-  "parentVmName": "sql-parent",
+  "parentVmName": "win-sql-02",
   "guestVmName": "sql-guest",
   "arcMachineName": "sql-guest"
 }
 ```
+
+With the default fleet's `win-sql-02`, Deploy then creates that one VM as `Standard_D4s_v5` with a
+128 GiB data disk and security type `Standard`, not as the fleet's `Standard_B2as_v2`, so
+the burstable-sizes cost scope in [cost.md](cost.md#qualified-retail-comparison) is exceeded for that VM.
 
 Use actual names privately; the scratch guest and Arc names must match. The same
 block drives Deploy, normal Activate, Hibernate and Remove and the optional
@@ -70,7 +77,8 @@ With the lab Active (a fresh Deploy leaves it Active), preview and then prepare.
 The subscription and tenant stay private:
 
 ```powershell
-$prep = @{ SubscriptionId = $sub; TenantId = $tenant; SkinPath = '.local\demo-skin.json' }
+$prep = @{ SubscriptionId = $sub; TenantId = $tenant; SkinPath = '<PRIVATE>\arc-skin.json'
+    BuildInputPath = '<PRIVATE>\nested-sql-build.json' }
 .\scripts\Prepare-NestedSqlParent.ps1 @prep -WhatIf
 .\scripts\Prepare-NestedSqlParent.ps1 @prep -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms -Confirm:$false
 ```
@@ -119,7 +127,8 @@ disk](troubleshooting.md#deploy-refuses-a-retained-vms-size-or-data-disk)) and
 Prepare only verifies it, without a restart.
 
 When Verify passes it writes the build's nonsecret arguments to
-`.local\nested-sql-build.json`, keeping other keys already in that file:
+`<PRIVATE>\nested-sql-build.json` (the `-BuildInputPath` file; its default is
+`.local\nested-sql-build.json`), keeping other keys already in that file:
 `SubscriptionId`, `TenantId`, `ParentVmId` (the Azure VM id), `Location`,
 `WindowsIsoPath`, `SqlIsoPath`, `SwitchName`, `GuestAddress`, `Gateway`,
 `DnsServer`, and `OnboardingApplicationId` (looked up by the display name
@@ -150,24 +159,24 @@ JSON or command-line text:
 
 ```powershell
 Import-Module .\scripts\lib\Common.psm1
-$skinPath = '.local\demo-skin.json'
+$skinPath = '<PRIVATE>\arc-skin.json'
 $skin = Get-DemoSkin -Path $skinPath
 $guest = Get-DemoNestedSqlGuestConfig -Skin $skin
 $prefix = Get-DemoSkinValue $skin 'azure.namePrefix' 'arc-demo'
-$build = Get-Content .local\nested-sql-build.json -Raw | ConvertFrom-Json -AsHashtable
+$build = Get-Content '<PRIVATE>\nested-sql-build.json' -Raw | ConvertFrom-Json -AsHashtable
 $build.ParentResourceGroup = "rg-$prefix-infra"
 $build.ResourceGroup = "rg-$prefix"
 $build.ParentVmName = $guest.ParentVmName
 $build.VmName = $guest.GuestVmName
 $build.VmRoot = "D:\NestedSQL\VMs\$($guest.GuestVmName)"
-$saved = '<private folder>\nested-guest-credential.clixml'
+$saved = '<PRIVATE>\nested-guest-credential.clixml'
 $build.GuestCredential = if (Test-Path -LiteralPath $saved) { Import-Clixml -LiteralPath $saved } else {
     Get-Credential -UserName Administrator -Message 'Approved guest Administrator credential' }
 $life = @{ SubscriptionId = $build.SubscriptionId; TenantId = $build.TenantId;
     SkinPath = $skinPath; NamePrefix = $prefix }
 .\scripts\New-NestedSqlDemo.ps1 @build -SkinPath $skinPath -WhatIf
 $result = .\scripts\New-NestedSqlDemo.ps1 @build -SkinPath $skinPath -Confirm:$false
-$result | ConvertTo-Json -Depth 12 | Set-Content .local\nested-sql-result.json
+$result | ConvertTo-Json -Depth 12 | Set-Content '<PRIVATE>\nested-sql-result.json'
 ```
 
 Preview is not creation. The real invocation ensures the Arc-group onboarding
@@ -312,7 +321,7 @@ repair are a normal wake step. See [troubleshooting](troubleshooting.md).
 For a guest-only rebuild, wake its parent first and use the saved build identities:
 
 ```powershell
-$saved = Get-Content .local\nested-sql-result.json -Raw | ConvertFrom-Json
+$saved = Get-Content '<PRIVATE>\nested-sql-result.json' -Raw | ConvertFrom-Json
 .\scripts\Remove-NestedSqlDemo.ps1 @parent -VmName $saved.VmName -VmId $saved.VmId `
     -VmRoot $build.VmRoot -ArcMachineId $saved.ArcMachineId -ArcAgentVmId $saved.ArcAgentVmId `
     -SqlInstanceId $saved.SqlInstanceId -WhatIf

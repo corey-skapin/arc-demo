@@ -12,18 +12,36 @@ elsewhere PowerShell does not encrypt them, so keep the folder user-only). Do no
 copy them to another machine: a hand-over needs `-AdminPassword` from whoever holds
 the VM admin password, or a rebuild.
 
-| File or folder | What it is | Written by |
+One plain-text exception, held for seconds: while Deploy submits the Bicep deployment, its
+parameters file holds the VM admin password in the user's temp folder (a normal Windows profile
+limits it to you, SYSTEM and administrators). Deploy submits with `--no-wait`, deletes the file as soon as Azure
+accepts the request and again in a `finally` on any failure, and never writes it into the
+private folder.
+
+## Create the folder
+
+Only `build.json` and `arc-skin.json` must exist before the first run; the wrapper
+creates the rest when a step needs it (the last column says when).
+
+```powershell
+$private = '<PRIVATE>'   # outside git, outside every worktree, readable only by you
+New-Item -ItemType Directory -Force -Path $private | Out-Null
+Copy-Item .\config\demo-skin.json "$private\arc-skin.json"          # then set prefix, region, e-mail, workload flags
+Copy-Item .\config\build-plan.example.json "$private\build.json"    # then set arcSkinPath and the optional sections
+```
+
+| File or folder | What it is | Written by, and when |
 | --- | --- | --- |
-| `build.json` | Wrapper config, copied from [`config/build-plan.example.json`](../config/build-plan.example.json) | you |
-| `arc-skin.json` | Private Arc skin: prefix, region, notification e-mail, workload flags, `nestedSqlGuest`, optional fleet path | you, from `config/demo-skin.json` |
-| `arc-fleet.json` | Optional private fleet named by the skin's `workloads.onPremFleetPath` | you |
-| `sre-skin.json` | Private skin for the companion SRE repo | you |
-| `nested-sql-build.json` | Nonsecret inputs of the nested guest build (see [nested-sql-demo.md](nested-sql-demo.md)) | you, or the parent preparation step |
+| `build.json` | Wrapper config, copied from [`config/build-plan.example.json`](../config/build-plan.example.json) | you, before the first run |
+| `arc-skin.json` | Private Arc skin: prefix, region, notification e-mail, workload flags, `nestedSqlGuest`, optional fleet path | you, from `config/demo-skin.json`, before the first run |
+| `arc-fleet.json` | Optional private fleet named by the skin's `workloads.onPremFleetPath` | you, only if the skin names it |
+| `sre-skin.json` | Private skin for the companion SRE repo | you, only with the companion repo |
+| `nested-sql-build.json` | Nonsecret inputs of the nested guest build (see [nested-sql-demo.md](nested-sql-demo.md)) | the parent preparation step (P3) when it passes, so it does not exist before then (the plan still lists P4); or you, by hand, for a parent prepared another way |
 | `vm-admin-credential.clixml` | The generated VM admin password (DPAPI-protected SecureString), for reruns of P2 when the Key Vault cannot be read from this PC or a build failed part way | `Deploy-ArcDemo.ps1` at P2, before any Azure write |
 | `nested-guest-credential.clixml` | Optional: the nested guest's Administrator credential (DPAPI-protected PSCredential) so P4 runs unattended. Without it P4 prompts, and a session that cannot prompt stops before anything starts | you, once ([recipe](#saving-the-nested-guest-credential)); the wrapper only reads it |
-| `build-state.json` | Which steps are done, with attempts and evidence paths | the wrapper |
-| `evidence/` | One JSON file per step, readiness results, inventory snapshots and `media-acceptance.json`, the recorded licence acceptance for the installer media | the wrapper, `Export-ArcDemoInventory.ps1`, the media scripts |
-| `sre-backups/` | One new SRE configuration backup per SRE deployment | the wrapper, for the SRE deploy script |
+| `build-state.json` | Which steps are done, with attempts and evidence paths | the wrapper, at the first `-Execute` |
+| `evidence/` | One JSON file per step, readiness results, inventory snapshots and `media-acceptance.json`, the recorded licence acceptance for the installer media | the wrapper, `Export-ArcDemoInventory.ps1`, `Test-ArcDemoReadiness.ps1 -OutputPath` and the media scripts, when they first write evidence: do not create it by hand |
+| `sre-backups/` | One new SRE configuration backup per SRE deployment | the wrapper, for the SRE deploy script (P9) |
 
 Relative paths in `build.json` resolve against this folder. Use a separate
 folder for each lab; the state file refuses a different subscription, tenant or

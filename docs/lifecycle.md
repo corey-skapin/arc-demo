@@ -95,7 +95,7 @@ Define the guest once in the private skin:
 ```json
 "nestedSqlGuest": {
   "enabled": true,
-  "parentVmName": "sql-parent",
+  "parentVmName": "win-sql-02",
   "guestVmName": "sql-guest",
   "arcMachineName": "sql-guest"
 }
@@ -103,8 +103,10 @@ Define the guest once in the private skin:
 
 These are names in the confirmed demo groups, not credentials or arbitrary
 resource IDs. Defaults leave it disabled. Use the same skin for every operation.
-The exact configured Windows parent may already be in the retained fleet; a
-separately created parent is selected only from that same infra group.
+The exact configured Windows parent may already be in the retained fleet (the default
+fleet's `win-sql-02`, which Deploy then creates as `Standard_D4s_v5` with a 128 GiB data
+disk and security type `Standard`, see [cost.md](cost.md#qualified-retail-comparison));
+a separately created parent is selected only from that same infra group.
 
 Activate restores outbound networking, starts the parent, starts an Off/Saved
 Hyper-V guest without restarting a Running guest, then waits for the guest's

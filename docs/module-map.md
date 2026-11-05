@@ -17,7 +17,7 @@ readiness contract, see [lifecycle.md](lifecycle.md).
 | `bicep/modules/network.bicep` | VNet/subnet/NSG; creates fresh NAT/PIP before compute or preserves the existing NAT attachment |
 | `bicep/modules/keyvault.bicep` | Shared admin-credential vault and deployer RBAC |
 | `bicep/modules/workspace.bicep` | Log Analytics and VMInsights/ChangeTracking solutions |
-| `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; `New-CoreDcrBody` in the deploy wrapper owns selectors, including the source/event-specific LOB informational heartbeat |
+| `bicep/modules/dcrs.bicep` | Deterministic DCR IDs; `New-CoreDcrBody` in `Deploy-ArcDemo.ps1` (an inline hashtable sent by native REST PUT, not Bicep) owns the core DCR's six Windows event selectors: Application and System levels 1-3, the Security audit keyword, and the Information events `ArcLobBridgeApp` 4000 and `ArcSqlEngineDemo` 6000 and 6001. The SQL incident event 6201 needs no selector of its own: it is written as an `Error` entry, which the Application level 1-3 selector already collects; 6000 and 6001 are Information, so they need theirs |
 | `bicep/modules/alerts.bicep` | Action Group and missing-Heartbeat alert |
 | `bicep/modules/defender.bicep`, `tests/DefenderPlan.Tests.ps1` | Subscription Defender for Servers P2, deployed only while the live plan is not already Standard (`deployDefenderVmPlan`, set by Deploy); an enabled plan and its extensions are never re-PUT |
 | `bicep/modules/policy.bicep` | Named MCSB/NIST assignments |

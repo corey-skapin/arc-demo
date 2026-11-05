@@ -332,14 +332,17 @@ Preflight does not register providers or subscription features, install CLI exte
 It reports every unregistered provider, every unregistered subscription feature
 (`Microsoft.Compute/UseStandardSecurityType`, when the skin declares the nested SQL parent) and every
 missing CLI extension (`connectedmachine`, plus `containerapp` for Container Apps) in one error with
-the exact fix, for example `az extension add --name containerapp --yes`; resolve missing providers
+the exact fix, for example `az extension add --name containerapp --yes` (that extension is
+preview-only today and takes about 2 minutes, so approving it approves a preview build); resolve missing providers
 and features with separate operator authorization, using the exact ones reported
 by preflight for the skin's workload toggles (`Test-Prerequisites.ps1`, Deploy and
 the build wrapper's P0 check the same set). Supplying
 `-DeployerPrincipalId <OBJECT_ID>` (your own; read it from your ARM token when Graph is blocked, see
 [the CAE entry](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge))
 bypasses only Graph user discovery, not RBAC.
-SKU restriction and regional/family vCPU quota checks do not guarantee capacity. If Azure still
+SKU restriction and regional/family vCPU quota are checked by Deploy's own first step, not by this
+preflight or the wrapper's P0: about 4 minutes, announced on the console, before anything is created.
+These checks do not guarantee capacity. If Azure still
 refuses allocation, Deploy prints the options and never switches VM size or
 region on its own; re-running the same command resumes.
 Review [cost assumptions](cost.md) before agreeing to a budget.

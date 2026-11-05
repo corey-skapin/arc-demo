@@ -487,7 +487,7 @@ the base first and add Container Apps as a second Deploy pass
 
 Preflight no longer registers providers or skips RBAC for a supplied principal.
 Missing providers, missing CLI extensions (`connectedmachine`, plus `containerapp`
-for Container Apps), insufficient effective permissions, malformed skins,
+for Container Apps, which is preview-only today and takes about 2 minutes to install), insufficient effective permissions, malformed skins,
 SKU restrictions and insufficient quota terminate with instructions. Missing
 providers and extensions are reported together, for example
 `az extension add --name connectedmachine --yes`; preflight itself installs and
@@ -661,7 +661,9 @@ az vm list-usage --subscription <SUB> -l australiaeast -o table
 
 Choose a permitted SKU/region and review the matching Bicep preview. Neither an
 unrestricted SKU listing nor `--validate` guarantees physical allocation. Do not
-create/delete arbitrary probe resource groups in an in-use lab.
+create/delete arbitrary probe resource groups in an in-use lab. The `list-skus`
+command above takes 3-4 minutes with `--all`, and `list-usage` counters can lag for hours
+after a Remove (a count of 2 to 6 vCPUs with no VMs left is stale, not a reason to stop).
 
 ## Capacity preflight says "Insufficient ... vCPU quota" with plenty of headroom
 
@@ -672,7 +674,10 @@ of one family together (`Test-DemoComputeCapacity -Requirements`) and names the 
 it exceeded, for
 example `standardBasv2Family vCPU quota ...: 90 in use + 16 needed ... limit of 100`.
 Trust that message: request quota or reduce the fleet. A regional `cores` overflow
-means the total across all VM families would exceed the regional limit.
+means the total across all VM families would exceed the regional limit. This check is
+Deploy's first step, not part of `Test-Prerequisites` or the wrapper's P0; it takes about
+4 minutes and prints a banner first. Usage counters can lag for hours after a Remove, so
+compare a surprising number with `az vm list` before acting on it.
 
 ## A fresh Deploy after Remove complains about the canonical Key Vault
 
