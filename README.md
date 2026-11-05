@@ -4,6 +4,34 @@ Show how Arc and Azure Monitor turn a Windows/Linux server estate into one
 operational view: identity, telemetry, application activity, alerts and posture.
 This repo owns the **Arc part**; the optional companion repo owns the SRE part.
 
+## What you get
+
+These screenshots come from a lab estate rebuilt from zero with this repo; each is one of the workbooks the build publishes, captioned with that workbook's own opening text.
+
+![Estate overview workbook: machine counts, reporting hosts, CPU, memory and disk](docs/images/arc-estate-overview.png)
+
+**Estate overview.** Which servers are in the Arc estate, are they connected and sending telemetry, how busy are they, what changed, and what needs attention?
+
+![Asset inventory workbook: Arc servers, tags, SQL Server instances and software](docs/images/arc-asset-inventory.png)
+
+**Asset inventory.** Which Azure Arc-enabled servers does this estate have, are they connected and tagged, what SQL Server runs on them and what software is installed?
+
+![Machine Intelligence Center workbook: one machine's identity, telemetry and performance](docs/images/arc-machine-intelligence.png)
+
+**Machine Intelligence Center.** One Azure Arc machine in one place: identity, live performance, security, software changes, SQL, extensions, policy and uptime.
+
+![Compliance, security and governance workbook: policy, Defender and patch scores](docs/images/arc-governance.png)
+
+**Compliance, security and governance.** How do the Arc-enabled servers measure up on Azure Policy, Microsoft Defender for Cloud and Azure Update Manager? In a deliberately un-hardened lab, low scores are the honest starting point, not a fault.
+
+![Capacity and headroom workbook: pressure, headroom and evidence quality per machine](docs/images/arc-capacity.png)
+
+**Capacity and headroom.** Where is the estate under pressure, where does it appear to have headroom, and how far can the data be trusted? Evidence first: nothing here resizes, stops or changes a machine.
+
+![Optimisation opportunities workbook: review candidates and the evidence behind them](docs/images/arc-optimisation.png)
+
+**Optimisation opportunities.** Which machines are worth a conversation about cost or efficiency, why they were flagged, and what evidence is still missing? Candidates are not approved savings.
+
 ## Present
 
 Open **`.local/presenter-runsheet.md`** in Markdown preview and go top to bottom.
