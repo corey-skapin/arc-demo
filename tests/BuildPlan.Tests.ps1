@@ -326,6 +326,20 @@ Describe 'Ordered plan' {
         (Get-BuildRow (Get-BuildTest $f -State $state) 'P6.3').Notes | Should -HaveCount 0
     }
 
+    It 'does not offer the SQL lock-timeout alert before the SQL engine is confirmed, unless P5.4 runs first in the same selection' {
+        $f = New-BuildFixture
+        $alone = Get-BuildTest $f -Only 'P6.1'
+        (Get-BuildRow $alone 'P6.1').Status | Should -Be 'blocked'
+        (Get-BuildRow $alone 'P6.1').Blockers | Should -Match 'real SQL engine is not confirmed.*P5.4'
+        (Get-BuildRow (Get-BuildTest $f -From P5 -To P6) 'P6.1').Status | Should -Be 'ready'
+        $null = New-Item -ItemType Directory -Path (Join-Path $f.Repo '.local') -Force
+        $proof = Join-Path $f.Repo '.local/sql-engine-status.json'
+        Set-Content $proof '{"evidence":{"status":"pending"}}'
+        (Get-BuildRow (Get-BuildTest $f -Only 'P6.1') 'P6.1').Status | Should -Be 'blocked'
+        Set-Content $proof '{"evidence":{"status":"pass"}}'
+        (Get-BuildRow (Get-BuildTest $f -Only 'P6.1') 'P6.1').Status | Should -Be 'ready'
+    }
+
     It 'selects one step by its ID with -Only, as well as a whole phase' {
         $f = New-BuildFixture
         $t = Get-BuildTest $f
@@ -598,6 +612,21 @@ Describe 'Step runner' {
         $parity = (& (Get-BuildRow $t 'P11.2').Definition.Arguments $t.Context)
         $parity['SnapshotPath'] | Should -Be $t.State.values['snapshotPath']
         $parity['Feature'] | Should -Be @('ContainerApps', 'NestedSql', 'RealSql', 'OperationalWorkbooks', 'Sre')
+    }
+
+    It 'stops P6.1 at run time, retryable and without calling the script, when P5.4 left no passing proof' {
+        $f = New-BuildFixture
+        $env:BUILD_TEST_LOG = $f.Log
+        $t = Get-BuildTest $f -Only 'P6.1'
+        $step = (Get-BuildRow $t 'P6.1').Definition
+        { Invoke-ArcDemoBuildStep -Step $step -Context $t.Context -State $t.State } | Should -Throw '*real SQL engine is not confirmed*'
+        $t.State.steps['P6.1'].status | Should -Be 'blocked'
+        @(Get-BuildCall $f) | Should -HaveCount 0
+        $null = New-Item -ItemType Directory -Path (Join-Path $f.Repo '.local') -Force
+        Set-Content (Join-Path $f.Repo '.local/sql-engine-status.json') '{"evidence":{"status":"pass"}}'
+        Invoke-ArcDemoBuildStep -Step $step -Context $t.Context -State $t.State
+        $t.State.steps['P6.1'].status | Should -Be 'done'
+        (Get-BuildCall $f)[0].script | Should -Be 'Set-SqlIncidentAlert.ps1'
     }
 
     It 'runs a read-only step with -NoState without writing state or evidence' {
@@ -901,6 +930,32 @@ Describe 'Presenter handoff' {
         $document = New-ArcDemoPresenterContext -Context $t.Context -State $t.State
         $document['sqlMachineResourceId'] | Should -Be "$scope/Microsoft.HybridCompute/machines/sql-host"
         $document['sqlIncidentAlertResourceId'] | Should -Be "$scope/Microsoft.Insights/scheduledQueryRules/al-build-test-sql-lock-timeout"
+    }
+
+    It 'records the time of the last passing readiness (P7), not the moment P10 runs, and says now only without one' {
+        $f = New-BuildFixture
+        $t = Get-BuildTest $f
+        Mock Initialize-DemoContext {} -ModuleName BuildPlan
+        $scope = "/subscriptions/$script:Sub/resourceGroups/rg-build-test/providers"
+        Mock Invoke-DemoAz {
+            if ($Arguments[1] -eq 'list') { return ('[{"id":"' + $scope + '/Microsoft.Insights/workbooks/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","tags":{"workbookTag":"build-test---estate-overview"}}]') }
+            '{}'
+        } -ModuleName BuildPlan
+        $started = [DateTime]::UtcNow
+        $withoutP7 = New-ArcDemoPresenterContext -Context $t.Context -State $t.State
+        ([DateTime]::Parse($withoutP7.recordedAtUtc).ToUniversalTime()) | Should -BeGreaterOrEqual $started.AddSeconds(-1)
+        $checked = [DateTime]::UtcNow.AddHours(-3)
+        $evidence = Join-Path $f.Private 'P7-fixture.json'
+        @{ output = @{ schemaVersion = 1; checkedAtUtc = $checked.ToString('o') } } | ConvertTo-Json -Depth 4 | Set-Content $evidence
+        $t.State.steps['P7'] = @{ status = 'done'; evidence = $evidence }
+        (New-ArcDemoPresenterContext -Context $t.Context -State $t.State).recordedAtUtc | Should -Be $checked.ToString('o')
+        $t.State.steps['P7'].status = 'failed'
+        ([DateTime]::Parse((New-ArcDemoPresenterContext -Context $t.Context -State $t.State).recordedAtUtc).ToUniversalTime()) | Should -BeGreaterThan $checked.AddHours(2)
+        $t.State.steps['P7'].status = 'done'
+        @{ output = @{ checkedAtUtc = [DateTime]::UtcNow.AddHours(5).ToString('o') } } | ConvertTo-Json -Depth 4 | Set-Content $evidence
+        ([DateTime]::Parse((New-ArcDemoPresenterContext -Context $t.Context -State $t.State).recordedAtUtc).ToUniversalTime()) | Should -BeLessThan ([DateTime]::UtcNow.AddHours(1))
+        Set-Content $evidence 'not json'
+        { New-ArcDemoPresenterContext -Context $t.Context -State $t.State } | Should -Not -Throw
     }
 
     It 'writes nothing when an expected resource or the Estate Overview workbook is missing' {

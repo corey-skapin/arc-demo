@@ -31,6 +31,31 @@ Describe 'Nested demo noninteractive protected transport' {
         }
     }
 
+    It 'says about once a minute that a long step is still running, and names the parent' {
+        $script:polls = 0
+        Mock Write-Step {}
+        Mock Invoke-AzRest {
+            if ($Method -eq 'Put') { return }
+            if ($Url -like '*runCommands/*') {
+                $script:polls++
+                $name = if ($script:polls -lt 13) { 'Running' } else { 'Succeeded' }
+                return @{id='SYNTHETIC-COMMAND';properties=@{instanceView=@{executionState=$name;exitCode=0;output='done'}}}
+            }
+            if ($Url -like '*runCommands?*') { return @{value=@()} }
+            return @{
+                id='/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-demo/providers/Microsoft.Compute/virtualMachines/parent'
+                location='australiaeast';properties=@{vmId='33333333-3333-3333-3333-333333333333'}
+            }
+        }
+        $result = & $script:transport -SubscriptionId '11111111-1111-1111-1111-111111111111' `
+            -TenantId '22222222-2222-2222-2222-222222222222' -ParentResourceGroup rg-demo -ParentVmName parent `
+            -ParentVmId '33333333-3333-3333-3333-333333333333' -Step Remove `
+            -Parameters @{VmName='DemoNew';VmRoot='D:\NestedSQL\VMs\DemoNew';VmId='44444444-4444-4444-4444-444444444444'} `
+            -Confirm:$false
+        $result.ExecutionState | Should -Be 'Succeeded'
+        Should -Invoke Write-Step -Times 2 -Exactly -ParameterFilter { $Message -like 'Remove is still running on parent (*min so far; it can take up to 30 min).' }
+    }
+
     It 'places the onboarding secret only in Connect protected parameters' {
         $guestSecret = ConvertTo-SecureString 'Synthetic!Credential12345678901234567890' -AsPlainText -Force
         $onboardingSecret = ConvertTo-SecureString 'Transport-Sentinel-Secret-7419' -AsPlainText -Force

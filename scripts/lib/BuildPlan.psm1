@@ -334,6 +334,14 @@ function Get-BuildNestedBlocker {
     if ($missing) { "The nested SQL build input file is missing: $($missing -join ', ')." }
 }
 
+function Get-BuildSqlEngineProblem {
+    # The SQL lock-timeout alert watches the SQL engine, so it needs P5.4's saved proof that the engine answers.
+    param([Parameter(Mandatory)]$Context)
+    $proof = Join-BuildPath $Context.ArcRoot '.local/sql-engine-status.json'
+    if ((Test-Path -LiteralPath $proof -PathType Leaf) -and (Get-DemoSkinValue (Read-BuildJson $proof) 'evidence.status' '') -eq 'pass') { return }
+    'The real SQL engine is not confirmed yet (P5.4 saves .local/sql-engine-status.json with status pass), so the lock-timeout alert would watch nothing. Run P5 first; its Status step, P5.4, is read-only.'
+}
+
 function Get-BuildNestedArguments {
     param([Parameter(Mandatory)]$Context)
     $values = Get-BuildNestedInput $Context
@@ -556,7 +564,9 @@ function Get-ArcDemoBuildSteps {
                     MachineName = $c.Config.RealSql.MachineName; Action = 'Status'; ResultPath = (Join-BuildPath $c.ArcRoot '.local/sql-engine-status.json')
                 }
             }
-        New-BuildStep -Id 'P6.1' -Title 'SQL lock-timeout incident alert' -Script 'scripts\Set-SqlIncidentAlert.ps1' -Minutes 2 -Mutating -SkipReason $noSql -Arguments {
+        New-BuildStep -Id 'P6.1' -Title 'SQL lock-timeout incident alert' -Script 'scripts\Set-SqlIncidentAlert.ps1' -Minutes 2 -Mutating -SkipReason $noSql `
+            -Inputs { param($c) if ('P5.4' -notin $c.PlannedSteps) { Get-BuildSqlEngineProblem $c } } `
+            -Resolve { param($c) $problem = Get-BuildSqlEngineProblem $c; if ($problem) { throw $problem } } -Arguments {
                 param($c)
                 New-BuildArguments $c $c.Config.ArcSkinPath @{
                     MachineName = $c.Config.RealSql.MachineName; Action = 'Deploy'
@@ -841,6 +851,22 @@ function Assert-BuildResourceExists {
     if (-not (Test-BuildResourceExists $Id)) { throw "Expected resource is missing, so no presenter context is written: $Id" }
 }
 
+function Get-BuildContextTime {
+    # The context describes what the last passing Active readiness (P7) saw, so it carries that check's time,
+    # which is the time in the evidence file, not the later moment P10 happens to run.
+    param([Parameter(Mandatory)]$State)
+    if ($State.steps.Contains('P7') -and $State.steps['P7'].status -eq 'done' -and $State.steps['P7'].Contains('evidence')) {
+        $evidence = [string]$State.steps['P7']['evidence']
+        if ($evidence -and (Test-Path -LiteralPath $evidence -PathType Leaf)) {
+            try {
+                $checked = ConvertTo-DemoUtc (Get-DemoSkinValue (Read-BuildJson $evidence) 'output.checkedAtUtc' '')
+                if ($checked -and $checked -le [DateTime]::UtcNow) { return $checked.ToString('o') }
+            } catch { Write-Verbose "P7 evidence has no usable checkedAtUtc: $($_.Exception.Message)" }
+        }
+    }
+    [DateTime]::UtcNow.ToString('o')
+}
+
 function New-ArcDemoPresenterContext {
     <#
     .SYNOPSIS
@@ -867,7 +893,7 @@ function New-ArcDemoPresenterContext {
         schemaVersion = 1
         subscriptionId = "$($Context.SubscriptionId)"
         tenantId = "$($Context.TenantId)"
-        recordedAtUtc = [DateTime]::UtcNow.ToString('o')
+        recordedAtUtc = (Get-BuildContextTime $State)
         resourceGroups = [ordered]@{ arc = $Context.ArcGroup; infra = $Context.InfraGroup }
         workspaceResourceId = (Get-BuildArcResourceId $Context 'Microsoft.OperationalInsights/workspaces' "law-$($Context.Prefix)")
         workbookResourceId = $estate[0].id

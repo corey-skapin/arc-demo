@@ -61,6 +61,7 @@ function Invoke-ParentStep {
         Step=$Name;Parameters=$Values;TimeoutSeconds=$Seconds;Confirm=$false
     }
     if ($OnboardingSecret) { $stepArguments.OnboardingSecret = $OnboardingSecret }
+    Write-Step "Nested guest step ${Name}: started (allow up to $([int]($Seconds / 60)) minutes)."
     $result=& (Join-Path $PSScriptRoot 'Invoke-NestedSqlDemoStep.ps1') @stepArguments
     $result | Format-List | Out-Host
     $timings.Add([pscustomobject]@{Step=$Name;Seconds=$result.ElapsedSeconds})

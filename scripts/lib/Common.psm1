@@ -1318,6 +1318,7 @@ function Test-DemoComputeCapacity {
     )
     if ($PSCmdlet.ParameterSetName -eq 'Single') { $Requirements = @([pscustomobject]@{ VmSize = $VmSize; VmCount = $AdditionalVmCount }) }
     # One listing covers every size: the CLI downloads the whole regional SKU list however the result is filtered.
+    Write-Step "Checking SKU restrictions and vCPU quota in $Location. The CLI downloads the whole regional SKU list, so this takes about 4 minutes and creates nothing."
     $skuList = @(Invoke-DemoAz -Arguments @('vm', 'list-skus', '-l', $Location, '--resource-type', 'virtualMachines', '--all', '-o', 'json') | ConvertFrom-Json)
     $demand = foreach ($size in $Requirements | Group-Object { ([string]$_.VmSize).Trim() }) {
         if (-not $size.Name) { throw 'Every capacity requirement needs a VM size.' }

@@ -188,6 +188,11 @@ Describe 'Compute capacity preflight with Azure CLI 2.91 string quotas' {
             Test-DemoComputeCapacity -Location australiaeast -VmSize Standard_B2as_v2 -AdditionalVmCount 1
             Should -Invoke Write-Ok -Times 1 -ParameterFilter { $Message -eq 'cores vCPU quota: 22 in use + 2 needed of 100' }
         }
+        It 'says up front that the slow regional SKU listing takes about four minutes and creates nothing' {
+            Mock Write-Step {}
+            Test-DemoComputeCapacity -Location australiaeast -VmSize Standard_B2as_v2 -AdditionalVmCount 1
+            Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -like '*SKU restrictions and vCPU quota in australiaeast*about 4 minutes*creates nothing*' }
+        }
         It 'still reads numeric quota values from older CLI versions' {
             $script:usageAsNumbers = $true
             { Test-DemoComputeCapacity -Location australiaeast -Requirements @(@{ VmSize = 'Standard_B2as_v2'; VmCount = 8 }) } | Should -Not -Throw

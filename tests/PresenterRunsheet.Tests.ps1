@@ -272,6 +272,12 @@ Describe 'Offline private presenter guide' {
         } finally { Pop-Location }
     }
 
+    It 'anchors the default context at the script folder, so the guide can be generated from any directory' {
+        $parse = [System.Management.Automation.Language.Parser]::ParseFile($generator, [ref]$null, [ref]$null)
+        $parameter = $parse.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'ContextPath' }
+        $parameter.DefaultValue.Extent.Text | Should -Match '\$PSScriptRoot'
+    }
+
     It 'escapes valid resource-name parentheses inside Markdown portal links' {
         $context.actionGroupResourceId += '(ops)'
         $context | ConvertTo-Json | Set-Content $path

@@ -115,8 +115,10 @@ $clock = [Diagnostics.Stopwatch]::StartNew()
 try { $null = Invoke-AzRest -Method Put -Url $url -Body $body }
 finally { $body=$null; $protectedParameters=$null }
 Write-Verbose "Managed command: $name"
+$polls = 0
 do {
     Start-Sleep 10
+    $polls++
     $command = Invoke-AzRest -Method Get -Url ($url + '&$expand=instanceView')
     $state = $command.properties.instanceView
     if ($state.executionState -in @('Succeeded','Failed','Canceled','TimedOut')) {
@@ -128,5 +130,7 @@ do {
         if ($state.executionState -ne 'Succeeded' -or $state.exitCode -ne 0) { throw "Repository step $Step failed: $($state.error)" }
         return
     }
+    # About once a minute: a step runs for many minutes and prints nothing else until it ends.
+    if ($polls % 6 -eq 0) { Write-Step "$Step is still running on $ParentVmName ($([int]$clock.Elapsed.TotalMinutes) min so far; it can take up to $([int]($TimeoutSeconds / 60)) min)." }
 } while ($clock.Elapsed.TotalSeconds -lt ($TimeoutSeconds + 300))
 throw "Observation timed out for $name; inspect this command, do not resubmit it."

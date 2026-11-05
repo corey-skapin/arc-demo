@@ -62,3 +62,18 @@ Describe 'Simple scratch Windows guest preflight' {
         Should -Invoke New-VHD -Times 0
     }
 }
+
+Describe 'Scratch guest script output' {
+    It 'discards the Dismount-DiskImage object so no raw CIM dump reaches the build output' {
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:entry, [ref]$null, [ref]$errors)
+        $errors | Should -BeNullOrEmpty
+        $calls = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Dismount-DiskImage' }, $true))
+        $calls.Count | Should -BeGreaterThan 0
+        foreach ($call in $calls) {
+            $pipeline = $call.Parent
+            $pipeline | Should -BeOfType ([System.Management.Automation.Language.PipelineAst])
+            $pipeline.PipelineElements[-1].GetCommandName() | Should -Be 'Out-Null'
+        }
+    }
+}

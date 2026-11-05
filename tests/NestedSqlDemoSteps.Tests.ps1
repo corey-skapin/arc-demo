@@ -125,7 +125,7 @@ Describe 'Simple nested demo step previews' {
 
     It 'checks only the supplied guest and Arc identity' {
         Mock Invoke-Command {
-            [pscustomobject]@{ SetupComplete=$true; ArcConnected=$true; SqlRunning=$true; SqlExtensionInventoryVerified=$false }
+            [pscustomobject]@{ SetupComplete=$true; ArcConnected=$true; SqlRunning=$true }
         } -ParameterFilter {
             $VMName -ceq 'DEMOSQL' -and $ArgumentList[0] -ceq 'SYNTHETIC-ARC-ID' -and
                 $ArgumentList[2] -is [bool] -and -not $ArgumentList[2] -and
@@ -133,9 +133,12 @@ Describe 'Simple nested demo step previews' {
         }
         $result = & $script:check -VmName DEMOSQL -GuestCredential $script:credential -ExpectedArcResourceId SYNTHETIC-ARC-ID
         $result.SetupComplete | Should -BeTrue
-        $result.SqlExtensionInventoryVerified | Should -BeFalse
         Should -Invoke Invoke-Command -Times 1
         Should -Invoke Invoke-RestMethod -Times 0
+    }
+
+    It 'does not report an Azure inventory result the guest-side check cannot know' {
+        (Get-Content -LiteralPath $script:check -Raw) | Should -Not -Match 'SqlExtensionInventoryVerified'
     }
 
     It 'passes real boolean switches to the guest rather than truthy cast strings' {
