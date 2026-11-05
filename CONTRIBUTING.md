@@ -12,10 +12,10 @@ Pull requests welcome. Quick rules:
    ```
 
 3. If you hit a new failure mode, **add it to [`docs/troubleshooting.md`](docs/troubleshooting.md)** in the same PR with a verified fix.
-4. Scripts must remain **idempotent** — preserve correct state, credentials and fault flags on rerun. Start with mocked tests; real double deployment requires a separately approved disposable lab, never an in-use demo.
+4. Scripts must remain **idempotent** — preserve correct state, credentials and fault flags on rerun. Start with mocked tests; test a real double deployment only in a disposable lab, never in an in-use demo.
 5. Bicep modules go in `bicep/modules/`; top-level template stays in `bicep/main.bicep`.
 6. Keep `Common.psm1` lean — only put a helper there if it's used in 2+ scripts.
-7. Keep real customer labels, contacts, owner repository URLs, runtime identifiers,
+7. Keep real customer labels, contacts, private repository URLs, runtime identifiers,
    credentials and evidence outside tracked source. Use synthetic examples and
    runtime parameters; preserve public Azure built-in IDs and upstream licenses.
 
@@ -23,8 +23,8 @@ Pull requests welcome. Quick rules:
 
 Run the existing parser/Pester/analyzer/Bicep checks first. Documentation is
 linted in CI, but the Markdown job is advisory; inspect its actual output.
-If live smoke testing is explicitly approved, use a disposable prefix and the
-same confirmed target/skin throughout:
+If you run a live smoke test, use a disposable prefix and the
+same target and skin throughout:
 
 ```powershell
 $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; NamePrefix = 'arctest'; SkinPath = '.\config\demo-skin.json' }
@@ -36,7 +36,7 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; NamePrefix = 'arct
 .\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Hibernated -OutputFormat Json
 .\scripts\Activate-ArcDemo.ps1 @target
 .\scripts\Remove-ArcDemo.ps1 @target -WhatIf
-# Execute removal only under the separately approved destructive-test scope.
+# Run the removal for real only against the disposable prefix.
 ```
 
 Reprice runtime, storage, networking and retained services; no fixed smoke-test

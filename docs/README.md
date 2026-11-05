@@ -6,12 +6,12 @@ Open **`.local/presenter-runsheet.md`** from the repo root and follow it top to
 bottom. To see what the finished lab looks like first, the README's
 [What you get](../README.md#what-you-get) shows the six published workbooks from a
 rebuilt lab estate (the images are in [images/](images/)).
-[runsheet.md](runsheet.md) is the single source template; the operator
-[generates the guide](runbook.md#prepare-the-local-presenter-guide) from saved
+[runsheet.md](runsheet.md) is the single source template; you
+[generate the guide](runbook.md#prepare-the-local-presenter-guide) from saved
 local context. Generation is offline, not a current-health check. To run the Arc
-and SRE halves from one page, the operator also passes the SRE guide
+and SRE halves from one page, also pass the SRE guide when you generate it
 ([one page for the whole demo](runbook.md#one-page-for-the-whole-demo-optional))
-and you open **`.local/full-demo-runsheet.md`** instead.
+and open **`.local/full-demo-runsheet.md`** instead.
 
 The guide is one story, the Monday-morning questions, in seven chapters (25-28 minutes
 for the Arc path, with 20 and 15 minute cut lists) that follows one SQL database from
@@ -20,18 +20,17 @@ and **Optimisation opportunities** workbooks are chapters 5 and 6 when their pub
 IDs are recorded; read the [workbook reference](operational-workbooks.md) first. Start
 with the tiles and the evidence column, and with stale/missing evidence while hosts
 are parked; gaps are not spare capacity or realised savings. The SQL and LOB incident
-evidence is handed to the SRE guide.
+evidence continues in the SRE guide.
 
 ## Build and operate (the deploy path)
 
-Read [AGENTS.md](../AGENTS.md) first, then the [runbook](runbook.md). To build the
-whole estate from zero, use the plan-first
+Start with the [runbook](runbook.md); your AI tool reads [AGENTS.md](../AGENTS.md)
+first. To build the whole estate from zero, use the plan-first
 [ordered build wrapper](runbook.md#build-everything-in-order-optional-wrapper); it
-only runs the maintained scripts and needs no approval until `-Execute`.
+only runs the maintained scripts and plans only until you pass `-Execute`.
 
 | Reference | Use |
 | --- | --- |
-| [AI handoff](ai-deploy-handbook.md) | Ask an assistant to prepare the demo |
 | [Arc runbook](runbook.md) | Base infrastructure, ordered build, optional workbooks and presenter context |
 | [Private build folder](private-config.md) | The one private folder: build config, state and evidence |
 | [Nested SQL demo runbook](nested-sql-demo.md) | Parent preparation, guest ownership tags, proven scratch build, park, wake and remove; Jumpstart alternative |
@@ -57,8 +56,9 @@ reset faults or run destructive rehearsals incidentally.
 - [Container App](container-app-fault.md) and [AKS](aks-break-scenario.md):
   separately prepared scenarios.
 
-SRE is optional and owns its investigations and human Review approvals in the
-companion repo. Do not deploy its alerts or rehearse faults as part of SQL setup.
+SRE is optional and covers its investigations in the companion repo, where you
+click Approve on the Review card in the SRE portal. Do not deploy its alerts or
+rehearse faults as part of SQL setup.
 
 ## Configuration and reference
 
