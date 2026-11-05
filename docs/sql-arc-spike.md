@@ -13,9 +13,9 @@ demo, not production architecture or a support-certification claim.
 Do not turn this constraint into the incorrect claim that SQL Server cannot run
 on an Azure VM.
 
-| What the presenter wants | Repo path | Boundary |
-|---|---|---|
-| Real SQL instance/database/query activity in this existing lab | [Real SQL workload](sql-engine-workload.md) | SQL 2022 Developer, approved media/terms; no Arc SQL extension/Paid/BPA |
+| What you want | Repo path | Boundary |
+| --- | --- | --- |
+| Real SQL instance/database/query activity in this existing lab | [Real SQL workload](sql-engine-workload.md) | SQL 2022 Developer, pinned media and licence terms; no Arc SQL extension/Paid/BPA |
 | Functional nested SQL/Arc demo | [Scratch nested guest](nested-sql-demo.md) | Real Windows/SQL/Arc guest; Azure-hosted nested demo, not blanket support validation |
 | Supported SQL Server enabled by Azure Arc product validation | Supported non-Azure SQL host | Confirm the documented host/licensing requirements; do not extrapolate from this demo |
 
@@ -33,4 +33,4 @@ side-by-side comparison and live timings, without changing this support boundary
 > A supported Arc SQL product demo needs a suitable non-Azure SQL host.
 
 Never use simulated SQL events as evidence of actual database queries.
-Keep engine setup, telemetry collection and fault/recovery consent separate.
+Engine setup, telemetry collection and fault/recovery are separate steps.

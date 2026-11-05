@@ -11,8 +11,8 @@ timings below rebuilt the guest on a parent that was prepared by hand. The
 parent's size, data disk, Hyper-V role, network and media are now code
 ([Prepare the parent](#prepare-the-parent)), rehearsed end to end on a scratch
 `Standard_D4s_v5`; a full from-zero rebuild through Deploy is not yet recorded
-here. Use approved Windows/SQL
-media and terms; Developer/Evaluation editions are not production licences.
+here. The Windows Evaluation and SQL Developer media carry licence terms you accept
+when you stage them, and neither edition is a production licence.
 The normal fleet's `MSFT_ARC_TEST=true` simulation is a separate path.
 
 ## Prepare the parent
@@ -35,7 +35,7 @@ partway through Deploy, after the other VMs exist (`BadRequest ... The value
 'Standard' is not available for property 'securityType' until the feature
 Microsoft.Compute/UseStandardSecurityType is registered`). `Test-Prerequisites.ps1`,
 the build wrapper's P0 and Deploy check it read-only from the same list and never
-register it. An authorized operator registers it once per subscription: `az feature
+register it. You register it once per subscription: `az feature
 register --subscription <SUB> --namespace Microsoft.Compute --name
 UseStandardSecurityType`, then `az provider register --subscription <SUB> --namespace
 Microsoft.Compute --wait`. In the rebuild that found this the feature read `Registered`
@@ -91,7 +91,7 @@ Preflight always runs.
 
 | Phase | Does | Skips or refuses |
 | --- | --- | --- |
-| Preflight | Read-only: exact context and inventory, VM state, lab Active | A parked lab (run the approved Activate first: it never starts compute without explicit outbound networking) or a VM that is mid-transition |
+| Preflight | Read-only: exact context and inventory, VM state, lab Active | A parked lab (run Activate first: it never starts compute without explicit outbound networking) or a VM that is mid-transition |
 | Size | Deallocate, resize to the declared size, start again | Skips when already that size (Deploy declared it); refuses while a nested guest runs |
 | Disk | Create and attach the declared data disk at LUN 0 | Skips when attached as declared; refuses when LUN 0 or the disk name belongs to something else, and never resizes, converts or moves a disk |
 | Volume | Initialise the blank LUN 0 disk as `D:` (NTFS, `NestedSQL`) with `VMs` and `Media` folders; a size without a temp disk leaves `D:` to the empty virtual DVD-ROM, which moves to `Z:` first | Skips when already so; refuses a `D:` that is another volume, including a DVD-ROM that holds a disc |
@@ -102,9 +102,10 @@ Preflight always runs.
 
 - `-WhatIf` reads Azure only: no guest command, no start, no download.
 - Staging media needs both `-AcceptWindowsEvaluationTerms` and
-  `-AcceptSqlDeveloperTerms`. Acceptance is recorded privately and never assumed;
+  `-AcceptSqlDeveloperTerms`, which accept the licence terms. Acceptance is
+  recorded privately and never assumed;
   both ISOs are pinned in `config\demo-media.json` and checked before use (see
-  [media staging](sql-engine-workload.md#approval-fit-and-media)).
+  [media staging](sql-engine-workload.md#fit-and-media)).
 - It uses classic Run Command, so it does not consume the parent's 25 saved
   managed commands. Do not run it while Activate, Hibernate, Deploy or a nested
   build is using the parent.
@@ -154,7 +155,7 @@ disks.
 ## Build
 
 Run in PowerShell 7.4+ with the exact tenant/subscription already signed in.
-Supply the approved retained/new guest Administrator credential from the secure
+Supply the guest Administrator credential (retained or new) from the secure
 prompt or the DPAPI-protected export described in
 [private-config.md](private-config.md#saving-the-nested-guest-credential), never in
 JSON or command-line text:
@@ -173,7 +174,7 @@ $build.VmName = $guest.GuestVmName
 $build.VmRoot = "D:\NestedSQL\VMs\$($guest.GuestVmName)"
 $saved = '<PRIVATE>\nested-guest-credential.clixml'
 $build.GuestCredential = if (Test-Path -LiteralPath $saved) { Import-Clixml -LiteralPath $saved } else {
-    Get-Credential -UserName Administrator -Message 'Approved guest Administrator credential' }
+    Get-Credential -UserName Administrator -Message 'Guest Administrator credential' }
 $life = @{ SubscriptionId = $build.SubscriptionId; TenantId = $build.TenantId;
     SkinPath = $skinPath; NamePrefix = $prefix }
 .\scripts\New-NestedSqlDemo.ps1 @build -SkinPath $skinPath -WhatIf
@@ -197,8 +198,8 @@ New Arc enrollment applies only the guest's ownership and identity tags:
 `ArcSQLServerExtensionDeployment=Disabled` onboarding tag. These are not parent
 tags or proof of monitoring coverage: do not copy `monitorTier`, `defender`,
 `updateManager` or `machineConfig` intent to this guest. Connecting an
-already-connected guest does not retag it; an explicitly approved existing-guest
-correction must merge tags and preserve unrelated tags, not replace the tag set.
+already-connected guest does not retag it; to correct an existing guest's tags,
+merge them and preserve unrelated tags rather than replacing the tag set.
 
 | One-day-credential scratch-build step | Observed time |
 | --- | ---: |
@@ -228,8 +229,7 @@ guests were not changed.
 
 ## Hibernate and activate
 
-Normal estate operations use the same skin. Preview first, then execute the
-requested operation:
+Normal estate operations use the same skin. Preview each one first, then run it:
 
 ```powershell
 .\scripts\Hibernate-ArcDemo.ps1 @life -WhatIf
@@ -258,14 +258,13 @@ Use normal Activate if whole-estate parking removed NAT. The live pair proof use
 the retained parent; consolidated whole-estate wiring has mocked coverage and
 the dated retained-estate rehearsals below, not a fresh full-estate rebuild proof.
 
-The merged skin/Common **pair-only** path was also exercised live on
+The **pair-only** path was also exercised live on
 31 October 2026: wake, including Arc Connected, took 311.3 seconds; graceful
 guest `Off` followed by parent-only deallocation took 143.5 seconds. The same
 guest GUID, two disk paths and Arc VM ID were verified, SQL queried successfully,
 and all four system databases remained Online with a fresh inventory upload.
 The extension ARM state temporarily returned `Creating` before `Succeeded`;
-bounded read-only observation settled it without reinstall or repair. No
-fleet-wide lifecycle operation was run, and the pair was left parked.
+bounded read-only observation settled it without reinstall or repair.
 
 The 1 November 2026 whole-estate rehearsals started eight managed hosts and the
 configured nested guest while leaving the excluded Jumpstart parent parked.
@@ -283,8 +282,6 @@ Full Active readiness nevertheless remained pending on six Linux AMA/Change
 Tracking extension models reporting `Updating`. Default Activate did not
 complete: Linux Run Command was blocked behind a VM extension update, rather
 than missing Heartbeats. See [the Linux wait symptom](troubleshooting.md#linux-activation-waits-behind-a-vm-extension-update).
-The Linux command was not resubmitted; no sensor repair or further wake was
-attempted.
 
 That rehearsal's final Hibernate passed in 7m42s, with graceful nested guest shutdown;
 independent Hibernated readiness passed in 52 seconds. Direct reads verified all
@@ -292,14 +289,14 @@ nine VMs deallocated, no active Container App revisions and no NAT gateway or
 public IP. This proves wake, SQL, fresh telemetry and parking, not clean
 completion of default Activate or a fully Ready whole-estate demo.
 
-On 2 November 2026 UTC, default Activate from merged main completed with exit 0
+On 2 November 2026 UTC, default Activate completed with exit 0
 at 00:12:20, including all eight guest checks, nested guest Arc connection and
 seven newly waking hosts' patch-assessment submissions. No Linux guest-check
 stall occurred on this attempt. All eight selected VMs were running; the excluded
 Jumpstart parent remained parked. Later read-only Active readiness at 00:25:48
 was pending only on the six Linux AMA/Change Tracking extension models reporting
 `Updating`, with fresh Heartbeats. This is not full Ready or completed patch
-assessment proof. The estate was retained awake for separately approved work.
+assessment proof.
 
 Arc Connected is not SQL readiness. After a wake, in a new shell, reload what the
 Build section created: `$build` and `$result` exist only in the shell that ran the
@@ -353,13 +350,13 @@ $saved = Get-Content '<PRIVATE>\nested-sql-result.json' -Raw | ConvertFrom-Json
     -SqlInstanceId $saved.SqlInstanceId -WhatIf
 ```
 
-After approving the exact deletion, repeat without `-WhatIf`. This removes only
+Check the preview, then repeat without `-WhatIf`. This removes only
 the guest, its private disks/root and matching Arc/SQL registrations; parent,
 shared network, media and other workloads remain. The helper checks ownership
 and refuses shared/reparse paths or unverified shutdown.
 
-For **full demo removal**, use `Remove-ArcDemo.ps1 @life -WhatIf`, then execute
-only when full removal is requested. It gracefully stops a running configured
+For **full demo removal**, preview with `Remove-ArcDemo.ps1 @life -WhatIf`, then run
+it without `-WhatIf`. It gracefully stops a running configured
 guest before deleting the demo groups; it never wakes a parked parent just to
 delete it. Full removal deletes the parent's guest disks with that parent's data
 volume. Defender pricing and shared/tenant resources follow the existing
@@ -380,7 +377,7 @@ use generic `Connect-NestedSqlDemoGuest.ps1` through the step transport with the
 actual image guest/Arc name and retained credential. SQL/extension helpers are
 available, but do not reinstall an image's already-installed SQL merely to match
 the scratch flow. Use the same skin for park/wake. The scratch teardown's private
-disk/root checks intentionally do **not** authorize deleting an arbitrary image.
+disk/root checks intentionally do **not** extend to deleting an arbitrary image.
 
 Observed image inventory included SQL 2019 Developer and AdventureWorksLT2019.
 Migration metadata remained enabled despite a disabled extension request; no

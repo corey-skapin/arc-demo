@@ -19,17 +19,18 @@ The runtime reads `C:\ProgramData\ArcSreLobApp\appsettings.json`:
 | `Degraded` | Writes warning events but keeps running. | Event ID `4200` Warning |
 | `CrashOnProcessing` | Writes an error event and exits with code 42. | Event ID `4100` Error plus stopped scheduled task |
 
-### Approved bounded warning rehearsal
+### Bounded warning rehearsal
 
 The companion helper's `WarnForDuration -WarningSeconds 120 -ApproveWarningWindow`
-requires explicit approval of the host, duration and alert/notification effects.
-It requires a Healthy running worker, temporarily selects Degraded, restores the
+runs one bounded warning window. Pass `-ApproveWarningWindow` to confirm the host,
+duration and alert/notification effects.
+The helper requires a Healthy running worker, temporarily selects Degraded, restores the
 exact original configuration in `finally`, and verifies the original worker/task
-without restarting or killing it. Interruption or a concurrent change requires
-operator inspection, not an automatic fault retry or reset.
+without restarting or killing it. After an interruption or a concurrent change,
+inspect the host yourself: nothing retries the fault or resets it automatically.
 
-On **2 November 2026 UTC**, one approved window ran from 00:27:32 to 00:29:32;
-configuration restoration was verified at 00:29:34 with the same worker PID.
+On **2 November 2026 UTC**, one window ran from 00:27:32 to 00:29:32; the original
+configuration was restored with the same worker PID.
 Eight real `4200` events arrived in Log Analytics. The existing Sev2 alert fired
 at 00:28:39, its Action Group executed that second, and an automatic Review-only
 SRE thread ran from 00:29:41 to a final narrative at 00:31:10. Independent Status
@@ -46,12 +47,11 @@ not an app-to-SQL transaction or automatic remediation.
 
 #### Representative follow-up
 
-A separately approved single repeat on **2 November 2026 UTC** used the existing
+A single repeat on **2 November 2026 UTC** used the existing
 120-second helper, unchanged pinned app and a neutral temporary Sev2 rule.
 Fresh Healthy/original-worker, ingested `4000` and zero-alert gates passed first.
 The helper's start is a pre-write boundary, not a separately measured file-write
-timestamp. Its exact original-config restoration readback followed about
-122 seconds later.
+timestamp; the original configuration was restored about 122 seconds later.
 
 | Evidence | UTC |
 | --- | --- |
@@ -66,20 +66,16 @@ timestamp. Its exact original-config restoration readback followed about
 
 All eight local `4200` events were ingested; the exact deployed alert KQL matched
 eight records. The original process, running task, pinned source and configuration
-were retained without restart, kill, redeployment or repair. The rehearsal made
-no second warning, DCR, workbook, IAM or power change.
+were retained without restart, kill, redeployment or repair.
 
 The companion capture reported an evidence-led result: warnings followed by
 resumed healthy activity, ranked change evidence from actual read-only Run
 Command/Status output, and qualified dependency/customer-impact and sparse-counter
-limits. It did not repeat the stale ongoing-warning or host-pressure-exclusion
-claims. Six KQL result headers were retained, but audit truncation still prevents
-full verification of some returned values. This does not prove a real downstream
-outage, email receipt or automatic repair.
+limits. Audit truncation prevents full verification of some returned values. This
+does not prove a real downstream outage, email receipt or automatic repair.
 
-The temporary alert route was separately approved.
-The companion owns retirement and canonical-route restoration after source-event
-expiry; this is not proof of default repeat-within-cooldown behavior.
+This run used a temporary alert route, so it is not proof of default
+repeat-within-cooldown behavior.
 
 ## Showing healthy activity in Log Analytics
 
@@ -90,10 +86,10 @@ It does not collect all informational Application events. With the default
 about one heartbeat per minute; ingestion charges and propagation delays apply.
 The optional sample is not installed or started by Arc deployment or readiness.
 
-For an existing lab with the older DCR, obtain approval for the single-selector
-collection change; do not redeploy the lab or induce a fault just to show logs.
+An existing lab with the older DCR needs the single-selector collection change;
+do not redeploy the lab or induce a fault just to show logs.
 Source presence or old error events do not prove the worker is running today.
-Verify fresh records after the approved preparation, with the Logs time picker
+Verify fresh records after that change, with the Logs time picker
 covering the query window:
 
 ```kusto
@@ -105,16 +101,15 @@ Event
 | order by TimeGenerated desc
 ```
 
-Filter `Computer` to the confirmed deployment host when more than one sample is
+Filter `Computer` to the host you deployed the sample to when more than one sample is
 present. Missing healthy events can mean collection is not updated, ingestion is
-pending, or the worker is not emitting; inspect approved evidence rather than
-assuming the app stopped. Warning `4200` and error `4100` are separate,
-explicitly approved fault scenarios, not healthy-heartbeat substitutes.
+pending, or the worker is not emitting; inspect the evidence rather than
+assuming the app stopped. Warning `4200` and error `4100` are separate
+fault scenarios, not healthy-heartbeat substitutes.
 
 ## How it is deployed
 
-Do not run this directly from the repo during the demo. After separately
-approving the deployment/guest execution scope, use the companion
+Do not run this directly from the repo during the demo. Use the companion
 `sre-agent` repository's helper to deploy
 it to an Arc-enabled Windows server:
 
@@ -142,7 +137,7 @@ the tracked example with personal or customer-specific context.
 For the LOB-on-Arc demo:
 
 1. Follow the companion repo's current knowledge-base/code-context setup for its parent agent; portal navigation can change.
-2. Register the operator-supplied `<ARC_REPOSITORY_URL>` using that procedure.
+2. Register your `<ARC_REPOSITORY_URL>` using that procedure.
 3. Verify access/indexing and the deployed source pin rather than assuming a URL alone supplies working context.
 4. Confirm the investigation can actually cite `samples/lob-arc-app/LobArcBridgeApp.ps1`. Code context is not proof of an executed repair.
 

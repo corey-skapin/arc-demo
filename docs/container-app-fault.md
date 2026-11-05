@@ -1,9 +1,8 @@
 # Container App fault scenario
 
-**Optional scenario/operator procedure, not the default presenter path.**
+**Optional scenario, not part of the default demo path.**
 Start with [the docs index](README.md) and [runsheet.md](runsheet.md).
-Use the retained private skin and actual names; merely reading this procedure
-does not authorize deployment, break/reset or a notification test.
+Use the retained private skin and actual names.
 
 Optional workload behind `-DeployContainerApps $true`. It creates a lightweight
 Container Apps environment `cae-<prefix>`, a tiny HTTP Container App
@@ -16,9 +15,8 @@ A fresh deployment defaults to `SIMULATE_CRASH=false`; routine reconciliation
 preserves an existing flag. Inspect actual revision/HTTP health rather than
 assuming the app is currently healthy.
 
-Break/reset require separate explicit approval, an agreed observation deadline
-and an independent fallback reset. Let one operator/companion SRE owner control
-the window; do not run competing resets or lifecycle operations.
+Do not run competing resets or lifecycle operations while the scenario is active:
+either you reset the app or the SRE agent does.
 
 ## Deploy
 
@@ -55,7 +53,9 @@ Azure Monitor evaluates `RestartCount` every 5 minutes over a 5-minute window
 and fires when total restarts are greater than 0. The low threshold is intentional:
 Container Apps may restart a failed replica about once per evaluation window, so
 `> 0` improves visibility. It does not guarantee a fixed alert, delivery or
-investigation deadline; retain measured timestamps and bounded fallback recovery.
+investigation deadline: keep the timestamps you measure, and if the wait runs
+longer than you want, reset the app yourself with the command under
+[Repair / reset](#repair--reset).
 
 ## Verify
 
@@ -85,9 +85,9 @@ resource group and app names with the value passed to `-NamePrefix`.
 
 After reset, verify `SIMULATE_CRASH=false`, the actual healthy serving revision,
 latest/latest-ready revision relationship and an HTTP success response. A healthy
-replacement revision can precede stateful alert resolution. Distinguish
-operator fallback from a verified SRE-executed write; do not infer attribution
-from an investigation message.
+replacement revision can precede stateful alert resolution. Tell your own reset
+apart from a verified SRE agent write; do not infer attribution from an
+investigation message.
 
 Hibernation deactivates active revisions without resetting the flag or deleting
 the environment. Activation reactivates the latest revision if none is active.
