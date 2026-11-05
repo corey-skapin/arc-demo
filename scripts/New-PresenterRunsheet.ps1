@@ -64,7 +64,7 @@ if ((Split-Path $directory -Leaf) -ne '.local' -or (Split-Path $contextFile -Lea
     throw 'Use .local/demo-context.json; private identifiers must not be written into tracked docs.'
 }
 if (-not (Test-Path -LiteralPath $contextFile -PathType Leaf)) {
-    throw 'Local context is missing. Ask the preparing operator/agent to save approved deployment inputs and outputs in .local/demo-context.json.'
+    throw 'Local context is missing. Save your nonsecret deployment inputs and outputs in .local/demo-context.json first.'
 }
 $jsonOptions = @{ AsHashtable = $true }
 if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { $jsonOptions.DateKind = 'String' }
@@ -266,7 +266,7 @@ if ($context.Contains('companionSreRunsheetPath')) {
             if ([IO.Path]::IsPathRooted($relative)) { throw 'Companion guide must be on the same drive to create a relative Markdown link.' }
             $link = (($relative -split '[\\/]') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
         }
-        $values.CompanionSection = "Continue with the [SRE presenter guide]($link). Arc identity and monitoring are already covered; the SRE repo owns investigation and human Review approval."
+        $values.CompanionSection = "Continue with the [SRE presenter guide]($link). Arc identity and monitoring are already covered; the SRE repo covers the investigation and the Review approval, which you click in the SRE portal."
     }
 }
 $templateText = Get-Content -LiteralPath (Join-Path $repo 'docs\runsheet.md') -Raw
@@ -301,14 +301,14 @@ if ($SreGuidePath) {
     $closeAnchor = ConvertTo-HeadingAnchor 'The close: the Monday answers (2 minutes)'
     $nightHeading = 'The night shift (SRE half)'
     $combinedValues = $values.Clone()
-    $combinedValues.CompanionSection = "Continue with [$nightHeading]($(ConvertTo-HeadingAnchor $nightHeading)) below. It is part of this same document, so there is no second guide to open. Arc identity and monitoring are already covered; the SRE half owns investigation and human Review approval."
+    $combinedValues.CompanionSection = "Continue with [$nightHeading]($(ConvertTo-HeadingAnchor $nightHeading)) below. It is part of this same document, so there is no second guide to open. Arc identity and monitoring are already covered; the SRE half covers the investigation and the Review approval, which you click in the SRE portal."
     $arcText = Expand-RunsheetToken -Text $templateText -Map $combinedValues
     $arcLines = @(Split-MarkdownLine $arcText)
     $arcHeadings = @(Get-MarkdownHeading $arcLines)
     $closeHeading = @($arcHeadings | Where-Object { $_.Level -eq 2 -and $_.Text -eq 'The close: the Monday answers (2 minutes)' })
-    $handOver = @($arcHeadings | Where-Object { $_.Level -eq 2 -and $_.Text -eq 'Hand over to the SRE half' })
-    if ($closeHeading.Count -ne 1 -or $handOver.Count -ne 1 -or $handOver[0].Index -ge $closeHeading[0].Index) {
-        throw "The runsheet template needs one 'Hand over to the SRE half' heading followed by one 'The close: the Monday answers (2 minutes)' heading to splice the SRE half between them."
+    $sreHalf = @($arcHeadings | Where-Object { $_.Level -eq 2 -and $_.Text -eq 'Continue with the SRE half' })
+    if ($closeHeading.Count -ne 1 -or $sreHalf.Count -ne 1 -or $sreHalf[0].Index -ge $closeHeading[0].Index) {
+        throw "The runsheet template needs one 'Continue with the SRE half' heading followed by one 'The close: the Monday answers (2 minutes)' heading to splice the SRE half between them."
     }
     $timedPattern = '^(?<title>Opening: .+?|Chapter \d+\. .+?) \((?<minutes>\d+) minutes?, clock (?<from>\d+:\d+) to (?<to>\d+:\d+)\)$'
     $timed = @($arcHeadings | Where-Object { $_.Level -eq 2 -and $_.Text -match $timedPattern } | ForEach-Object {
@@ -343,11 +343,11 @@ if ($SreGuidePath) {
     foreach ($row in $timed) {
         $fault = ''
         if ($row.Title -match '^Chapter 7\.') {
-            $fault = '**Say GO** once the alert rules are shown, ideally on the audience question. The SRE assistant then runs **Prepare**: the originals are disabled while the fresh copies exist.'
+            $fault = '**Say GO** once the alert rules are shown, ideally on the audience question. Then run **Prepare**: the originals are disabled while the fresh copies exist.'
         }
         $table.Add("| $($row.From) to $($row.To) | $(& $link $row.Title $row.Heading) | $fault |")
     }
-    $table.Add("| $($timed[-1].To) | $(& $link 'Hand over to the SRE half' 'Hand over to the SRE half') | |")
+    $table.Add("| $($timed[-1].To) | $(& $link 'Continue with the SRE half' 'Continue with the SRE half') | |")
     foreach ($step in $steps[0..5]) {
         $number = [int](($step.Text -split '\.')[0])
         $heading = "SRE step $($step.Text)"
@@ -355,24 +355,24 @@ if ($SreGuidePath) {
         $fault = switch ($number) {
             1 { 'Navigation only until GO.' }
             5 { '**Fire SQL**, wait for its alert and thread. Then **fire LOB**. One at a time, cleanup verified between.' }
-            6 { '**Fire T09.** The user''s **Review** click approves only the new investigation''s reset card.' }
+            6 { '**Fire T09.** Your **Review** click approves only the new investigation''s reset card.' }
             default { '' }
         }
         $table.Add("| $clock | $(& $link $heading $heading) | $fault |")
     }
-    $table.Add("| when the user says **done** | $(& $link 'Live faults' 'Live faults') | **Restore**: the SRE assistant runs `-Action Restore` for all three, after the investigations have finished. Originals enabled, copies absent. |")
+    $table.Add("| when you say **done** | $(& $link 'Live faults' 'Live faults') | **Restore**: run `-Action Restore` for all three, after the investigations have finished. Originals enabled, copies absent. |")
     $table.Add("| last | $(& $link 'The close: the Monday answers' 'The close: the Monday answers (2 minutes)') | SRE step 7 points here: one close for the whole demo. |")
 
     $front = @(
         '# Full demo run-through: from servers to the night shift'
         ''
-        "**Presenter:** this is the one page to run the whole demo from. Follow it from top to bottom: the Arc half, then the night shift (the SRE half), then one close. Links and queries are already filled in. Generation is offline: it did not query Azure or check readiness, and nothing here changes the lab. Combined **$($values.GeneratedAtUtc)** from the Arc guide and ``$sreFile``."
+        "This is the one page to run the whole demo from. Follow it from top to bottom: the Arc half, then the night shift (the SRE half), then one close. Links and queries are already filled in. Generation is offline: it did not query Azure or check readiness, and nothing here changes the lab. Combined **$($values.GeneratedAtUtc)** from the Arc guide and ``$sreFile``."
         ''
         '## Whole demo in order'
         ''
     ) + $table + @(
         ''
-        "Arc clock times come from the chapter headings. The SRE half has no fixed clock because the alerts set the pace: see $(& $link 'Live faults' 'Live faults'). Read **Live faults** before chapter 7, and keep $(& $link 'This afternoon: verified existing investigations' 'This afternoon: verified existing investigations') open for the dated threads. When asked: $(& $link 'Prepared answers' 'Prepared answers'), $(& $link 'Fallback queries' 'Fallback queries'), $(& $link 'Operator notes' 'Operator notes')."
+        "Arc clock times come from the chapter headings. The SRE half has no fixed clock because the alerts set the pace: see $(& $link 'Live faults' 'Live faults'). Read **Live faults** before chapter 7, and keep $(& $link 'This afternoon: verified existing investigations' 'This afternoon: verified existing investigations') open for the dated threads. When asked: $(& $link 'Prepared answers' 'Prepared answers'), $(& $link 'Fallback queries' 'Fallback queries'), $(& $link 'Notes' 'Notes')."
         ''
     )
     $night = @(

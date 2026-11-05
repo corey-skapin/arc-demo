@@ -24,7 +24,7 @@ Read-only verification text. Thread 00000000-aaaa-bbbb-cccc-000000000001 is the 
 
 ## Live faults
 
-Say **GO** only after the alert rules are shown. The assistant runs `Invoke-SreDemoRoute.ps1 -Action Prepare` for `SQL`.
+Say **GO** only after the alert rules are shown. Run `Invoke-SreDemoRoute.ps1 -Action Prepare` for `SQL`.
 
 ## 1. Pick up from Arc
 
@@ -57,9 +57,9 @@ Tenant: 00000000-0000-0000-0000-000000000000
 
 Match alert ID, timestamp and host.
 
-## 6. Live T09: human-reviewed Container App repair
+## 6. Live T09: reviewed Container App repair
 
-The signed-in human approves only the current run's reset card.
+You approve only the current run's reset card.
 
 ## 7. Close
 
@@ -117,17 +117,17 @@ Describe 'Whole-demo run-through: Arc, the SRE half and one close' {
         Should -Invoke Start-Process -Times 0
     }
 
-    It 'shows every Arc chapter heading and every SRE step heading once, in order, with the SRE half between the hand over and the close' {
+    It 'shows every Arc chapter heading and every SRE step heading once, in order, with the SRE half between the Arc chapters and the close' {
         $arcResult = & $generator -ContextPath $path -SreGuidePath $sreGuide
         $arc = @(Get-DocHeading (Get-Content $arcOutput -Raw) 2 | ForEach-Object Text)
         $combined = @(Get-DocHeading (Get-Content $fullOutput -Raw) 2 | ForEach-Object Text) | Where-Object { $_ -ne 'Whole demo in order' }
-        $handOver = [array]::IndexOf($arc, 'Hand over to the SRE half')
-        $handOver | Should -BeGreaterThan 0
+        $sreHalf = [array]::IndexOf($arc, 'Continue with the SRE half')
+        $sreHalf | Should -BeGreaterThan 0
         $sre = @('This afternoon: verified existing investigations', 'Live faults',
             'SRE step 1. Pick up from Arc', 'SRE step 2. Show the healthy Container App', 'SRE step 3. Show the configured response',
             'SRE step 4. Walk through an existing investigation', 'SRE step 5. Live SQL and LOB investigations',
-            'SRE step 6. Live T09: human-reviewed Container App repair', 'SRE step 7. Close')
-        $expected = @($arc[0..$handOver]) + $sre + @($arc[($handOver + 1)..($arc.Count - 1)])
+            'SRE step 6. Live T09: reviewed Container App repair', 'SRE step 7. Close')
+        $expected = @($arc[0..$sreHalf]) + $sre + @($arc[($sreHalf + 1)..($arc.Count - 1)])
         $combined | Should -Be $expected
         @($combined | Group-Object | Where-Object Count -gt 1) | Should -BeNullOrEmpty
         @($combined | Where-Object { $_ -like 'Chapter *' }).Count | Should -Be 7
@@ -152,7 +152,7 @@ Describe 'Whole-demo run-through: Arc, the SRE half and one close' {
         $expected = $script:SreGuide.Substring($start, $end - $start)
         $titles = @{
             1 = 'Pick up from Arc'; 2 = 'Show the healthy Container App'; 3 = 'Show the configured response'
-            4 = 'Walk through an existing investigation'; 5 = 'Live SQL and LOB investigations'; 6 = 'Live T09: human-reviewed Container App repair'
+            4 = 'Walk through an existing investigation'; 5 = 'Live SQL and LOB investigations'; 6 = 'Live T09: reviewed Container App repair'
         }
         foreach ($number in 1..6) { $expected = $expected.Replace("## $number. $($titles[$number])", "## SRE step $number. $($titles[$number])") }
         $text.Contains($expected) | Should -BeTrue
@@ -190,7 +190,7 @@ Describe 'Whole-demo run-through: Arc, the SRE half and one close' {
         $chapterSeven = $table | Where-Object { $_ -like '*Chapter 7.*' }
         $chapterSeven | Should -Match '\*\*Say GO\*\* once the alert rules are shown'
         $chapterSeven | Should -Match '\*\*Prepare\*\*'
-        ($table | Where-Object { $_ -like '*Hand over to the SRE half*' }) | Should -Match '^\| 23:00 \|'
+        ($table | Where-Object { $_ -like '*Continue with the SRE half*' }) | Should -Match '^\| 23:00 \|'
         ($table | Where-Object { $_ -like '*SRE step 5.*' }) | Should -Match '\*\*Fire SQL\*\*.*\*\*fire LOB\*\*'
         ($table | Where-Object { $_ -like '*SRE step 6.*' }) | Should -Match '\*\*Fire T09\.\*\*.*\*\*Review\*\* click'
         ($table | Where-Object { $_ -like '*Live faults*' }) | Should -Match '\*\*Restore\*\*.*-Action Restore'
@@ -198,7 +198,7 @@ Describe 'Whole-demo run-through: Arc, the SRE half and one close' {
         $table.Count | Should -Be 19
     }
 
-    It 'fills every token, keeps the Stage setup lines and sends the hand over to the section below, not a second guide' {
+    It 'fills every token, keeps the Stage setup lines and points to the section below, not a second guide' {
         & $generator -ContextPath $path -SreGuidePath $sreGuide | Out-Null
         $text = Get-Content $fullOutput -Raw
         $text | Should -Not -Match '\{\{|\}\}'
@@ -248,16 +248,16 @@ Describe 'Whole-demo run-through template contract' {
         $template = Get-Content (Join-Path $repo 'docs\runsheet.md') -Raw
     }
 
-    It 'names both generated pages in its Presenter line' {
+    It 'names both generated pages in its opening lines' {
         $template | Should -Match '\.local/presenter-runsheet\.md'
         $template | Should -Match '\.local/full-demo-runsheet\.md'
     }
 
     It 'keeps the headings the combined page is spliced and tabled from' {
         $headings = @(Get-DocHeading $template 2 | ForEach-Object Text)
-        $handOver = $headings.IndexOf('Hand over to the SRE half')
-        $handOver | Should -BeGreaterThan 0
-        $headings[$handOver + 1] | Should -Be 'The close: the Monday answers (2 minutes)'
+        $sreHalf = $headings.IndexOf('Continue with the SRE half')
+        $sreHalf | Should -BeGreaterThan 0
+        $headings[$sreHalf + 1] | Should -Be 'The close: the Monday answers (2 minutes)'
         @($headings | Where-Object { $_ -match '^(Opening: .+|Chapter \d\. .+) \(\d+ minutes?, clock \d+:\d\d to \d+:\d\d\)$' }).Count | Should -Be 8
     }
 }
