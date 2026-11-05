@@ -535,7 +535,9 @@ exceptions or reset a VM password to get around this.
 created: a platform error, a lost connection (`ConnectionResetError`), a missing subscription feature, a
 slow Container Apps environment. The estate is partial.
 
-**Recovery** — a fresh Deploy saves the generated VM admin password before it changes anything,
+**Recovery** — Deploy submits the deployment without blocking and polls it, so a lost client
+connection during the build no longer ends it (a reset while *submitting* is checked against
+Azure before anything is resubmitted). A fresh Deploy saves the generated VM admin password before it changes anything,
 when `-AdminPasswordPath` is given (the build wrapper's P2 always gives it), and a rerun reads it
 back, so the same command resumes. Check what Azure has first:
 

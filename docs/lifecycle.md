@@ -363,7 +363,10 @@ Extension jobs must complete successfully; guest commands need
 an exact completion marker as well as a nonfailed provisioning result. Only the
 activation AMA wait permits the explicit `ARC_DEMO_PENDING` stdout marker;
 other guest operations cannot use it to bypass completion. Temporary
-credential-bearing files and jobs are removed even after failure.
+credential-bearing files and jobs are removed even after failure. Deploy submits the
+Bicep deployment with `--no-wait` and polls it, so the parameters file (which holds the
+admin password in plain text in the user's temp folder) is deleted as soon as Azure accepts
+the request, seconds after it is written, not after the whole build.
 
 Routine deployment preserves an existing Container App's `SIMULATE_CRASH` value
 and does not re-bootstrap the sample workload on an existing AKS cluster.

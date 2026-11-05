@@ -1216,6 +1216,111 @@ function Test-DemoComputeCapacity {
     Write-Warn 'SKU restrictions and vCPU quota passed. This does not prove physical capacity; ARM what-if/validation is not an allocation guarantee.'
 }
 
+function Get-DemoDeploymentState {
+    <#
+    .SYNOPSIS
+        Reads one subscription deployment's provisioning state and error; $null when it does not exist.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    $raw = Invoke-DemoAz -Arguments @('deployment', 'sub', 'show', '--name', $Name, '--query', '{state:properties.provisioningState,error:properties.error}', '-o', 'json') -AllowNotFound
+    $text = (@($raw) -join "`n").Trim()
+    if (-not $text) { return $null }
+    $text | ConvertFrom-Json
+}
+
+function Invoke-DemoSubscriptionDeployment {
+    <#
+    .SYNOPSIS
+        Starts a subscription-scope deployment, then polls it with progress until it finishes.
+    .DESCRIPTION
+        One synchronous az deployment sub create held a single CLI call open for the whole build (17 to 54 minutes
+        in practice): a client-side connection reset ended it with nothing to resume from, and a slow module (a VM
+        waiting behind a vendor extension update, a Container Apps environment) left the console silent for tens
+        of minutes. This submits with --no-wait, which returns as soon as Azure Resource Manager has accepted the
+        request, then polls the deployment's own state. It prints which modules are still running when that
+        changes (and every five minutes), tolerates a few failed reads, and gives up at -TimeoutMinutes without
+        stopping the deployment in Azure. A transient client error while submitting is checked against Azure
+        before anything is submitted again. -RemoveParametersFileWhenAccepted deletes the parameters file as soon
+        as the request is accepted: it holds the VM admin password in plain text. Failed and Canceled throw the
+        deployment's error text, so capacity guidance can still match it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Location,
+        [Parameter(Mandatory)][string]$TemplateFile,
+        [Parameter(Mandatory)][string]$ParametersFile,
+        [switch]$RemoveParametersFileWhenAccepted,
+        [ValidateRange(1, 1440)][int]$TimeoutMinutes = 240,
+        [ValidateRange(1, 300)][int]$PollSeconds = 30
+    )
+    $transient = 'Connection (reset|aborted)|ConnectionReset|timed out|timeout|temporarily unavailable|ServiceUnavailable|TooManyRequests|Too Many Requests|\b50[234]\b|connection was closed|error occurred while sending'
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-DemoAz -Arguments @('deployment', 'sub', 'create', '--name', $Name, '--location', $Location, '--template-file', $TemplateFile,
+                '--parameters', "@$ParametersFile", '--no-wait', '--only-show-errors', '-o', 'none') | Out-Null
+            break
+        } catch {
+            $submitFailure = $_
+            # A reset can arrive after Azure accepted the request: look before submitting a second deployment.
+            $accepted = $false
+            try { $accepted = $null -ne (Get-DemoDeploymentState -Name $Name) } catch { Write-Verbose "Could not check whether $Name was accepted: $($_.Exception.Message)" }
+            if ($accepted) { Write-Warn "Submitting deployment $Name reported an error after Azure had accepted it; following the accepted deployment."; break }
+            if ($submitFailure.Exception.Message -notmatch $transient -or $attempt -ge 3) { throw $submitFailure }
+            Write-Warn "Submitting deployment $Name failed with a transient client error and Azure has no record of it, so nothing was created. Retrying in 15 seconds (attempt $attempt of 3)."
+            Start-Sleep -Seconds 15
+        }
+    }
+    if ($RemoveParametersFileWhenAccepted) { [System.IO.File]::Delete($ParametersFile) }
+    Write-Step "Deployment $Name accepted by Azure; polling every $PollSeconds seconds (a Container Apps environment or a vendor extension update on a VM can take 20 to 40 minutes)."
+    $started = Get-Date
+    $deadline = $started.AddMinutes($TimeoutMinutes)
+    $readFailures = 0
+    $missing = 0
+    $lastActive = $null
+    $lastPrinted = $started
+    while ($true) {
+        $state = $null
+        try {
+            $state = Get-DemoDeploymentState -Name $Name
+            $readFailures = 0
+        } catch {
+            if (++$readFailures -ge 5) {
+                throw "Could not read deployment $Name after $readFailures attempts: $($_.Exception.Message) Azure keeps running it; check it with: az deployment sub show --name $Name --query properties.provisioningState -o tsv"
+            }
+            Write-Warn "Reading deployment $Name failed ($readFailures of 5); retrying: $($_.Exception.Message)"
+            Start-Sleep -Seconds $PollSeconds
+            continue
+        }
+        $minutes = [int]((Get-Date) - $started).TotalMinutes
+        if ($null -eq $state) {
+            if (++$missing -ge 3) { throw "Deployment $Name is not visible in Azure after it was accepted; inspect it with: az deployment sub show --name $Name" }
+        } else {
+            $missing = 0
+            if ($state.state -eq 'Succeeded') { Write-Ok "Deployment $Name succeeded after $minutes min"; return }
+            if ($state.state -in @('Failed', 'Canceled')) {
+                throw "Deployment $Name $($state.state) after $minutes min: $(ConvertTo-Json -InputObject $state.error -Depth 12 -Compress)"
+            }
+            $active = @()
+            try {
+                $active = @(Invoke-DemoAz -Arguments @('deployment', 'operation', 'sub', 'list', '--name', $Name, '--query',
+                    "[?properties.provisioningState=='Running'].properties.targetResource.resourceName", '-o', 'json') | ConvertFrom-Json | Where-Object { $_ } | Sort-Object)
+            } catch { Write-Verbose "Could not list the running modules of ${Name}: $($_.Exception.Message)" }
+            $label = $active -join ', '
+            if ($label -ne $lastActive -or ((Get-Date) - $lastPrinted).TotalMinutes -ge 5) {
+                Write-Step "Deployment $Name is $($state.state) after $minutes min$(if ($label) { "; still running: $label" })"
+                $lastActive = $label
+                $lastPrinted = Get-Date
+            }
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw "Deployment $Name is still $($state.state) after $TimeoutMinutes minutes. Azure keeps running it. Do not start another: wait until 'az deployment sub show --name $Name --query properties.provisioningState -o tsv' reads Succeeded or Failed, then rerun the same command (it resumes; see docs/troubleshooting.md)."
+        }
+        Start-Sleep -Seconds $PollSeconds
+    }
+}
+
 function Get-DemoAllocationGuidance {
     <#
     .SYNOPSIS

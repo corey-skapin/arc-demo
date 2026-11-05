@@ -795,8 +795,7 @@ if (-not $PSCmdlet.ShouldProcess("$SubscriptionId / $NamePrefix", 'Deploy infras
 }
 Write-Step "Deploying main.bicep (deployment: $deploymentName)..."
 try {
-    az deployment sub create --name $deploymentName --location $Location `
-        --template-file $bicepFile --parameters @$paramFile --only-show-errors -o none
+    Invoke-DemoSubscriptionDeployment -Name $deploymentName -Location $Location -TemplateFile $bicepFile -ParametersFile $paramFile -RemoveParametersFileWhenAccepted
 } catch {
     $allocationGuidance = Get-DemoAllocationGuidance -ErrorText $_.Exception.Message -Location $Location -VmSize $VmSize -SubscriptionId $SubscriptionId
     if ($allocationGuidance) { throw $allocationGuidance }

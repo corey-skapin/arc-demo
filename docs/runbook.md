@@ -349,7 +349,13 @@ Real SQL setup is a separate approved operation using
 Deployment has no SQL installation switch; use the separate SQL build/workload helpers.
 
 Bicep provisions static resources in `rg-<prefix>` (Arc/Monitor) and
-`rg-<prefix>-infra` (backing/optional compute). The wrapper handles DCR table
+`rg-<prefix>-infra` (backing/optional compute). Deploy submits the deployment without
+blocking (`--no-wait`) and polls it every 30 seconds, printing which modules are still
+running whenever that changes (a Container Apps environment takes 17 to 23 minutes, a
+VM behind a vendor extension update can take much longer), so a lost client connection no
+longer ends the build and the console is never silent for tens of minutes. Polling gives up
+after 4 hours without stopping the deployment, and a rerun refuses to start while one is still
+Running. The wrapper handles DCR table
 readiness/retries, NAT, Arc onboarding, supported extensions/DCRAs and workbooks.
 Linux AMA and CT use VM extensions but Arc DCRAs. Windows VM Insights map is
 supported by the lab; Linux map remains disabled. Runtime errors stop deployment

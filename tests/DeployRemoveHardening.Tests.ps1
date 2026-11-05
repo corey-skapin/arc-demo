@@ -392,6 +392,120 @@ Describe 'Saved secret files' {
     }
 }
 
+Describe 'Subscription deployment is submitted without blocking and polled with progress' {
+    InModuleScope Common {
+        BeforeEach {
+            $script:states = [System.Collections.Generic.Queue[string]]::new()
+            $script:lastState = $null
+            $script:submitFailures = [System.Collections.Generic.Queue[string]]::new()
+            $script:operations = [System.Collections.Generic.Queue[string]]::new()
+            $script:created = [System.Collections.Generic.List[object]]::new()
+            $script:paramFile = Join-Path $TestDrive "params-$([guid]::NewGuid().ToString('N')).json"
+            Set-Content -LiteralPath $script:paramFile -Value '{}'
+            $script:fakeNow = [datetime]'2026-11-05T00:00:00Z'
+            Mock Write-Step {}
+            Mock Write-Ok {}
+            Mock Write-Warn {}
+            Mock Start-Sleep { $script:fakeNow = $script:fakeNow.AddSeconds($Seconds) }
+            Mock Get-Date { $script:fakeNow }
+            Mock Invoke-DemoAz {
+                param($Arguments)
+                if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'create') {
+                    $script:created.Add($Arguments)
+                    if ($script:submitFailures.Count) { throw $script:submitFailures.Dequeue() }
+                    return
+                }
+                if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'show') {
+                    if ($script:states.Count) { $script:lastState = $script:states.Dequeue() }
+                    if ($script:lastState -eq 'missing') { return $null }
+                    if ($script:lastState -like 'throw:*') { throw $script:lastState.Substring(6) }
+                    return $script:lastState
+                }
+                if ($Arguments[0] -eq 'deployment' -and $Arguments[1] -eq 'operation') {
+                    return $(if ($script:operations.Count) { $script:operations.Dequeue() } else { '[]' })
+                }
+                throw "Unexpected operation: $($Arguments -join ' ')"
+            }
+        }
+        BeforeAll {
+            function script:Invoke-Fixture {
+                param([switch]$RemoveFile, [int]$TimeoutMinutes = 240)
+                Invoke-DemoSubscriptionDeployment -Name arc-demo-20261105-100000 -Location australiaeast -TemplateFile 'main.bicep' -ParametersFile $script:paramFile `
+                    -RemoveParametersFileWhenAccepted:$RemoveFile -TimeoutMinutes $TimeoutMinutes -PollSeconds 30
+            }
+        }
+
+        It 'submits with --no-wait, deletes the plain-text parameters file once accepted and returns on Succeeded' {
+            foreach ($s in '{"state":"Accepted"}', '{"state":"Running"}', '{"state":"Running"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            Invoke-Fixture -RemoveFile
+            $script:created.Count | Should -Be 1
+            $script:created[0] | Should -Contain '--no-wait'
+            $script:created[0] | Should -Contain "@$script:paramFile"
+            Test-Path -LiteralPath $script:paramFile | Should -BeFalse
+            Should -Invoke Write-Ok -Times 1 -Exactly -ParameterFilter { $Message -like '*arc-demo-20261105-100000 succeeded after*' }
+        }
+        It 'keeps the parameters file unless asked to remove it' {
+            $script:states.Enqueue('{"state":"Accepted"}'); $script:states.Enqueue('{"state":"Succeeded"}')
+            Invoke-Fixture
+            Test-Path -LiteralPath $script:paramFile | Should -BeTrue
+        }
+        It 'throws the deployment error text on Failed so capacity guidance can still match it' {
+            $script:states.Enqueue('{"state":"Accepted"}')
+            $script:states.Enqueue('{"state":"Failed","error":{"code":"DeploymentFailed","details":[{"code":"SkuNotAvailable","message":"Standard_B2as_v2 is not available"}]}}')
+            $thrown = $null
+            try { Invoke-Fixture } catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*arc-demo-20261105-100000 Failed after*SkuNotAvailable*'
+            (Get-DemoAllocationGuidance -ErrorText $thrown -Location australiaeast -VmSize Standard_B2as_v2) | Should -BeLike '*(SkuNotAvailable; size Standard_B2as_v2*'
+        }
+        It 'names the modules still running when they change' {
+            foreach ($s in '{"state":"Running"}', '{"state":"Running"}', '{"state":"Running"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            foreach ($o in '["vm-win-sql-01","vm-lnx-app-01"]', '["vm-win-sql-01","vm-lnx-app-01"]', '["vm-lnx-app-01"]') { $script:operations.Enqueue($o) }
+            Invoke-Fixture
+            Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -like '*still running: vm-lnx-app-01, vm-win-sql-01*' }
+            Should -Invoke Write-Step -Times 1 -Exactly -ParameterFilter { $Message -like '*still running: vm-lnx-app-01' -and $Message -notlike '*vm-win-sql-01*' }
+        }
+        It 'follows the accepted deployment after a client error during the submit, without submitting twice' {
+            $script:submitFailures.Enqueue('Azure CLI deployment sub failed (exit 1): ERROR: (ConnectionResetError(10054, An existing connection was forcibly closed))')
+            foreach ($s in '{"state":"Running"}', '{"state":"Running"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            Invoke-Fixture
+            $script:created.Count | Should -Be 1
+            Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*after Azure had accepted it*' }
+        }
+        It 'resubmits a transient submit failure only while Azure has no record, at most three attempts' {
+            $script:submitFailures.Enqueue('ERROR: Connection reset by peer'); $script:submitFailures.Enqueue('ERROR: Connection aborted')
+            foreach ($s in 'missing', 'missing', '{"state":"Accepted"}', '{"state":"Succeeded"}') { $script:states.Enqueue($s) }
+            Invoke-Fixture
+            $script:created.Count | Should -Be 3
+            Should -Invoke Write-Warn -Times 2 -Exactly -ParameterFilter { $Message -like '*Azure has no record of it, so nothing was created*' }
+        }
+        It 'does not retry a submit error that will not clear, and gives up after three transient ones' {
+            $script:submitFailures.Enqueue('ERROR: {"code":"InvalidTemplateDeployment","message":"fixture"}'); $script:states.Enqueue('missing')
+            { Invoke-Fixture } | Should -Throw '*InvalidTemplateDeployment*'
+            $script:created.Count | Should -Be 1
+            $script:created.Clear()
+            1..3 | ForEach-Object { $script:submitFailures.Enqueue('ERROR: timed out'); $script:states.Enqueue('missing') }
+            { Invoke-Fixture } | Should -Throw '*timed out*'
+            $script:created.Count | Should -Be 3
+        }
+        It 'tolerates a few failed reads while polling but not five in a row' {
+            $script:states.Enqueue('{"state":"Accepted"}')
+            1..4 | ForEach-Object { $script:states.Enqueue('throw:ERROR: Connection reset') }
+            $script:states.Enqueue('{"state":"Succeeded"}')
+            { Invoke-Fixture } | Should -Not -Throw
+            $script:states.Enqueue('{"state":"Accepted"}')
+            1..5 | ForEach-Object { $script:states.Enqueue('throw:ERROR: Connection reset') }
+            { Invoke-Fixture } | Should -Throw '*Could not read deployment arc-demo-20261105-100000 after 5 attempts*Azure keeps running it*'
+        }
+        It 'stops waiting at the timeout and leaves the deployment running in Azure' {
+            $script:lastState = '{"state":"Running"}'
+            $thrown = $null
+            try { Invoke-Fixture -TimeoutMinutes 2 } catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*still Running after 2 minutes*Azure keeps running it*Do not start another*'
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'cancel' -in $Arguments -or 'delete' -in $Arguments }
+        }
+    }
+}
+
 Describe 'Allocation failure guidance' {
     It 'explains a <Code> failure without switching size or region' -ForEach @(
         @{ Code = 'SkuNotAvailable'; Text = "Azure CLI deployment sub failed (exit 1): ERROR: {""code"": ""SkuNotAvailable"", ""message"": ""The requested VM size for resource 'Following SKUs have failed for Capacity Restrictions: Standard_B2as_v2' is currently not available in location 'australiaeast'.""}" }
@@ -517,6 +631,11 @@ Describe 'Deploy hardening wiring' {
         Mock Set-DemoKeyVaultSecret { throw 'fixture: stop after the secret write' }
         Mock Invoke-AzRest { throw 'fixture: no ARM REST call expected' }
         $state = @{ createCalls = 0; createError = $null }
+        # The deployment helper has its own tests; here only its call and failure text matter.
+        Mock Invoke-DemoSubscriptionDeployment {
+            $state.createCalls++
+            if ($state.createError) { throw $state.createError }
+        }
         Mock Invoke-DemoAz {
             param($Arguments)
             # On a clean subscription the infra group does not exist: every -AllowNotFound read returns $null.
@@ -525,11 +644,6 @@ Describe 'Deploy hardening wiring' {
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'list') { return '[]' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return }
-            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'create') {
-                $state.createCalls++
-                if ($state.createError) { throw $state.createError }
-                return
-            }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'show') { return '{"workspaceId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.OperationalInsights/workspaces/law-fixture"}}' }
             throw "Unexpected operation: $($Arguments -join ' ')"
         }
@@ -601,6 +715,11 @@ Describe 'Deploy admin password, saved copy and resume of an unfinished build' {
         # Mock bodies run outside the test file's script scope, so they share the state through globals (as FleetVmShape.Tests does).
         $global:ArcPw = $script:s
         $global:ArcPwFile = $script:pwFile
+        Mock Invoke-DemoSubscriptionDeployment {
+            $global:ArcPw.createCalls++
+            $global:ArcPw.bicepPassword = (Get-Content -LiteralPath $ParametersFile -Raw | ConvertFrom-Json).parameters.adminPassword.value
+            $global:ArcPw.fileAtCreate = Test-Path -LiteralPath $global:ArcPwFile
+        }
         Mock Invoke-DemoAz {
             param($Arguments)
             if ($Arguments[0] -eq 'keyvault' -and $Arguments[1] -eq 'list') { return $global:ArcPw.vaults }
@@ -612,13 +731,6 @@ Describe 'Deploy admin password, saved copy and resume of an unfinished build' {
             if ($Arguments[0] -in @('network', 'consumption', 'aks', 'containerapp')) { return $null }
             if ($Arguments[0] -eq 'security' -and $Arguments[2] -eq 'show') { return '{"name":"VirtualMachines","pricingTier":"Free","subPlan":null,"extensions":null}' }
             if ($Arguments[0] -eq 'bicep') { return '{"parameters":{"onPremFleet":{"defaultValue":[]}}}' }
-            if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'create') {
-                $global:ArcPw.createCalls++
-                $path = $Arguments[[Array]::IndexOf($Arguments, '--parameters') + 1].TrimStart('@')
-                $global:ArcPw.bicepPassword = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).parameters.adminPassword.value
-                $global:ArcPw.fileAtCreate = Test-Path -LiteralPath $global:ArcPwFile
-                return
-            }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'what-if') { return }
             if ($Arguments[0] -eq 'deployment' -and $Arguments[2] -eq 'show') { return '{"workspaceId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.OperationalInsights/workspaces/law-fixture"},"dcrCoreId":{"value":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.Insights/dataCollectionRules/dcr-fixture"},"dcrVmiId":{"value":"/x/dcr-vminsights"},"dcrCtId":{"value":"/x/dcr-changetracking"}}' }
             throw "Unexpected operation: $($Arguments -join ' ')"
