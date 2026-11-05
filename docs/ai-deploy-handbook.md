@@ -24,7 +24,9 @@ optional Container App/AKS/SQL scenarios a prerequisite for the Arc story.
    prerequisites/preview and obtain approval before any deployment, activation,
    repair, provider registration, assessment, fault, email test or other write.
 2. Follow the runbook/lifecycle path for the approved operation; to build the whole
-   estate from zero, use the plan-first ordered build wrapper in the runbook. Preserve
+   estate from zero, use the plan-first ordered build wrapper in the runbook. Ask for
+   every approval the build will need once, up front: cost start, licence terms and
+   the SQL host's one graceful restart for a routine pending file rename (P5). Preserve
    VM/SP credentials, retained identities/data and workload fault flags. Never run a
    destructive lifecycle rehearsal against this in-use lab.
 3. Verify Active readiness independently, preserving dated JSON evidence outside

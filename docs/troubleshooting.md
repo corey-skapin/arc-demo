@@ -39,13 +39,31 @@ do not induce a fault just to make this query nonempty.
 
 ## SQL preparation reports a pending file rename
 
-A nonempty `PendingFileRenameOperations` value was observed during an approved
-SQL preflight even though the other checked reboot flags were clear.
-That observation does not identify the owning package, prove an active installer
-or authorize a reboot. The [real SQL helper](sql-engine-workload.md) fails closed
-before installation; it never deletes the flag or skips setup checks.
-Keep the running lab unchanged. Obtain separate scope for any deeper diagnosis
-and approval for an appropriate reboot/repair before retrying installation.
+**Symptom** — wrapper step P5.3 (or `Invoke-SqlEngineOnArc.ps1 -Action Install`) stops after about a
+minute with `A reboot/pending rename is recorded (PendingFileRenameOperations: ...)`. The wrapper words
+it as "A reboot/pending rename is recorded".
+
+**Cause** — a nonempty `PendingFileRenameOperations` value on a fresh Windows host is usually routine
+installer leftovers (in the build that found this: an Edge updater folder, `Amcache.hve.tmp` and an NSIS
+temp folder, with the Component Based Servicing and Windows Update flags clear, no installer running and
+the last boot at VM creation). The error now lists the first eight pending sources so you can judge that.
+It does not identify the owning package or prove an active installer, and SQL Server setup itself refuses
+a host with a pending restart, so the [real SQL helper](sql-engine-workload.md) fails closed before
+installation and never deletes the value or skips setup checks.
+
+**Fix** — keep the running lab otherwise unchanged and ask the owner for **one graceful restart** of that
+VM; request it together with the other approvals for the build, not when the step fails. Then:
+
+1. Read-only first: confirm in the error (or the guest) that only routine entries are listed and no
+   installer is running.
+2. With approval, restart once from Azure: `az vm restart --subscription <SUB> -g rg-<prefix>-infra -n <vm>`
+   (about 45 seconds). Never restart from inside the guest or repeatedly.
+3. Rerun the step (`-Only P5`, or `Invoke-SqlEngineOnArc.ps1 -Action Install`). It waits up to six minutes
+   for `himds`, `ExtensionService` and `GCArcService` (running about 3.5 minutes after the restart) and
+   `MonAgentCore` (about 4.5 minutes) before its Arc SQL block check, which requires all four.
+
+If the value is still set after a restart, or the list names something other than routine leftovers,
+stop and obtain separate scope for deeper diagnosis.
 
 ## Media staging stops on a size or hash mismatch
 

@@ -14,7 +14,9 @@ or redeploy the estate just to prepare SQL.
 The helper requires Windows Server 2016+, .NET Framework 4.7.2+, a member or
 standalone server, 4 GiB RAM, 2 GiB available RAM and 10 GiB free system disk.
 Existing MSSQL services, an active installer, pending reboot or file rename
-stop installation. A host name alone does not establish available capacity.
+stop installation (the error lists what is pending; a routine leftover is cleared by one approved
+graceful restart, see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename)).
+A host name alone does not establish available capacity.
 
 Obtain approved **SQL Server 2022 Developer ISO** media and accept its actual
 licence terms before installation. Developer is for development/test/demo, not
