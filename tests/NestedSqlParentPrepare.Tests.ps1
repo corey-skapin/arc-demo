@@ -334,7 +334,7 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
                 'vm start' { $w.Calls.Add('vm start'); $w.Power = 'VM running'; return }
                 'vm restart' { $w.Calls.Add('vm restart'); $w.Restarted = $true; if ($w.HyperVInstalled -and -not $w.RestartKeepsHypervisorOff) { $w.HypervisorRunning = $true }; return }
                 'disk show' {
-                    $name = $Arguments[[Array]::IndexOf($Arguments, '-n') + 1]
+                    $name = if ('--ids' -in $Arguments) { ($Arguments[[Array]::IndexOf($Arguments, '--ids') + 1] -split '/')[-1] } else { $Arguments[[Array]::IndexOf($Arguments, '-n') + 1] }
                     if (-not $w.Disks.ContainsKey($name)) { return $null }
                     return ($w.Disks[$name] | ConvertTo-Json -Compress)
                 }
@@ -519,6 +519,18 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         $global:PrepWorld.Attached = @(@{ name = 'win-sql-02-nested-data'; lun = 0; caching = 'None'; diskSizeGb = 256; managedDisk = @{ storageAccountType = 'StandardSSD_LRS' } })
         { & $script:prepare @script:common -Phase Disk -Confirm:$false } | Should -Throw '*never resizes, converts or moves*'
         @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' }) | Should -BeNullOrEmpty
+    }
+    It 'judges a deallocated parent''s data disk by the disk resource, because its VM model reports no size or tier' {
+        $global:PrepWorld = New-FakeWorld -Declared $true
+        $global:PrepWorld.Power = 'VM deallocated'
+        $global:PrepWorld.Attached = @(@{ name = 'win-sql-02-nested-data'; lun = 0; caching = 'None'; managedDisk = @{ id = '/fixture/disks/win-sql-02-nested-data' } })
+        $global:PrepWorld.Disks['win-sql-02-nested-data'] = @{ name = 'win-sql-02-nested-data'; diskSizeGb = 128; sku = @{ name = 'StandardSSD_LRS' }; managedBy = '/fixture/win-sql-02' }
+        $result = & $script:prepare @script:common -Phase Disk -Confirm:$false
+        ($result.phases | Where-Object phase -eq 'Disk').status | Should -Be 'satisfied'
+        @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' -or $_ -like 'vm *' }) | Should -BeNullOrEmpty
+        $global:PrepWorld.Disks['win-sql-02-nested-data'].sku.name = 'Standard_LRS'
+        { & $script:prepare @script:common -Phase Disk -Confirm:$false } | Should -Throw '*never resizes, converts or moves*'
+        @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' -or $_ -like 'vm *' }) | Should -BeNullOrEmpty
     }
     It 'Verify never starts a parked parent and reports a failing check instead of a build input' {
         $global:PrepWorld = New-FakeWorld -Prepared $true

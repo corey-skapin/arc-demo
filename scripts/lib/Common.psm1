@@ -1010,7 +1010,11 @@ function Assert-DemoOsDiskStorageAccountType {
         $observed = Invoke-DemoAz -Arguments @('disk', 'show', '--ids', $diskId, '--query', 'sku.name', '-o', 'tsv')
         if ([string]::IsNullOrWhiteSpace($observed)) { throw "OS disk tier unreadable for $($machine.name); inspect the retained disk before deployment." }
         if ($observed.Trim() -ne $StorageAccountType) {
-            throw "OS disk tier mismatch on $($machine.name): existing $($observed.Trim()), requested $StorageAccountType. Preserve the existing tier with -OsDiskStorageAccountType or compute.osDiskStorageAccountType. Disk conversion requires a separately approved stop/deallocate/restart window; deployment will not perform it."
+            $tier = $observed.Trim()
+            $declare = if ($tier -in @('Standard_LRS', 'StandardSSD_LRS')) {
+                "To keep the disk as it is, declare what exists: set compute.osDiskStorageAccountType to $tier in the private skin (or pass -OsDiskStorageAccountType $tier) and, when a nested SQL parent is configured, nestedSqlGuest.parentDataDiskStorageAccountType to the tier of its data disk."
+            } else { "Deploy can only declare Standard_LRS or StandardSSD_LRS, so a $tier disk needs a separate decision." }
+            throw "OS disk tier mismatch on $($machine.name): the disk is $tier and this run requests $StorageAccountType. Deploy never converts a disk. $declare A tenant governance automation can convert a parked estate's disks to Standard HDD on its own (docs/troubleshooting.md, 'The OS disk tier changed by itself'). Converting a disk back is a separately approved stop/deallocate/restart window."
         }
     }
 }
@@ -1376,8 +1380,17 @@ function Assert-DemoRetainedVmShape {
             }
             $wantedType = if ($match.storageAccountType) { [string]$match.storageAccountType } else { 'StandardSSD_LRS' }
             $actualType = [string]$disk.managedDisk.storageAccountType
-            if ([int]$disk.lun -ne [int]$match.lun -or ($disk.diskSizeGb -and [int64]$disk.diskSizeGb -ne [int64]$match.sizeGb) -or ($actualType -and $actualType -ne $wantedType)) {
-                throw "Data disk $($disk.name) on $($machine.name) differs from its declaration (existing lun $($disk.lun), $($disk.diskSizeGb) GiB, $actualType). Deployment never resizes, converts or moves a retained data disk; declare the existing values."
+            $actualSize = $disk.diskSizeGb
+            $diskId = [string]$disk.managedDisk.id
+            if ((-not $actualType -or -not $actualSize) -and $diskId) {
+                # A deallocated VM's model reports neither the size nor the tier of its disks; the disk resource always does.
+                $resource = Invoke-DemoAz -Arguments @('disk', 'show', '--ids', $diskId, '-o', 'json') | ConvertFrom-Json
+                if (-not $actualType) { $actualType = [string]$resource.sku.name }
+                if (-not $actualSize) { $actualSize = $resource.diskSizeGb }
+            }
+            if ([int]$disk.lun -ne [int]$match.lun -or ($actualSize -and [int64]$actualSize -ne [int64]$match.sizeGb) -or ($actualType -and $actualType -ne $wantedType)) {
+                $governance = if ($actualType -and $actualType -ne $wantedType) { " A tenant governance automation can convert a parked estate's disks to Standard HDD on its own (docs/troubleshooting.md, 'The OS disk tier changed by itself')." } else { '' }
+                throw "Data disk $($disk.name) on $($machine.name) differs from its declaration (existing lun $($disk.lun), $actualSize GiB, $actualType). Deployment never resizes, converts or moves a retained data disk; declare the existing values: nestedSqlGuest.parentDataDiskGb and parentDataDiskStorageAccountType for the nested SQL parent, or the fleet entry's dataDisks lun, sizeGb and storageAccountType for another VM.$governance"
             }
         }
     }

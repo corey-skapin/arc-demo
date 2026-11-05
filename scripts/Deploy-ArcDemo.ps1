@@ -62,6 +62,10 @@
     StandardSSD_LRS for new OS disks; Standard_LRS is an explicit retained-lab
     choice. Existing disk tiers must already match; deployment never performs
     an incidental conversion. HDD OS disks retire on 8 September 2028.
+    A tenant governance automation can convert a parked estate's disks to
+    Standard HDD on its own; the next Deploy then refuses until the private skin
+    declares what exists: compute.osDiskStorageAccountType (or this switch) and,
+    for a nested SQL parent, nestedSqlGuest.parentDataDiskStorageAccountType.
 
 .PARAMETER OnboardingSecret
     Optional existing onboarding SP secret as a SecureString. Normally omit it:

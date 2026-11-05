@@ -410,6 +410,11 @@ existing HDD lab requires `-OsDiskStorageAccountType Standard_LRS` or that value
 in its private skin. The wrapper refuses mismatches even during preview; it
 does not convert disks. Preserve the operator-chosen HDD tier and plan any
 migration separately before HDD OS support retirement. See [cost.md](cost.md).
+A governance automation can also convert a parked estate's disks to HDD on its
+own, so a Deploy that refuses the tier after a Hibernate is not a script fault:
+declare the tier the disks have now (and
+`nestedSqlGuest.parentDataDiskStorageAccountType` for the nested parent), see
+[the OS disk tier changed by itself](troubleshooting.md#the-os-disk-tier-changed-by-itself).
 
 ## 4. Validate, then rehearse
 

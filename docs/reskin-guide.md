@@ -13,7 +13,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 | `workloads.*` | Act-1 and optional workload toggles. | Arc on-prem simulation on; optional Azure VM/Container App/AKS/SQL off |
 | `nestedSqlGuest.*` | One optional nested Windows/SQL guest: enabled, parent VM name, Hyper-V guest name and Arc name; used by Activate/Hibernate/Remove. Deploy also declares the parent from it: optional `parentVmSize`, `parentDataDiskGb`, `parentDataDiskStorageAccountType` override the defaults below. | Disabled; use the [nested SQL runbook](nested-sql-demo.md) to configure a private skin. Parent defaults: `Standard_D4s_v5`, 128 GiB `StandardSSD_LRS` data disk |
 | `compute.vmSize` | VM SKU for Arc-simulated and optional native VMs. | `Standard_B2as_v2` |
-| `compute.osDiskStorageAccountType` | OS disk tier for simulated/native VMs; wrapper rejects existing-tier mismatches rather than converting disks. | `StandardSSD_LRS` for new OS disks; explicit `Standard_LRS` for retained HDD labs only |
+| `compute.osDiskStorageAccountType` | OS disk tier for simulated/native VMs; wrapper rejects existing-tier mismatches rather than converting disks. | `StandardSSD_LRS` for new OS disks; explicit `Standard_LRS` for a lab whose disks are HDD (retained, or converted by a tenant automation while parked) |
 | `operations.*` | Auto-shutdown schedule (`autoShutdownTime` as `HHmm`, `autoShutdownTimezone`). Deploy owns it and sets it again on every run, so set the time you want here before the Deploy; a hand-changed time is reverted, and Deploy says so before it submits. | 19:00 Cen. Australia Standard Time |
 | `cost.monthlyBudgetAmount` | Subscription budget threshold. | `200` |
 | `labels.*` | Demo title, workbook display name, opening/closing talk-track labels. | Arc Demo labels |
@@ -27,8 +27,11 @@ Change per customer:
 - `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. [Real SQL preparation](sql-engine-workload.md) is a separate operation, not a deployment flag.
 - `workloads.onPremFleetPath` for a custom OS mix.
 - Match `compute.osDiskStorageAccountType` to the existing OS disks for a
-  retained lab. New labs should keep SSD: HDD OS disks retire on 8 September
-  2028. Tier changes are separately approved maintenance, not reskinning.
+  retained lab, and `nestedSqlGuest.parentDataDiskStorageAccountType` to the
+  nested parent's data disk. New labs should keep SSD: HDD OS disks retire on
+  8 September 2028. Tier changes are separately approved maintenance, not
+  reskinning; a tier that changed by itself is declared as it is
+  ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
 
 Keep constant unless the lab requirement changes:
 

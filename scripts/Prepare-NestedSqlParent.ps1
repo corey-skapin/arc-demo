@@ -203,8 +203,15 @@ function Invoke-SizePhase {
 
 function Test-DiskMatchesDeclaration {
     param($Disk)
-    [int]$Disk.lun -eq 0 -and [string]$Disk.caching -eq 'None' -and [int64]$Disk.diskSizeGb -eq $nested.ParentDataDiskGb -and
-        [string]$Disk.managedDisk.storageAccountType -eq $nested.ParentDataDiskStorageAccountType
+    $size = $Disk.diskSizeGb
+    $tier = [string]$Disk.managedDisk.storageAccountType
+    # A deallocated parent's VM model reports neither the size nor the tier of its disks; the disk resource always does.
+    if ((-not $size -or -not $tier) -and $Disk.managedDisk.id) {
+        $resource = Invoke-DemoAz -Arguments @('disk', 'show', '--ids', [string]$Disk.managedDisk.id, '-o', 'json') | ConvertFrom-Json
+        if (-not $size) { $size = $resource.diskSizeGb }
+        if (-not $tier) { $tier = [string]$resource.sku.name }
+    }
+    [int]$Disk.lun -eq 0 -and [string]$Disk.caching -eq 'None' -and [int64]$size -eq $nested.ParentDataDiskGb -and $tier -eq $nested.ParentDataDiskStorageAccountType
 }
 
 function Invoke-DiskPhase {

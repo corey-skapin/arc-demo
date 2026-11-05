@@ -99,6 +99,24 @@ Describe 'Explicit retained OS disk tiers' {
             Mock Invoke-DemoAz { 'StandardSSD_LRS' }
             { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType Standard_LRS } | Should -Throw '*tier mismatch*'
         }
+        It 'tells a stranger exactly what to declare when a governance automation has converted the disks to HDD' {
+            Mock Invoke-DemoAz { 'Standard_LRS' }
+            $message = try { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } catch { $_.Exception.Message }
+            $message | Should -Match 'the disk is Standard_LRS and this run requests StandardSSD_LRS'
+            $message | Should -Match 'Deploy never converts a disk'
+            $message | Should -Match 'compute\.osDiskStorageAccountType to Standard_LRS in the private skin \(or pass -OsDiskStorageAccountType Standard_LRS\)'
+            $message | Should -Match 'nestedSqlGuest\.parentDataDiskStorageAccountType'
+            $message | Should -Match 'governance automation can convert a parked estate''s disks to Standard HDD on its own'
+            $message | Should -Match 'The OS disk tier changed by itself'
+            $message | Should -Match 'separately approved stop/deallocate/restart window'
+        }
+        It 'does not advise declaring a tier that Deploy cannot declare' {
+            Mock Invoke-DemoAz { 'Premium_LRS' }
+            $message = try { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } catch { $_.Exception.Message }
+            $message | Should -Match 'the disk is Premium_LRS'
+            $message | Should -Match 'Deploy can only declare Standard_LRS or StandardSSD_LRS'
+            $message | Should -Not -Match 'osDiskStorageAccountType to Premium_LRS'
+        }
         It 'does not inspect a disk when no existing VM is targeted' {
             Mock Invoke-DemoAz { throw 'unexpected disk read' }
             Assert-DemoOsDiskStorageAccountType -Machines @() -StorageAccountType StandardSSD_LRS

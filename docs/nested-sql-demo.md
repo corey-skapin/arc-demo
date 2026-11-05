@@ -64,7 +64,9 @@ Use actual names privately; the scratch guest and Arc names must match. The same
 block drives Deploy, normal Activate, Hibernate and Remove and the optional
 pair-only state helper. Both bundled skins leave it disabled. Optional
 `parentVmSize`, `parentDataDiskGb` and `parentDataDiskStorageAccountType` replace
-the defaults, for example to match an existing parent exactly.
+the defaults, for example to match an existing parent exactly. If its data disk
+was converted to Standard HDD while the lab was parked, declare `Standard_LRS`
+there ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
 
 If an unused alternative parent remains in the same infra group, explicitly list
 its name under `operations.keepParkedVmNames` in the private skin, for example

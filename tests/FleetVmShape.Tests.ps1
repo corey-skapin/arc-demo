@@ -198,6 +198,40 @@ Describe 'Redeploy never silently resizes a VM or detaches a data disk' {
         $broken = [pscustomobject]@{ name = 'win-sql-02'; hardwareProfile = $null }
         { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @($broken) -DefaultVmSize 'Standard_B2as_v2' } | Should -Throw '*Cannot read the size*'
     }
+    Context 'while the VM is deallocated and its model reports no disk size or tier' {
+        BeforeAll {
+            function New-ModelessDisk { [pscustomobject]@{ name = 'win-sql-02-nested-data'; lun = 0; caching = 'None'; managedDisk = [pscustomobject]@{ id = '/fixture/disks/win-sql-02-nested-data' } } }
+        }
+        It 'asks the disk resource and passes when it matches the declaration' {
+            Mock Invoke-DemoAz -ModuleName Common { '{"name":"win-sql-02-nested-data","diskSizeGb":128,"sku":{"name":"StandardSSD_LRS"}}' }
+            { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } | Should -Not -Throw
+            Should -Invoke Invoke-DemoAz -ModuleName Common -Times 1 -Exactly -ParameterFilter { $Arguments[0] -eq 'disk' -and $Arguments[1] -eq 'show' -and '/fixture/disks/win-sql-02-nested-data' -in $Arguments }
+        }
+        It 'refuses a disk that a governance automation converted, and says what to declare' {
+            Mock Invoke-DemoAz -ModuleName Common { '{"name":"win-sql-02-nested-data","diskSizeGb":128,"sku":{"name":"Standard_LRS"}}' }
+            $message = try { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } catch { $_.Exception.Message }
+            $message | Should -Match 'differs from its declaration \(existing lun 0, 128 GiB, Standard_LRS\)'
+            $message | Should -Match 'nestedSqlGuest\.parentDataDiskGb and parentDataDiskStorageAccountType'
+            $message | Should -Match 'The OS disk tier changed by itself'
+        }
+        It 'refuses a disk whose resource shows another size' {
+            Mock Invoke-DemoAz -ModuleName Common { '{"name":"win-sql-02-nested-data","diskSizeGb":256,"sku":{"name":"StandardSSD_LRS"}}' }
+            $message = try { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } catch { $_.Exception.Message }
+            $message | Should -Match 'differs from its declaration \(existing lun 0, 256 GiB, StandardSSD_LRS\)'
+            $message | Should -Not -Match 'governance automation'
+        }
+        It 'surfaces a denied disk read instead of treating the missing values as a pass' {
+            Mock Invoke-DemoAz -ModuleName Common { throw 'AuthorizationFailed: disk read denied' }
+            { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @(New-ModelessDisk)) -DefaultVmSize 'Standard_B2as_v2' } | Should -Throw '*disk read denied*'
+        }
+        It 'reads no disk resource when the running VM model already reports the size and the tier' {
+            Mock Invoke-DemoAz -ModuleName Common { throw 'unexpected disk read' }
+            $disk = New-AttachedDisk
+            $disk.managedDisk | Add-Member -NotePropertyName id -NotePropertyValue '/fixture/disks/win-sql-02-nested-data'
+            { Assert-DemoRetainedVmShape -Machines @($declared) -ExistingVms @(New-ExistingVm -Disks @($disk)) -DefaultVmSize 'Standard_B2as_v2' } | Should -Not -Throw
+            Should -Invoke Invoke-DemoAz -ModuleName Common -Times 0
+        }
+    }
 }
 
 Describe 'Capacity is demanded per distinct size' {

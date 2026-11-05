@@ -25,7 +25,11 @@ Price the selected rule/region/notifications separately rather than treating
 the self-recovering incident or automatic investigation as free.
 
 The observed eight-host lab already uses Standard HDD OS disks: five 127 GiB
-Windows disks and three 30 GiB Linux disks. Its successful warm activation and
+Windows disks and three 30 GiB Linux disks. It is not recorded whether that lab
+was built on HDD or converted to it: on a governed subscription a tenant
+automation can convert a parked estate's disks to Standard HDD without an owner
+choice ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
+Its successful warm activation and
 fresh 79-check Monitor snapshot show that this tier can support the current
 inventory/telemetry rehearsal. They do not benchmark cold boot, sustained SQL
 I/O, patch throughput, active AV scanning or a customer production workload.
@@ -36,7 +40,9 @@ by automatic conversion to equivalent Standard SSD with possible disruption.
 The fresh-deployment default therefore remains `StandardSSD_LRS`.
 An existing HDD lab can deliberately retain its current tier with
 `-OsDiskStorageAccountType Standard_LRS` or private skin
-`compute.osDiskStorageAccountType`. The same setting is passed to both simulated
+`compute.osDiskStorageAccountType`, and so can one whose disks were converted
+while it was parked (plus `nestedSqlGuest.parentDataDiskStorageAccountType` for the
+nested parent's data disk). The same setting is passed to both simulated
 Arc and optional native VM modules. Plan HDD migration before retirement.
 
 The deployment wrapper verifies targeted existing OS disks and refuses a tier

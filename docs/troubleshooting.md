@@ -813,6 +813,8 @@ disk; override with `parentVmSize`, `parentDataDiskGb`,
 retained `Standard_LRS` disk). For any other entry add `vmSize` and `dataDisks`
 to its [fleet entry](legacy-os-fleet.md#per-entry-size-and-data-disks). A real
 size change is a separate approved resize with the VM deallocated, not a deploy.
+A disk tier that changed outside this repo is declared the same way; see
+[the OS disk tier changed by itself](#the-os-disk-tier-changed-by-itself).
 
 ## Clean deploy fails while creating DCRs with missing Log Analytics tables
 
@@ -1150,4 +1152,45 @@ disk. Select its current tier using the CLI input or private
 `Standard_LRS`, while new OS disks default to `StandardSSD_LRS`.
 Do not bypass the check or run an implicit conversion. An approved disk-tier
 migration needs a maintenance window with stop/deallocate/restart; HDD OS
-support retires on 8 September 2028. See [cost.md](cost.md).
+support retires on 8 September 2028. See [cost.md](cost.md). If the disks were
+Standard SSD when the lab was built and nobody changed them, read
+[the next entry](#the-os-disk-tier-changed-by-itself).
+
+## The OS disk tier changed by itself
+
+**Symptom** — A Deploy that worked before a Hibernate stops before any Bicep, even
+as a preview, with `OS disk tier mismatch on <vm>: the disk is Standard_LRS and this
+run requests StandardSSD_LRS`. Once the OS tier is declared, the nested SQL parent
+can stop it again with `Data disk ... differs from its declaration (existing lun 0,
+128 GiB, Standard_LRS)`. The private skin did not change.
+
+**Cause** — The disks really are Standard HDD now. A governance automation in the
+tenant can convert the disks of a parked estate to Standard HDD on its own. Observed
+on 5-6 November 2026: about two hours after a Hibernate, every OS disk and the
+nested data disk in `rg-<prefix>-infra` was rewritten within about 15 seconds and
+read `Standard_LRS` afterwards, while every VM stayed deallocated. The activity log
+shows `Microsoft.Compute/disks/write` from an application identity, not from this
+repo or the operator. Whether a subscription does this depends on its tenant
+policy. No Hibernate, Activate or readiness check reads a disk tier, so the first
+sign is the Deploy guard, which reads each disk before it sends anything to Bicep.
+
+**Check** — Read-only:
+
+```powershell
+az disk list -g rg-<prefix>-infra --query "[].{name:name, tier:sku.name, sizeGb:diskSizeGb}" -o table
+```
+
+**Fix** — Declare what exists. Deploy never converts a disk, so it will not undo the
+automation. In the private skin:
+
+```json
+"compute": { "osDiskStorageAccountType": "Standard_LRS" },
+"nestedSqlGuest": { "parentDataDiskStorageAccountType": "Standard_LRS" }
+```
+
+`-OsDiskStorageAccountType Standard_LRS` does the same for the OS disks on the command
+line; the data disk has only the skin key. The guard then passes for the tiers the
+disks have. Accepting HDD (cheaper, with OS disk support retiring on 8 September
+2028) or converting back to Standard SSD is the owner's decision. A conversion back is
+a separately approved window with the VMs deallocated, stop/deallocate/change
+tier/restart, as [cost.md](cost.md) describes. Do not bypass the guard.
