@@ -962,6 +962,26 @@ function Get-DemoWakePreview {
     $lines.ToArray()
 }
 
+function Write-DemoResultFile {
+    <#
+    .SYNOPSIS
+        Writes the JSON result of an Activate or Hibernate run, for the finally block of the script.
+    .DESCRIPTION
+        A result that still reads `running` here means the run was stopped (Ctrl+C or a host stop skips the catch block but
+        not finally), so it is recorded as `interrupted`: steps already submitted may still be in progress. The write is
+        guarded because this runs while an error may already be on its way out: a file that cannot be written only warns,
+        so it can never replace the real failure.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Result, [Parameter(Mandatory)][string]$Path)
+    if ($Result['status'] -eq 'running') {
+        $Result['status'] = 'interrupted'
+        $Result['error'] = 'The run was stopped before it finished. Steps already submitted may still be in progress: read the current state before running it again.'
+    }
+    try { $Result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8 }
+    catch { Write-Warning "The result file $Path could not be written: $($_.Exception.Message)" }
+}
+
 function Get-DemoRemovalChecks {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$NamePrefix)

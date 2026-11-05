@@ -292,7 +292,10 @@ keeps the same evidence Activate's does outside git: the steps with their times,
 VM's power state before parking, the revisions deactivated, the network outcome and the
 closing Hibernated readiness rows. The file is written when the run starts and again
 when it ends, passed or failed; a folder that does not exist is refused before anything
-is parked. Use a new file per attempt.
+is parked. A run that is stopped (Ctrl+C) records `status: interrupted`, because steps it
+already submitted may still be in progress, and a file that cannot be written at the end only
+warns, so it never hides the error the run ended with. The same holds for Activate's file.
+Use a new file per attempt.
 
 Hibernated **required** acceptance is VM deallocation, deployed AKS
 Stopped/Succeeded and no active Container App revision. Named NAT/PIP absence

@@ -137,6 +137,33 @@ Describe 'Explicit retained OS disk tiers' {
     }
 }
 
+Describe 'Result file of an Activate or Hibernate run' {
+    It 'keeps a finished <Status> result as it is' -TestCases @(
+        @{ Status = 'pass' }, @{ Status = 'fail' }, @{ Status = 'pending' }
+    ) {
+        param($Status)
+        $path = Join-Path $TestDrive "result-$Status.json"
+        Write-DemoResultFile -Result ([ordered]@{ status = $Status; error = 'kept' }) -Path $path
+        $written = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $written.status | Should -Be $Status
+        $written.error | Should -Be 'kept'
+    }
+    It 'records a run that was stopped before it finished as interrupted, not as running' {
+        $path = Join-Path $TestDrive 'result-stopped.json'
+        Write-DemoResultFile -Result ([ordered]@{ status = 'running'; error = $null }) -Path $path
+        $written = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $written.status | Should -Be 'interrupted'
+        $written.error | Should -Match 'stopped before it finished'
+    }
+    It 'only warns when the file cannot be written, so it never replaces the error in flight' {
+        $path = Join-Path $TestDrive 'result-is-a-folder.json'
+        New-Item -ItemType Directory -Path $path | Out-Null
+        $warned = $null
+        Write-DemoResultFile -Result ([ordered]@{ status = 'fail'; error = 'real failure' }) -Path $path -WarningVariable warned -WarningAction SilentlyContinue
+        "$warned" | Should -Match 'could not be written'
+    }
+}
+
 Describe 'Narrow LOB heartbeat collection' {
     BeforeAll {
         $errors = $null
@@ -1087,6 +1114,11 @@ Describe 'Best-effort Hibernate with real inventory and cost checks' {
                 }
                 'vm deallocate' {
                     $id = $Arguments[[array]::IndexOf($Arguments, '--ids') + 1]
+                    # Swaps the result file for a folder, so that the write at the end of the run fails.
+                    if ($f.sabotagePath -and (Test-Path -LiteralPath $f.sabotagePath -PathType Leaf)) {
+                        Remove-Item -LiteralPath $f.sabotagePath -Force
+                        New-Item -ItemType Directory -Path $f.sabotagePath | Out-Null
+                    }
                     if ($f.failVm -and $id -eq $f.vms[0].id) { throw 'AuthorizationFailed: first VM deallocation denied' }
                     ($f.vms | Where-Object id -eq $id).powerState = 'VM deallocated'; return
                 }
@@ -1191,6 +1223,18 @@ Describe 'Best-effort Hibernate with real inventory and cost checks' {
         $r.vms[1].action | Should -Be 'deallocate-submitted'
         ($r.warnings -join ' ') | Should -Match 'VM parking failed'
         $r.completedAtUtc | Should -Not -BeNullOrEmpty
+    }
+    It 'keeps the real error when the result file cannot be written at the end of the run' {
+        $f = $global:ArcParkFixture; $f.failVm = $true
+        $path = Join-Path $TestDrive 'hibernate-unwritable.json'
+        $f.sabotagePath = $path
+        $warned = $null
+        $thrown = try {
+            & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -ResultPath $path -WarningVariable warned -WarningAction SilentlyContinue
+        } catch { $_.Exception.Message }
+        $thrown | Should -Match 'running'
+        $thrown | Should -Not -Match 'could not be written'
+        "$warned" | Should -Match 'result file .*hibernate-unwritable\.json could not be written'
     }
     It 'rejects a -ResultPath folder that does not exist before parking anything' {
         $f = $global:ArcParkFixture

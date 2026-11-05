@@ -201,7 +201,7 @@ function Invoke-SizePhase {
     New-PhaseResult 'Size' 'changed' "$size -> $($nested.ParentVmSize)"
 }
 
-function Test-DiskMatchesDeclaration {
+function Get-DiskValues {
     param($Disk)
     $size = $Disk.diskSizeGb
     $tier = [string]$Disk.managedDisk.storageAccountType
@@ -211,7 +211,13 @@ function Test-DiskMatchesDeclaration {
         if (-not $size) { $size = $resource.diskSizeGb }
         if (-not $tier) { $tier = [string]$resource.sku.name }
     }
-    [int]$Disk.lun -eq 0 -and [string]$Disk.caching -eq 'None' -and [int64]$size -eq $nested.ParentDataDiskGb -and $tier -eq $nested.ParentDataDiskStorageAccountType
+    [pscustomobject]@{ SizeGb = $size; Tier = $tier }
+}
+
+function Test-DiskMatchesDeclaration {
+    param($Disk)
+    $values = Get-DiskValues $Disk
+    [int]$Disk.lun -eq 0 -and [string]$Disk.caching -eq 'None' -and [int64]$values.SizeGb -eq $nested.ParentDataDiskGb -and $values.Tier -eq $nested.ParentDataDiskStorageAccountType
 }
 
 function Invoke-DiskPhase {
@@ -219,7 +225,10 @@ function Invoke-DiskPhase {
     $attached = @($current.storageProfile.dataDisks | Where-Object { $_ })
     $own = @($attached | Where-Object { $_.name -eq $diskName })
     if ($own.Count -eq 1) {
-        if (-not (Test-DiskMatchesDeclaration $own[0])) { throw "Data disk $diskName differs from its declaration (lun $($own[0].lun), $($own[0].diskSizeGb) GiB, $($own[0].managedDisk.storageAccountType)); Prepare never resizes, converts or moves a retained disk." }
+        if (-not (Test-DiskMatchesDeclaration $own[0])) {
+            $seen = Get-DiskValues $own[0]
+            throw "Data disk $diskName differs from its declaration (lun $($own[0].lun), $($seen.SizeGb) GiB, $($seen.Tier)); Prepare never resizes, converts or moves a retained disk. To keep the disk as it is, declare what exists: nestedSqlGuest.parentDataDiskGb and parentDataDiskStorageAccountType in the private skin. A tenant governance automation can convert a parked estate's disks to Standard HDD on its own (docs/troubleshooting.md, 'The OS disk tier changed by itself')."
+        }
         return New-PhaseResult 'Disk' 'satisfied' "$diskName attached at LUN 0"
     }
     $atLun = @($attached | Where-Object { [int]$_.lun -eq 0 })
@@ -348,7 +357,7 @@ function Invoke-VerifyPhase {
     $securityType = [string]$current.securityProfile.securityType
     Add-Check 'security-type' 'Standard or unset' $securityType ($securityType -in @('', 'Standard'))
     $own = @($current.storageProfile.dataDisks | Where-Object { $_.name -eq $diskName })
-    Add-Check 'data-disk' "$diskName LUN 0, $($nested.ParentDataDiskGb) GiB, caching None" $(if ($own.Count) { "LUN $($own[0].lun), $($own[0].diskSizeGb) GiB, $($own[0].caching)" } else { 'absent' }) ($own.Count -eq 1 -and (Test-DiskMatchesDeclaration $own[0]))
+    Add-Check 'data-disk' "$diskName LUN 0, $($nested.ParentDataDiskGb) GiB, caching None" $(if ($own.Count) { "LUN $($own[0].lun), $((Get-DiskValues $own[0]).SizeGb) GiB, $($own[0].caching)" } else { 'absent' }) ($own.Count -eq 1 -and (Test-DiskMatchesDeclaration $own[0]))
     Add-Check 'power' 'VM running' $current.powerState ($current.powerState -eq 'VM running') 'Verify never starts a VM; run the approved Activate or the Volume phase first.'
     if ($isFleetMember -and $current.powerState -eq 'VM running') {
         $arc = Invoke-DemoAz -Arguments @('connectedmachine', 'show', '-g', $arcRg, '-n', $parentName, '-o', 'json') | ConvertFrom-Json
