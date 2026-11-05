@@ -370,7 +370,7 @@ Describe 'Ordered plan' {
         (Get-BuildRow (Get-BuildTest $f -State $state -Force) 'P9.1').Status | Should -Be 'ready'
     }
 
-    It 'skips the SRE preview and create steps, without asking for approval, when the SRE parent already exists' {
+    It 'skips the SRE preview and create steps, needing no switch, when the SRE parent already exists' {
         $f = New-BuildFixture
         $state = New-ArcDemoBuildState $script:Sub $script:Ten 'build-test'
         $state.steps['P9.2'] = @{ status = 'failed'; attempts = 1 }
@@ -465,7 +465,7 @@ Describe 'Ordered plan' {
         (& $row.Definition.Arguments $t.Context).Keys | Should -Not -Contain 'Feature'
     }
 
-    It 'adds the SRE grant switch only when the grant was approved and confirms the SQL opt-out only after it was blocked' {
+    It 'adds the SRE grant switch only when the grant switch was passed and confirms the SQL opt-out only after it was blocked' {
         $f = New-BuildFixture
         $plain = Get-BuildTest $f
         $create = & (Get-BuildRow $plain 'P9.2').Definition.Arguments $plain.Context
@@ -789,7 +789,7 @@ $null = ([pscustomobject]@{}).missing
     }
 }
 
-Describe 'Presenter handoff' {
+Describe 'Presenter guide step' {
     It 'writes a context the real generator accepts, using only verified exact IDs' {
         $f = New-BuildFixture -RealPresenter
         $env:BUILD_TEST_LOG = $f.Log
@@ -1069,11 +1069,11 @@ Describe 'Invoke-ArcDemoBuild.ps1' {
         Test-Path (Join-Path $f.Private 'evidence') | Should -BeFalse
     }
 
-    It 'refuses to execute offline or without the explicit approval switches, before starting anything' {
+    It 'refuses to execute offline or without the explicit confirmation switches, before starting anything' {
         $f = New-BuildFixture -Without 'realSql', 'sre', 'presenter' -NoNested
         { & $script:Wrapper -SubscriptionId $script:Sub -TenantId $script:Ten -BuildConfigPath $f.ConfigPath -Execute -Offline } | Should -Throw '*-Offline only applies*'
         { & $script:Wrapper -SubscriptionId $script:Sub -TenantId $script:Ten -BuildConfigPath $f.ConfigPath -Execute -Only P2 -Confirm:$false 6>$null } |
-            Should -Throw '*Approval switch(es) missing*-ApproveCostStart (P2)*'
+            Should -Throw '*Confirmation switch(es) missing*-ApproveCostStart (P2)*'
         Test-Path (Join-Path $f.Private 'build-state.json') | Should -BeFalse
     }
 }

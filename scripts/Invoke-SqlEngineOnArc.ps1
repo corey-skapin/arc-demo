@@ -49,7 +49,7 @@ try {
 
 if ($Action -eq 'Install' -and -not $WhatIfPreference -and -not $GuestScriptOutputPath -and
     (-not $AcceptDeveloperLicenseTerms -or -not $MediaIsoPath -or -not $MediaSha256)) {
-    throw 'Install requires explicit Developer licence acceptance plus an approved guest-local SQL 2022 Developer ISO and SHA256; no download or implied acceptance.'
+    throw 'Install requires explicit Developer licence acceptance plus a guest-local SQL 2022 Developer ISO and SHA256; no download or implied acceptance.'
 }
 if ($Action -eq 'Install' -and -not $WhatIfPreference -and -not $GuestScriptOutputPath -and -not $ArcSqlAutoConnectOptOutConfirmed) {
     throw 'Install also requires explicit confirmation of a reviewed effective Arc SQL automatic-connection opt-out; no tag/extension policy changes are made here.'

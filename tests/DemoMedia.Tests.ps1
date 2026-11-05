@@ -226,7 +226,7 @@ Describe 'Guest action transport' {
     }
 }
 
-Describe 'Stage-DemoMedia operator flow' {
+Describe 'Stage-DemoMedia flow' {
     BeforeAll {
         $script:stage = Join-Path $repo 'scripts\Stage-DemoMedia.ps1'
         $script:manifestPath = Join-Path $TestDrive 'media.json'
@@ -242,7 +242,7 @@ Describe 'Stage-DemoMedia operator flow' {
         $script:recordPath = Join-Path $TestDrive ('acceptance-' + [guid]::NewGuid().ToString('N') + '.json')
         Mock Import-Module {}
         Mock Initialize-DemoContext {}
-        Mock Invoke-DemoAz { 'operator@example.com' }
+        Mock Invoke-DemoAz { 'user@example.com' }
         Mock Get-DemoGuestTarget {
             [pscustomobject]@{ Target = [pscustomobject]@{ Id = '/fixture/vm'; Name = 'win-sql-01'; OsType = 'Windows'
                 Actual = [pscustomobject]@{ powerState = 'VM running'; provisioningState = 'Succeeded' } } }
@@ -268,7 +268,7 @@ Describe 'Stage-DemoMedia operator flow' {
         $record = Get-Content -LiteralPath $script:recordPath -Raw | ConvertFrom-Json
         $record.items.'sample-media'.licenseUrl | Should -Be 'https://example.com/terms'
         $record.items.'sample-media'.sha256 | Should -Be $script:payloadSha
-        $record.items.'sample-media'.acceptedBy | Should -Be 'operator@example.com'
+        $record.items.'sample-media'.acceptedBy | Should -Be 'user@example.com'
         $first = $record.items.'sample-media'.acceptedAtUtc
         Start-Sleep -Milliseconds 30
         & $script:stage @script:common -AcceptSqlDeveloperTerms -AcceptanceRecordPath $script:recordPath -Confirm:$false | Out-Null

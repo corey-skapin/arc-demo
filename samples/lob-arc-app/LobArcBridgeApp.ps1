@@ -6,7 +6,7 @@
 .DESCRIPTION
     The worker simulates an on-prem line-of-business app running on a Windows
     Arc-enabled server. It emits Application log events and a text log, then
-    reads an appsettings.json fault flag so operators can induce a crash or a
+    reads an appsettings.json fault flag so you can induce a crash or a
     degraded state without changing the deployed source.
 #>
 [CmdletBinding()]

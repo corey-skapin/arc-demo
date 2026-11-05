@@ -92,14 +92,14 @@ Describe 'Explicit retained OS disk tiers' {
         }
         It 'blocks an incidental HDD to SSD conversion' {
             Mock Invoke-DemoAz { 'Standard_LRS' }
-            { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } | Should -Throw '*separately approved*'
+            { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } | Should -Throw '*its own stop/deallocate/restart window*'
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'update' -in $Arguments -or 'deallocate' -in $Arguments }
         }
         It 'blocks an incidental SSD to HDD conversion' {
             Mock Invoke-DemoAz { 'StandardSSD_LRS' }
             { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType Standard_LRS } | Should -Throw '*tier mismatch*'
         }
-        It 'tells a stranger exactly what to declare when a governance automation has converted the disks to HDD' {
+        It 'tells you exactly what to declare when a governance automation has converted the disks to HDD' {
             Mock Invoke-DemoAz { 'Standard_LRS' }
             $message = try { Assert-DemoOsDiskStorageAccountType -Machines @($script:diskVm) -StorageAccountType StandardSSD_LRS } catch { $_.Exception.Message }
             $message | Should -Match 'the disk is Standard_LRS and this run requests StandardSSD_LRS'
@@ -108,7 +108,7 @@ Describe 'Explicit retained OS disk tiers' {
             $message | Should -Match 'nestedSqlGuest\.parentDataDiskStorageAccountType'
             $message | Should -Match 'governance automation can convert a parked estate''s disks to Standard HDD on its own'
             $message | Should -Match 'The OS disk tier changed by itself'
-            $message | Should -Match 'separately approved stop/deallocate/restart window'
+            $message | Should -Match 'needs its own stop/deallocate/restart window'
         }
         It 'does not advise declaring a tier that Deploy cannot declare' {
             Mock Invoke-DemoAz { 'Premium_LRS' }
@@ -224,7 +224,7 @@ Describe 'Portable workbook workspace defaults' {
         . ([scriptblock]::Create($function.Extent.Text))
         $serialized = Get-Content (Join-Path $repo 'workbooks\nseilaz\Asset_Inventory_Workbook_Example.json') -Raw
     }
-    It 'ships no upstream operator workspace selection' {
+    It 'ships no preselected upstream workspace' {
         $workbook = $serialized | ConvertFrom-Json -Depth 100
         $selector = @($workbook.items.content.parameters | Where-Object label -like '*Log Analytics Workspace*')
         $selector.Count | Should -Be 1

@@ -191,7 +191,7 @@ Describe 'Initialize-DemoOnboardingIdentity' {
             { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver } |
                 Should -Throw '*cleanup/verification failed*changed beyond the minted credential*'
         }
-        It 'gives -OnboardingSecret guidance and runs nothing when the operator cannot add a credential' {
+        It 'gives -OnboardingSecret guidance and runs nothing when you cannot add a credential' {
             $fx = $global:OnboardingFixture
             $fx.mintDenied = $true
             { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver } |

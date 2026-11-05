@@ -174,13 +174,13 @@ function Test-Prerequisites {
     }
     if ($unregistered) {
         $listed = ($unregistered | ForEach-Object { "$($_.Namespace) ($($_.State))" }) -join ', '
-        $problems += "Resource provider(s) not registered: $listed. An authorized operator must run, for each: az provider register --subscription $SubscriptionId --namespace <provider> --wait. Preflight never registers providers."
+        $problems += "Resource provider(s) not registered: $listed. Register each yourself: az provider register --subscription $SubscriptionId --namespace <provider> --wait. Preflight never registers providers."
     }
     if ($unregisteredFeatures) {
         $listedFeatures = ($unregisteredFeatures | ForEach-Object { "$($_.Feature) ($($_.State))" }) -join ', '
         $register = ($unregisteredFeatures | ForEach-Object { "az feature register --subscription $SubscriptionId --namespace $($_.Namespace) --name $($_.Name)" }) -join '; '
         $refresh = (@($unregisteredFeatures.Namespace | Sort-Object -Unique) | ForEach-Object { "az provider register --subscription $SubscriptionId --namespace $_ --wait" }) -join '; '
-        $problems += "Subscription feature(s) not registered: $listedFeatures. Without them the deployment fails partway through, after the other VMs exist (BadRequest: the value 'Standard' is not available for property 'securityType' until the feature Microsoft.Compute/UseStandardSecurityType is registered). An authorized operator must run: $register; wait until az feature show reads Registered; then run: $refresh. Preflight never registers features."
+        $problems += "Subscription feature(s) not registered: $listedFeatures. Without them the deployment fails partway through, after the other VMs exist (BadRequest: the value 'Standard' is not available for property 'securityType' until the feature Microsoft.Compute/UseStandardSecurityType is registered). Run: $register; wait until az feature show reads Registered; then run: $refresh. Preflight never registers features."
     }
     if ($problems) { throw ($problems -join ' ') }
     Write-Ok 'Required resource providers already registered (read-only check)'
@@ -549,7 +549,7 @@ function Invoke-DemoAz {
         does not clear it. The documented workaround is AZURE_IDENTITY_DISABLE_CP1=1. Because every directory call
         in the repo goes through here, a Graph call that fails with exactly that challenge is retried once with the
         variable set for that child process only, and later Graph calls in the process keep it. Nothing else is
-        changed and a setting the operator made is never overridden.
+        changed and a setting you made is never overridden.
     #>
     [CmdletBinding()]
     param(
@@ -997,7 +997,7 @@ function Get-DemoRemovalChecks {
     $budget = Invoke-DemoAz -Arguments @('consumption', 'budget', 'show', '--budget-name', "budget-$NamePrefix", '-o', 'json') -AllowNotFound
     New-DemoCheck 'budget' "$scope/providers/Microsoft.Consumption/budgets/budget-$NamePrefix" 'absent' $(if ($budget) { 'exists' } else { 'absent' }) $(if ($budget) { 'pending' } else { 'pass' })
     New-DemoCheck 'exception/tenant-identity' '' 'separate opt-in cleanup' $null 'skipped' $false 'Tenant onboarding identity/application is not inspected here. Use RemoveOnboardingIdentity for scoped SP deletion; directory access is not needed for default removal.'
-    New-DemoCheck 'exception/shared-services' $scope 'preserved unless explicitly approved' $null 'skipped' $false 'Subscription Defender and shared resources are excluded. Soft-deleted vaults and retained applications can persist; no purge or zero-bill claim.'
+    New-DemoCheck 'exception/shared-services' $scope 'preserved unless you remove them yourself' $null 'skipped' $false 'Subscription Defender and shared resources are excluded. Soft-deleted vaults and retained applications can persist; no purge or zero-bill claim.'
 }
 
 function Get-DemoStaleManifestDeployments {
@@ -1034,7 +1034,7 @@ function Assert-DemoOsDiskStorageAccountType {
             $declare = if ($tier -in @('Standard_LRS', 'StandardSSD_LRS')) {
                 "To keep the disk as it is, declare what exists: set compute.osDiskStorageAccountType to $tier in the private skin (or pass -OsDiskStorageAccountType $tier) and, when a nested SQL parent is configured, nestedSqlGuest.parentDataDiskStorageAccountType to the tier of its data disk."
             } else { "Deploy can only declare Standard_LRS or StandardSSD_LRS, so a $tier disk needs a separate decision." }
-            throw "OS disk tier mismatch on $($machine.name): the disk is $tier and this run requests $StorageAccountType. Deploy never converts a disk. $declare A tenant governance automation can convert a parked estate's disks to Standard HDD on its own (docs/troubleshooting.md, 'The OS disk tier changed by itself'). Converting a disk back is a separately approved stop/deallocate/restart window."
+            throw "OS disk tier mismatch on $($machine.name): the disk is $tier and this run requests $StorageAccountType. Deploy never converts a disk. $declare A tenant governance automation can convert a parked estate's disks to Standard HDD on its own (docs/troubleshooting.md, 'The OS disk tier changed by itself'). Converting a disk back needs its own stop/deallocate/restart window."
         }
     }
 }
@@ -1375,7 +1375,7 @@ function Assert-DemoRetainedVmShape {
     .SYNOPSIS
         Refuses a redeploy that would silently resize an existing VM or detach or
         convert its data disks. Deployment preserves retained VMs; a resize or disk
-        change is a separate, approved operation.
+        change is a separate operation you run yourself.
     #>
     [CmdletBinding()]
     param(
@@ -1390,7 +1390,7 @@ function Assert-DemoRetainedVmShape {
         $actual = [string]$existing.hardwareProfile.vmSize
         if (-not $actual) { throw "Cannot read the size of existing VM $($machine.name); inspect it before deployment." }
         if ($actual -ne $wanted) {
-            throw "VM $($machine.name) is $actual but this deployment requests $wanted. Deployment never resizes an existing VM. Declare the existing size (fleet vmSize, or nestedSqlGuest.parentVmSize for the nested parent), or resize it separately in an approved window with the VM deallocated."
+            throw "VM $($machine.name) is $actual but this deployment requests $wanted. Deployment never resizes an existing VM. Declare the existing size (fleet vmSize, or nestedSqlGuest.parentVmSize for the nested parent), or resize it yourself with the VM deallocated."
         }
         $declared = @($machine.dataDisks | Where-Object { $_ })
         foreach ($disk in @($existing.storageProfile.dataDisks | Where-Object { $_ })) {
@@ -2372,7 +2372,7 @@ function Invoke-DemoOnboardingCredential {
                 }
             }
         } catch {
-            throw "Could not add a one-day credential to the onboarding application: $($_.Exception.Message) The signed-in operator must own the application or hold an application administrator role; otherwise supply the current onboarding secret (Deploy: -OnboardingSecret)."
+            throw "Could not add a one-day credential to the onboarding application: $($_.Exception.Message) The signed-in user must own the application or hold an application administrator role; otherwise supply the current onboarding secret (Deploy: -OnboardingSecret)."
         }
         if (-not $credential.secretText -or -not $credential.keyId) {
             throw 'Graph did not return the new credential secret and key ID.'

@@ -259,7 +259,7 @@ Describe 'Parity evaluation' {
             Get-Failed $result | Should -Contain 'tenant/no-residual-credentials'
             ($result.checks | Where-Object id -eq 'tenant/no-long-lived-credentials').observed | Should -Be @('rbac until 2027-10-09')
             ($result.checks | Where-Object id -eq 'tenant/no-residual-credentials').observed | Should -Be @('two-days')
-            ($result.checks | Where-Object id -eq 'tenant/no-long-lived-credentials').message | Should -Match 'owner''s decision'
+            ($result.checks | Where-Object id -eq 'tenant/no-long-lived-credentials').message | Should -Match 'your decision'
             Get-Failed (Invoke-Parity (New-HealthySnapshot)) | Should -Not -Contain 'tenant/no-long-lived-credentials'
         } finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $previous }
     }

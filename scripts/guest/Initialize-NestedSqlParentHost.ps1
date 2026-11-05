@@ -6,7 +6,7 @@
     Runs inside the parent as SYSTEM (Windows PowerShell 5.1) through Run Command. Every
     action is idempotent, takes its settings as base64 JSON and prints one ARC_GUEST_RESULT=
     JSON line plus ARC_DEMO_OK. Inspect only reads. The role reboot is issued from Azure by
-    the operator script, never from here.
+    Prepare-NestedSqlParent.ps1, never from here.
 
       Inspect  data volume, Hyper-V role/service/hypervisor, switch/vNIC/NAT, media files
       Volume   initialise the blank Azure data disk as the data volume (default D:, NestedSQL);

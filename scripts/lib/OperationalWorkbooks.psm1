@@ -644,7 +644,7 @@ function Get-DemoOperationalWorkbook {
     $book = Get-Content -LiteralPath (Join-Path $root $file) -Raw | ConvertFrom-Json -Depth 100
     $prepared = [datetime]::UtcNow.AddHours([double]$DisplayUtcOffsetHours).ToString('yyyy-MM-dd HH:mm', [cultureinfo]::InvariantCulture) + ' (' + (Get-DemoUtcOffsetLabel -Hours $DisplayUtcOffsetHours) + ')'
     $guests = @($roster | Where-Object layer -eq 'guest').Count
-    $note = "Roster and tags published $prepared for $($roster.Count) exact Arc IDs in this resource group ($guests declared guest(s)). Refresh by republishing to add hosts or pick up tag changes. Topology is operator-declared; undeclared machines stay unclassified. Parent and guest rows are separate observations and never hardware totals. Check telemetry timestamps before relying on any figure."
+    $note = "Roster and tags published $prepared for $($roster.Count) exact Arc IDs in this resource group ($guests declared guest(s)). Refresh by republishing to add hosts or pick up tag changes. Topology is declared in the skin or a topology file; undeclared machines stay unclassified. Parent and guest rows are separate observations and never hardware totals. Check telemetry timestamps before relying on any figure."
     $defaults = [ordered]@{}
     foreach ($key in $script:OperationalDefaults.Keys) { $defaults[$key] = $script:OperationalDefaults[$key] }
     $defaults['UtcOffsetHours'] = $DisplayUtcOffsetHours.ToString('0.##', [cultureinfo]::InvariantCulture)

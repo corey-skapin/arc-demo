@@ -1,9 +1,9 @@
 #Requires -Version 7.4
 <#
 .SYNOPSIS
-    Installs the separately approved Arc SQL inventory extension using LicenseOnly.
+    Installs the Arc SQL inventory extension using LicenseOnly.
 .DESCRIPTION
-    Run from the signed-in operator machine after Enable-NestedSqlDemoExtension.
+    Run from your signed-in machine after Enable-NestedSqlDemoExtension.
     No manual SQL grants, PAYG, Defender, assessment, or backup enablement.
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
@@ -36,7 +36,7 @@ if ($existing -and $existing.properties.provisioningState -eq 'Succeeded') {
     $existing
     return
 }
-if (-not $PSCmdlet.ShouldProcess($id, 'Install approved LicenseOnly Arc SQL extension with default least privilege')) { return }
+if (-not $PSCmdlet.ShouldProcess($id, 'Install LicenseOnly Arc SQL extension with default least privilege')) { return }
 $body = @{
     location = $Location
     properties = @{

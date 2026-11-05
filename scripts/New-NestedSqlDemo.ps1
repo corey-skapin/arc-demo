@@ -1,7 +1,7 @@
 #Requires -Version 7.4
 <#
 .SYNOPSIS
-    Creates the approved scratch Windows/Arc/SQL demo using repository steps only.
+    Creates the scratch Windows/Arc/SQL demo using repository steps only.
 .DESCRIPTION
     Ensures the Azure Connected Machine Onboarding role at the Arc resource group, mints
     one one-day credential on the existing onboarding application for this build and
@@ -40,7 +40,7 @@ if ($SkinPath) {
     }
 }
 Initialize-DemoContext $SubscriptionId $TenantId
-if (-not $PSCmdlet.ShouldProcess("$VmName on $ParentVmName",'Create approved Windows guest, enroll Arc, install SQL and approved LicenseOnly extension')) { return }
+if (-not $PSCmdlet.ShouldProcess("$VmName on $ParentVmName",'Create Windows guest, enroll Arc, install SQL and the LicenseOnly extension')) { return }
 $arcId="/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.HybridCompute/machines/$VmName"
 $sqlId="/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.AzureArcData/sqlServerInstances/$VmName"
 $timings=[Collections.Generic.List[object]]::new()

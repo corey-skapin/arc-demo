@@ -4,7 +4,7 @@
     Previews, deploys or (drafts only) removes one optional operational workbook against existing Arc inventory/LAW.
 .DESCRIPTION
     Preview is the default: only scoped reads and a rendered result, no ARM deployment/what-if call.
-    Deploy requires explicit approval/ShouldProcess. Never changes guests, collection, retention, prices or lifecycle state.
+    Deploy is confirmed through ShouldProcess (-WhatIf previews it, -Confirm:$false skips the prompt). Never changes guests, collection, retention, prices or lifecycle state.
 
     -Draft renders and deploys a separate "(draft)" copy with its own deterministic ID, so the published workbook stays
     intact while it is reviewed in the portal. Promotion is the same command without -Draft (it replaces the published
@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\Common.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'lib\OperationalWorkbooks.psm1') -Force
 if ($Action -eq 'Remove' -and -not $Draft) {
-    throw 'Only a draft workbook can be removed here. The published workbook goes with the lab group on approved normal removal.'
+    throw 'Only a draft workbook can be removed here. The published workbook goes with the lab group when you remove the lab.'
 }
 $skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path $PSScriptRoot)
 if (-not $PSBoundParameters.ContainsKey('NamePrefix')) { $NamePrefix = Get-DemoSkinValue $skin 'azure.namePrefix' $NamePrefix }

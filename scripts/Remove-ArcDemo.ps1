@@ -7,7 +7,7 @@
     Identity deletion is separately opt-in; shared/ambiguous identities are refused. It deletes the
     service principal only: the application registration, and any credential left on it (for example
     the one-year credential an older Deploy added when it created the application), stays, and removing
-    that credential is the owner's decision (az ad app credential delete).
+    that credential is up to you (az ad app credential delete).
     A running nested SQL parent gets one bounded graceful guest stop; if that fails the
     removal warns and continues, because the parent and its guest are deleted anyway.
     -ForceDeleteWorkspace first permanently deletes the Log Analytics workspace; without it

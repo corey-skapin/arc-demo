@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Installs SQL Server Developer from approved parent media in the new Arc-connected guest.
+    Installs SQL Server Developer from the parent's media in the new Arc-connected guest.
 .DESCRIPTION
     Verify the Azure machine's SQL suppression tag before invoking this step.
     Uses original demo Setup administrator selection and product service defaults.
@@ -16,7 +16,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $null = Get-Item -LiteralPath $SqlIsoPath
-if (-not $PSCmdlet.ShouldProcess($VmName, 'Install SQL Server Developer using approved media and default service accounts')) { return }
+if (-not $PSCmdlet.ShouldProcess($VmName, 'Install SQL Server Developer using the parent media and default service accounts')) { return }
 if (-not (Get-VMDvdDrive -VMName $VmName)) {
     Add-VMDvdDrive -VMName $VmName -Path $SqlIsoPath
 } else { Set-VMDvdDrive -VMName $VmName -Path $SqlIsoPath }

@@ -8,7 +8,7 @@
     resumable, and only a file that matches its pin takes the final name. An existing file
     that does not match is never overwritten, and a mismatching download is discarded.
 
-    Every item needs its explicit terms switch. The acceptance (time, operator, terms URL,
+    Every item needs its explicit terms switch. The acceptance (time, who accepted, terms URL,
     scope and pin) is recorded in a private file (default .local\media-acceptance.json) and is
     never implied. -WhatIf validates the request and resolves the target but runs nothing on
     the VM and writes nothing. The VM must already be running; this script never starts one.
@@ -58,7 +58,7 @@ Assert-DemoName $NamePrefix
 Initialize-DemoContext $SubscriptionId $TenantId
 $target = (Get-DemoGuestTarget -NamePrefix $NamePrefix -Skin $skin -MachineName $MachineName).Target
 if ($target.Actual.powerState -ne 'VM running' -or $target.Actual.provisioningState -ne 'Succeeded') {
-    throw "$MachineName must be running and Succeeded before media is staged; this script never starts a VM. Run the approved Activate first."
+    throw "$MachineName must be running and Succeeded before media is staged; this script never starts a VM. Run Activate first."
 }
 $root = $Destination.TrimEnd('\')
 $gib = [Math]::Round((($items | Measure-Object -Property Bytes -Sum).Sum) / 1GB, 2)
@@ -70,12 +70,12 @@ if (Test-Path -LiteralPath $recordPath) {
     $existing = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json -AsHashtable -Depth 6
     if ($existing -is [System.Collections.IDictionary] -and $existing.items -is [System.Collections.IDictionary]) { foreach ($key in $existing.items.Keys) { $record.items[$key] = $existing.items[$key] } }
 }
-$operator = ([string](Invoke-DemoAz -Arguments @('account', 'show', '--query', 'user.name', '-o', 'tsv') | Select-Object -First 1)).Trim()
+$acceptedBy = ([string](Invoke-DemoAz -Arguments @('account', 'show', '--query', 'user.name', '-o', 'tsv') | Select-Object -First 1)).Trim()
 foreach ($item in $items) {
     $previous = $record.items[$item.Id]
     if ($previous -is [System.Collections.IDictionary] -and $previous.sha256 -eq $item.Sha256) { continue }
     $record.items[$item.Id] = [ordered]@{
-        acceptedAtUtc = [DateTime]::UtcNow.ToString('o'); acceptedBy = $operator; displayName = $item.DisplayName
+        acceptedAtUtc = [DateTime]::UtcNow.ToString('o'); acceptedBy = $acceptedBy; displayName = $item.DisplayName
         licenseUrl = $item.LicenseUrl; scope = $item.Scope; bytes = $item.Bytes; sha256 = $item.Sha256
     }
 }

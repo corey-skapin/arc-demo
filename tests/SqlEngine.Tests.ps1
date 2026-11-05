@@ -72,7 +72,7 @@ Describe 'Real SQL guest safeguards and query evidence' {
         Mock Start-Process { throw 'No installer may run in unit tests.' }
     }
 
-    It 'requires user-owned licence acceptance and approved media before any installation' {
+    It 'requires licence acceptance and a media path before any installation' {
         { Install-DemoEngine } | Should -Throw '*licence*' -Because 'Install cannot imply licence acceptance'
         Should -Invoke Start-Process -Times 0
     }
@@ -82,7 +82,7 @@ Describe 'Real SQL guest safeguards and query evidence' {
         $thrown = $null
         try { Install-DemoEngine -MediaIsoPath 'C:\fixture.iso' -MediaSha256 $hash -AcceptDeveloperLicenseTerms -ArcSqlAutoConnectOptOutConfirmed } catch { $thrown = $_.Exception.Message }
         $thrown | Should -BeLike '*pending rename is recorded (PendingFileRenameOperations: C:\Windows\appcompat\Programs\Amcache.hve.tmp)*no automatic reboot or bypass*'
-        $thrown | Should -BeLike '*owner''s approval one graceful restart from Azure (az vm restart)*waits up to six minutes*troubleshooting.md*'
+        $thrown | Should -BeLike '*One graceful restart from Azure (az vm restart)*waits up to six minutes*troubleshooting.md*'
         Should -Invoke Start-Process -Times 0
     }
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Public Microsoft installer media the demo stages on lab VMs, pinned by size and SHA-256 (nothing here is secret). Stage-DemoMedia.ps1 verifies both before an ISO is moved into place and records the operator's terms acceptance privately in .local\\media-acceptance.json. If Microsoft refreshes a file the pin fails closed: confirm the new file from the licence/download page, update bytes and sha256 here, and accept the terms again.",
+  "description": "Public Microsoft installer media the demo stages on lab VMs, pinned by size and SHA-256 (nothing here is secret). Stage-DemoMedia.ps1 verifies both before an ISO is moved into place and records your terms acceptance privately in .local\\media-acceptance.json. If Microsoft refreshes a file the pin fails closed: confirm the new file from the licence/download page, update bytes and sha256 here, and accept the terms again.",
   "media": {
     "windows-server-2022-eval": {
       "displayName": "Windows Server 2022 Evaluation (Standard, Desktop Experience image index 2)",
