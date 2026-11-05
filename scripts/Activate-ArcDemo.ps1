@@ -191,7 +191,7 @@ try {
         if ($item.Job.Id) { Get-Job -Id $item.Job.Id -ErrorAction SilentlyContinue | Stop-Job -PassThru | Remove-Job -Force }
         if ($item.Job.DemoScriptPath) { [System.IO.File]::Delete($item.Job.DemoScriptPath) }
     }
-    if ($ResultPath) { $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ResultPath -Encoding utf8 }
+    if ($ResultPath) { Write-DemoResultFile -Result $result -Path $ResultPath }
 }
 Write-Ok 'Activation finished. Existing fault flags were preserved; assessment submissions are not assessment completion.'
 exit 0

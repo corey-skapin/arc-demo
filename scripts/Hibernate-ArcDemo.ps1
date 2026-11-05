@@ -185,6 +185,6 @@ try {
     throw
 } finally {
     $result.completedAtUtc = [DateTime]::UtcNow.ToString('o')
-    if ($ResultPath) { $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ResultPath -Encoding utf8 }
+    if ($ResultPath) { Write-DemoResultFile -Result $result -Path $ResultPath }
 }
 Write-Ok 'Compute parked. Review network cleanup diagnostics: skipped/failed NAT/PIP removal may still bill, as do retained disks, logs and enabled alerts. No fault flags or credentials changed.'

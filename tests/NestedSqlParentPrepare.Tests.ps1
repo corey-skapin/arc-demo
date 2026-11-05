@@ -529,8 +529,20 @@ Describe 'Prepare-NestedSqlParent against a simulated parent' {
         ($result.phases | Where-Object phase -eq 'Disk').status | Should -Be 'satisfied'
         @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' -or $_ -like 'vm *' }) | Should -BeNullOrEmpty
         $global:PrepWorld.Disks['win-sql-02-nested-data'].sku.name = 'Standard_LRS'
-        { & $script:prepare @script:common -Phase Disk -Confirm:$false } | Should -Throw '*never resizes, converts or moves*'
+        $message = try { & $script:prepare @script:common -Phase Disk -Confirm:$false } catch { $_.Exception.Message }
+        $message | Should -Match 'differs from its declaration \(lun 0, 128 GiB, Standard_LRS\)'
+        $message | Should -Match 'never resizes, converts or moves'
+        $message | Should -Match 'nestedSqlGuest\.parentDataDiskGb and parentDataDiskStorageAccountType'
         @($global:PrepWorld.Calls | Where-Object { $_ -like 'disk *' -or $_ -like 'vm *' }) | Should -BeNullOrEmpty
+    }
+    It 'Verify shows the data disk size from the disk resource when the VM model omits it' {
+        $global:PrepWorld = New-FakeWorld -Prepared $true
+        $global:PrepWorld.Attached = @(@{ name = 'win-sql-02-nested-data'; lun = 0; caching = 'None'; managedDisk = @{ id = '/fixture/disks/win-sql-02-nested-data' } })
+        $global:PrepWorld.Disks['win-sql-02-nested-data'] = @{ name = 'win-sql-02-nested-data'; diskSizeGb = 128; sku = @{ name = 'StandardSSD_LRS' }; managedBy = '/fixture/win-sql-02' }
+        $result = & $script:prepare @script:common -Phase Verify -BuildInputPath $script:build
+        $row = @($result.checks | Where-Object { $_.id -eq 'data-disk' })[0]
+        $row.status | Should -Be 'pass'
+        $row.observed | Should -Be 'LUN 0, 128 GiB, None'
     }
     It 'Verify never starts a parked parent and reports a failing check instead of a build input' {
         $global:PrepWorld = New-FakeWorld -Prepared $true
