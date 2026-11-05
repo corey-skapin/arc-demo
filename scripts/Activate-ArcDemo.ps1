@@ -95,6 +95,12 @@ try {
             $startedVmIds += $machine.Id
         }
     }
+    # The NAT gateway and public IP are created above, and Bicep no longer declares them once they exist, so a recreated pair
+    # would keep no tags unless they are written here. Tags are cost-allocation metadata: a failure warns and never stops the wake.
+    try {
+        $labTags = Get-DemoResourceTags -Skin $skin
+        foreach ($networkResourceId in @($network.PublicIpId, $network.NatId)) { $null = Set-DemoResourceTags -ResourceId $networkResourceId -Tags $labTags }
+    } catch { Write-Warning "The NAT gateway and public IP could not be tagged ($($_.Exception.Message)). The wake continues; the tags are cost-allocation metadata only." }
     Wait-Until -Message 'expected VM identities running' -Condition {
         $vms = @(Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '--show-details', '-o', 'json') | ConvertFrom-Json)
         @($inventory.Machines | Where-Object { $_.Id -notin @($vms | Where-Object powerState -eq 'VM running' | ForEach-Object id) }).Count -eq 0

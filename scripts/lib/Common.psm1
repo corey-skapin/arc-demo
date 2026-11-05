@@ -288,6 +288,20 @@ function ConvertTo-DemoTagString {
     return (($Tags.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value }) -join ',')
 }
 
+function Get-DemoResourceTags {
+    <#
+    .SYNOPSIS
+        The lab's resource tags: the four default cost-allocation and owner tags plus the skin's own tags section.
+    .DESCRIPTION
+        Deploy puts these on everything it creates. Activate puts them on the NAT gateway and public IP it recreates,
+        which Bicep does not declare again once they exist, so both read them here and a skin override reaches both.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][System.Collections.IDictionary]$Skin)
+    Merge-DemoHashtable -Defaults ([ordered]@{ owner = 'demo'; purpose = 'arc-demo'; costcenter = 'demo'; env = 'demo' }) `
+        -Overrides (Get-DemoSkinValue -Skin $Skin -Path 'tags' -Default @{})
+}
+
 function Get-MgmtToken {
     [CmdletBinding()]
     param()

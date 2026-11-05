@@ -621,6 +621,8 @@ Describe 'Activation with the real optional-network preflight' {
             Mock Assert-DemoSkinInventory {}
             Mock Invoke-DemoGuestCommand { throw 'Activate must not call Run Command directly' }
             Mock Invoke-DemoNestedSqlGuest { throw 'No nested guest is configured in this fixture' }
+            # Tag writes go through the ARM REST helper; a test must never reach it (and so the real token call) by accident.
+            Mock Set-DemoResourceTags { $true }
             # The shared wait has its own tests; here it reports a canned per-host outcome and records how it was called.
             Mock Wait-DemoHostsReady {
                 param($Inventory, $NamePrefix, $AttemptStartedUtc, $StartedAtUtc, $DeadlineMinutes, $GuestChecks, $StallMinutes, $RepairStalledAgents, $NestedGuest)
@@ -692,6 +694,38 @@ Describe 'Activation with the real optional-network preflight' {
             Should -Invoke Invoke-DemoGuestCommand -Times 0
             Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'start' -in $Arguments -or 'create' -in $Arguments -or 'update' -in $Arguments }
             Should -Invoke Invoke-DemoAz -Times 2 -Exactly -ParameterFilter { $Arguments[0] -eq 'aks' -and '-g' -in $Arguments -and '-n' -in $Arguments -and '--ids' -notin $Arguments }
+        }
+        It 'recreates an absent NAT gateway and public IP, then tags both with the lab tags and the skin overrides' {
+            $f = $global:ArcLifecycleFixture
+            $f.resources = @(); $f.nat = ''
+            $f.events = [System.Collections.Generic.List[string]]::new()
+            Mock Get-DemoSkin { @{ tags = @{ owner = 'platform-team'; extra = 'kept' } } }
+            Mock Invoke-DemoAz { $global:ArcLifecycleFixture.events.Add("create $($Arguments[1])") } -ParameterFilter { $Arguments[0] -eq 'network' -and 'create' -in $Arguments }
+            Mock Set-DemoResourceTags {
+                $global:ArcLifecycleFixture.events.Add("tag $(($ResourceId -split '/')[-1])")
+                $global:ArcLifecycleFixture.tags = $Tags
+                $true
+            }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            @($f.events) | Should -Be @('create public-ip', 'create nat', 'tag pip-natgw-retail-demo', 'tag natgw-retail-demo')
+            $f.tags.owner | Should -Be 'platform-team'
+            $f.tags.extra | Should -Be 'kept'
+            $f.tags.purpose | Should -Be 'arc-demo'
+            $f.tags.costcenter | Should -Be 'demo'
+            $f.tags.env | Should -Be 'demo'
+            Should -Invoke Wait-DemoHostsReady -Times 1 -Exactly
+        }
+        It 'checks the lab tags on a NAT gateway and public IP that already exist without recreating them' {
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment
+            Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -like '*/publicIPAddresses/pip-natgw-retail-demo' -and $Tags.purpose -eq 'arc-demo' }
+            Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -like '*/natGateways/natgw-retail-demo' -and $Tags.owner -eq 'demo' }
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'create' -in $Arguments }
+        }
+        It 'warns and keeps waking the estate when the tags cannot be written' {
+            Mock Set-DemoResourceTags { throw 'AuthorizationFailed: tags' }
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -SkipValidate -SkipPatchAssessment -WarningVariable warnings
+            ($warnings -join ' ') | Should -Match 'could not be tagged \(AuthorizationFailed: tags\).*cost-allocation metadata only'
+            Should -Invoke Wait-DemoHostsReady -Times 1 -Exactly
         }
         It 'never starts or invokes a guest command on an explicit keep-parked VM' {
             $f = $global:ArcLifecycleFixture

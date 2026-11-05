@@ -192,12 +192,7 @@ if ($AdminEmail -in @('you@contoso.com', 'operator@example.com')) {
     throw "AdminEmail is still the placeholder '$AdminEmail'. Pass -AdminEmail with a real operator email or update notifications.email in the skin file before deploying."
 }
 
-$demoTags = Merge-DemoHashtable -Defaults ([ordered]@{
-    owner = 'demo'
-    purpose = 'arc-demo'
-    costcenter = 'demo'
-    env = 'demo'
-}) -Overrides (Get-DemoSkinValue -Skin $skin -Path 'tags' -Default @{})
+$demoTags = Get-DemoResourceTags -Skin $skin
 $arcOnboardingTags = ConvertTo-DemoTagString -Tags $demoTags
 $demoTitle = Get-DemoSkinValue -Skin $skin -Path 'labels.demoTitle' -Default 'Arc Demo'
 $workbookTitle = Get-DemoSkinValue -Skin $skin -Path 'labels.workbookTitle' -Default "$demoTitle — Estate Overview"

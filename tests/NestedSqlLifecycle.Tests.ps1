@@ -134,6 +134,7 @@ Describe 'Nested SQL wiring in the normal entry points' {
             [pscustomobject]@{ Name = 'nested-start'; State = 'Completed' }
         }
         Mock Wait-DemoNestedSqlArcConnected {}
+        Mock Set-DemoResourceTags { $true }
         Mock Wait-DemoHostsReady {
             $fixture.nestedGuestRequest = $NestedGuest
             [pscustomobject]@{ Status = 'pass'; Hosts = @(); NestedGuest = [ordered]@{ status = 'pass'; startCommand = 'pass' }; ElapsedSeconds = 1 }

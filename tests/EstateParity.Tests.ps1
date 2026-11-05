@@ -22,11 +22,12 @@ BeforeAll {
             (New-Res 'alert-par-test-lob-arc-app-fault' 'Microsoft.Insights/scheduledQueryRules')
             (New-Res 'guest-vm' 'Microsoft.AzureArcData/sqlServerInstances')
         ) + @(1..6 | ForEach-Object { New-Res "estate-$_" $book @{ workbookTag = "w$_" } }) + @(1..2 | ForEach-Object { New-Res "operational-$_" $book $operational })
+        $labTags = @{ owner = 'demo'; purpose = 'arc-demo'; costcenter = 'demo'; env = 'demo' }
         $infra = @(
             (New-Res 'vnet-par-test' 'Microsoft.Network/virtualNetworks')
             (New-Res 'nsg-par-test' 'Microsoft.Network/networkSecurityGroups')
-            (New-Res 'natgw-par-test' 'Microsoft.Network/natGateways')
-            (New-Res 'pip-natgw-par-test' 'Microsoft.Network/publicIPAddresses')
+            (New-Res 'natgw-par-test' 'Microsoft.Network/natGateways' $labTags)
+            (New-Res 'pip-natgw-par-test' 'Microsoft.Network/publicIPAddresses' $labTags)
             (New-Res 'kv-partest-abc123' 'Microsoft.KeyVault/vaults')
             (New-Res 'shutdown-computevm-win-a' 'Microsoft.DevTestLab/schedules')
             (New-Res 'ca-par-test-fault' 'Microsoft.App/containerApps')
@@ -113,6 +114,8 @@ Describe 'Parity evaluation' {
         @{ Name = 'workbooks are missing'; Expect = 'arc/workbooks'; Change = { param($s) $s.sections.groups.data.arc.resources = @($s.sections.groups.data.arc.resources | Where-Object type -ne 'Microsoft.Insights/workbooks') } }
         @{ Name = 'an operational workbook is missing'; Expect = 'arc/operational-workbooks'; Change = { param($s) $s.sections.groups.data.arc.resources = @($s.sections.groups.data.arc.resources | Where-Object name -ne 'operational-2') } }
         @{ Name = 'the NAT gateway is gone (a parked estate)'; Expect = 'infra/nat-gateway'; Change = { param($s) $s.sections.groups.data.infra.resources = @($s.sections.groups.data.infra.resources | Where-Object type -ne 'Microsoft.Network/natGateways') } }
+        @{ Name = 'the NAT gateway was recreated without the lab tags'; Expect = 'infra/nat-gateway'; Change = { param($s) ($s.sections.groups.data.infra.resources | Where-Object name -eq 'natgw-par-test').tags = $null } }
+        @{ Name = 'the NAT public IP lacks one lab tag'; Expect = 'infra/nat-public-ip'; Change = { param($s) ($s.sections.groups.data.infra.resources | Where-Object name -eq 'pip-natgw-par-test').tags.PSObject.Properties.Remove('costcenter') } }
         @{ Name = 'the SQL alert is missing'; Expect = 'arc/sql-alert'; Change = { param($s) $s.sections.groups.data.arc.resources = @($s.sections.groups.data.arc.resources | Where-Object name -ne 'al-par-test-sql-lock-timeout') } }
         @{ Name = 'the SRE agent group is absent'; Expect = 'sre/agent'; Change = { param($s) $s.sections.groups.data.sre.exists = $false } }
         @{ Name = 'a manifest host has no VM'; Expect = 'fleet/win-a/vm'; Change = { param($s) $s.sections.vms.data = @($s.sections.vms.data | Where-Object name -ne 'win-a') } }
@@ -138,6 +141,18 @@ Describe 'Parity evaluation' {
         $result = Invoke-Parity $snapshot
         Get-Failed $result | Should -Contain $Expect
         $result.status | Should -Be 'fail'
+    }
+
+    It 'names the resource that lacks a lab tag and accepts any tag value, so a skin can set its own' {
+        $snapshot = New-HealthySnapshot
+        ($snapshot.sections.groups.data.infra.resources | Where-Object name -eq 'pip-natgw-par-test').tags.PSObject.Properties.Remove('env')
+        $check = (Invoke-Parity $snapshot).checks | Where-Object id -eq 'infra/nat-public-ip'
+        $check.status | Should -Be 'fail'
+        $check.expected | Should -Match 'tagged owner, purpose, costcenter, env'
+        $check.message | Should -Match 'Without every required tag: pip-natgw-par-test'
+        $custom = New-HealthySnapshot
+        ($custom.sections.groups.data.infra.resources | Where-Object name -eq 'natgw-par-test').tags.owner = 'someone-else'
+        Get-Failed (Invoke-Parity $custom) | Should -HaveCount 0
     }
 
     It 'allows the nested parent and explicitly kept-parked VMs, and ignores rules for features that are off' {

@@ -314,12 +314,23 @@ function Test-DemoEstateParity {
                 if ($tags) { foreach ($tag in $tags.PSObject.Properties) { $items = @($items | Where-Object { (Get-SnapshotValue $_ "tags.$($tag.Name)") -eq $tag.Value }) } }
                 $name = [string](Get-SnapshotValue $rule 'name')
                 if ($name) { $name = & $expandName $name; $items = @($items | Where-Object { $_.name -eq $name }) }
+                # tagNames: each named tag must be present with a value, whatever the value is (a skin may set its own).
+                $tagNames = @(@(Get-SnapshotValue $rule 'tagNames') | Where-Object { $_ })
+                $untagged = @()
+                if ($tagNames.Count) {
+                    $hasTags = { param($item) -not @($tagNames | Where-Object { -not (Get-SnapshotValue $item "tags.$_") }).Count }
+                    $untagged = @($items | Where-Object { -not (& $hasTags $_) })
+                    $items = @($items | Where-Object { & $hasTags $_ })
+                    $label = "$label tagged $($tagNames -join ', ')"
+                }
                 $min = Get-SnapshotValue $rule 'min'
                 $count = Get-SnapshotValue $rule 'count'
                 $need = if ($null -ne $min) { [int]$min } elseif ($null -ne $count) { [int]$count } else { 1 }
                 $ok = if ($null -ne $min) { $items.Count -ge $need } else { $items.Count -eq $need }
                 $wording = if ($null -ne $min) { "at least $need" } else { "exactly $need" }
-                & $add $id "$wording x $label" @($items | ForEach-Object { $_.name } | Select-Object -First 8) $ok "Found $($items.Count)."
+                $found = "Found $($items.Count)."
+                if ($untagged.Count) { $found += " Without every required tag: $(@($untagged | ForEach-Object { $_.name }) -join ', ')." }
+                & $add $id "$wording x $label" @($items | ForEach-Object { $_.name } | Select-Object -First 8) $ok $found
             }
         }
     }
