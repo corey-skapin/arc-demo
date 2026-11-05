@@ -746,9 +746,11 @@ function Invoke-ArcDemoBuildPreflight {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Context)
     $notes = [System.Collections.Generic.List[string]]::new()
-    $prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$Context.ContainerApps -Aks:$Context.Aks
+    $standardSecurityType = [bool](Get-DemoSkinValue $Context.Skin 'workloads.deployArcOnPrem' $true) -and
+        (Test-DemoStandardSecurityTypeRequired -Skin $Context.Skin -FleetPath (Get-DemoSkinValue $Context.Skin 'workloads.onPremFleetPath' '') -RepoRoot $Context.ArcRoot)
+    $prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$Context.ContainerApps -Aks:$Context.Aks -StandardSecurityType:$standardSecurityType
     $null = Test-Prerequisites -SubscriptionId "$($Context.SubscriptionId)" -TenantId "$($Context.TenantId)" -DeployerPrincipalId $Context.Config.DeployerPrincipalId `
-        -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions
+        -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions -Features $prerequisites.Features
     $notes.Add((Get-BuildRepoSummary $Context.ArcRoot 'Arc repo'))
     if ($Context.Config.Sre) { $notes.Add((Get-BuildRepoSummary $Context.Config.Sre.RepoPath 'SRE repo')) }
     $deleted = Invoke-AzRest -Method Get -Url "https://management.azure.com/subscriptions/$($Context.SubscriptionId)/providers/Microsoft.OperationalInsights/deletedWorkspaces?api-version=2020-08-01"

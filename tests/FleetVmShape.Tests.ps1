@@ -270,6 +270,7 @@ Describe 'Deploy wiring for the declared nested parent' {
     }
     It 'previews the parent with its size, security type and disk and checks each size' {
         Invoke-FleetPreview -SkinPath $script:nestedSkin
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter { @($Features) -contains 'Microsoft.Compute/UseStandardSecurityType' }
         $fleet = @($global:FleetPreviewParameters.parameters.onPremFleet.value)
         $parent = $fleet | Where-Object name -eq 'win-sql-02'
         $parent.vmSize | Should -Be 'Standard_D4s_v5'
@@ -285,6 +286,7 @@ Describe 'Deploy wiring for the declared nested parent' {
     }
     It 'leaves a skin without a nested guest on the shared size and disks' {
         Invoke-FleetPreview -SkinPath $script:plainSkin
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter { @($Features).Count -eq 0 }
         $fleet = @($global:FleetPreviewParameters.parameters.onPremFleet.value)
         $fleet.PSObject.Properties.Name | Should -Not -Contain 'dataDisks'
         ($fleet | Where-Object name -eq 'win-sql-02').PSObject.Properties.Name | Should -Not -Contain 'vmSize'

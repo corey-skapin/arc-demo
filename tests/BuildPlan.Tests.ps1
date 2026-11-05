@@ -758,6 +758,14 @@ Describe 'Build preflight' {
             'containerapp' -in $RequiredExtensions -and 'Microsoft.App' -in $Providers -and 'Microsoft.ContainerService' -notin $Providers
         }
     }
+    It 'checks the Standard security type feature only when the skin declares a nested parent' {
+        $f = New-BuildFixture
+        $null = Invoke-ArcDemoBuildPreflight -Context (Get-BuildTest $f).Context
+        Should -Invoke Test-Prerequisites -ModuleName BuildPlan -Times 1 -Exactly -ParameterFilter { 'Microsoft.Compute/UseStandardSecurityType' -in $Features }
+        $f = New-BuildFixture -NoNested
+        $null = Invoke-ArcDemoBuildPreflight -Context (Get-BuildTest $f).Context
+        Should -Invoke Test-Prerequisites -ModuleName BuildPlan -Times 1 -Exactly -ParameterFilter { @($Features).Count -eq 0 }
+    }
     It 'checks the AKS providers, and no Container Apps prerequisite, when the skin deploys only AKS' {
         $f = New-BuildFixture
         $skinPath = Join-Path $f.Private 'arc-skin.json'

@@ -4,9 +4,11 @@
 
 .DESCRIPTION
     Runs the pre-flight checks Deploy-ArcDemo.ps1 runs, without deploying anything.
-    Read-only and safe any time: it never installs a CLI extension or registers a provider.
-    Container Apps and AKS add their own provider (and, for Container Apps, the
-    containerapp CLI extension) exactly as Deploy-ArcDemo.ps1 does.
+    Read-only and safe any time: it never installs a CLI extension or registers a provider
+    or subscription feature. Container Apps and AKS add their own provider (and, for Container
+    Apps, the containerapp CLI extension) exactly as Deploy-ArcDemo.ps1 does, and a nested SQL
+    parent (or any fleet entry with securityType Standard) adds the
+    Microsoft.Compute/UseStandardSecurityType feature.
 
 .PARAMETER SubscriptionId
     The Azure subscription where the demo will live.
@@ -46,8 +48,10 @@ Import-Module (Join-Path $PSScriptRoot 'lib/Common.psm1') -Force
 $skin = Get-DemoSkin -Path $SkinPath -RepoRoot (Split-Path -Parent $PSScriptRoot)
 if (-not $PSBoundParameters.ContainsKey('DeployContainerApps')) { $DeployContainerApps = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployContainerApps' -Default $DeployContainerApps) }
 if (-not $PSBoundParameters.ContainsKey('DeployAks')) { $DeployAks = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployAks' -Default $DeployAks) }
-$prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Aks:$DeployAks
+$standardSecurityType = [bool](Get-DemoSkinValue -Skin $skin -Path 'workloads.deployArcOnPrem' -Default $true) -and
+    (Test-DemoStandardSecurityTypeRequired -Skin $skin -FleetPath (Get-DemoSkinValue -Skin $skin -Path 'workloads.onPremFleetPath' -Default '') -RepoRoot (Split-Path -Parent $PSScriptRoot))
+$prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Aks:$DeployAks -StandardSecurityType:$standardSecurityType
 
-$null = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions
+$null = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions -Features $prerequisites.Features
 Write-Host ''
 Write-Ok 'All prerequisites satisfied. You can now run Deploy-ArcDemo.ps1.'

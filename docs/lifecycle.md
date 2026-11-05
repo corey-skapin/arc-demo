@@ -45,7 +45,10 @@ Missing registrations must be approved and registered separately. Baseline
 providers include KeyVault, DevTestLab and Consumption. Optional Container Apps
 requires Microsoft.App and the `containerapp` CLI extension; AKS additionally needs
 ContainerService, ManagedIdentity, Resources, Storage and ContainerInstance for its
-deployment script. `Test-Prerequisites.ps1 @target`, Deploy and the build wrapper's
+deployment script. A nested SQL parent (security type `Standard`) also needs the
+subscription feature `Microsoft.Compute/UseStandardSecurityType`, registered by an
+authorized operator once ([nested-sql-demo.md](nested-sql-demo.md#prepare-the-parent)).
+`Test-Prerequisites.ps1 @target`, Deploy and the build wrapper's
 P0 all read the same set for the skin's workload toggles.
 The retired mixed SQL path no longer requests AzureArcData registration;
 optional real SQL preparation does not enable Arc SQL.

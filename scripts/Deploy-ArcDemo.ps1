@@ -535,8 +535,9 @@ function New-ChangeTrackingDcrBody {
 }
 
 # Phase 1: pre-flight
-$prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Aks:$DeployAks
-$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions
+$prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Aks:$DeployAks `
+    -StandardSecurityType:($DeployArcOnPrem -and (Test-DemoStandardSecurityTypeRequired -Skin $skin -FleetPath $OnPremFleetPath -RepoRoot $repoRoot))
+$principalId = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions -Features $prerequisites.Features
 
 $arcRg   = "rg-$NamePrefix"
 $infraRg = "rg-$NamePrefix-infra"

@@ -42,21 +42,46 @@ function Get-DemoMissingCliExtension {
 function Get-DemoPrerequisiteSet {
     <#
     .SYNOPSIS
-        The resource providers and Azure CLI extensions Deploy needs for the selected workloads.
+        The resource providers, subscription features and Azure CLI extensions Deploy needs for the selected workloads.
     .DESCRIPTION
         One list shared by Deploy, the build wrapper preflight and Test-Prerequisites.ps1, so a
-        read-only check cannot pass while Deploy would stop on a provider or extension it skipped.
+        read-only check cannot pass while Deploy would stop on a provider, feature or extension it skipped.
+        -StandardSecurityType adds Microsoft.Compute/UseStandardSecurityType, which Compute requires before it
+        accepts securityType Standard (the nested SQL parent always declares it).
     #>
     [CmdletBinding()]
-    param([switch]$ContainerApps, [switch]$Aks)
+    param([switch]$ContainerApps, [switch]$Aks, [switch]$StandardSecurityType)
     $providers = @('Microsoft.HybridCompute', 'Microsoft.GuestConfiguration', 'Microsoft.HybridConnectivity',
         'Microsoft.OperationalInsights', 'Microsoft.OperationsManagement', 'Microsoft.Insights', 'Microsoft.Security',
         'Microsoft.PolicyInsights', 'Microsoft.Compute', 'Microsoft.Network', 'Microsoft.KeyVault', 'Microsoft.DevTestLab',
         'Microsoft.Consumption')
     $extensions = @('connectedmachine')
+    $features = @()
     if ($ContainerApps) { $providers += 'Microsoft.App'; $extensions += 'containerapp' }
     if ($Aks) { $providers += @('Microsoft.ContainerService', 'Microsoft.ManagedIdentity', 'Microsoft.Resources', 'Microsoft.Storage', 'Microsoft.ContainerInstance') }
-    [pscustomobject]@{ Providers = $providers; Extensions = $extensions }
+    if ($StandardSecurityType) { $features += 'Microsoft.Compute/UseStandardSecurityType' }
+    [pscustomobject]@{ Providers = $providers; Extensions = $extensions; Features = $features }
+}
+
+function Test-DemoStandardSecurityTypeRequired {
+    <#
+    .SYNOPSIS
+        True when the deployment declares securityType Standard: the skin's nested SQL parent always does,
+        and a fleet file may set it on any entry. Reads only local files.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()][System.Collections.IDictionary]$Skin,
+        [string]$FleetPath = '',
+        [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    )
+    if (Get-DemoNestedSqlGuestConfig -Skin $Skin) { return $true }
+    if ([string]::IsNullOrWhiteSpace($FleetPath)) { return $false }
+    $path = if ([System.IO.Path]::IsPathRooted($FleetPath)) { $FleetPath } else { Join-Path $RepoRoot $FleetPath }
+    # A missing fleet file is reported by Deploy's own fleet loading, with the path.
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    $fleet = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -Depth 20
+    [bool]@($fleet | Where-Object { $_.securityType -eq 'Standard' }).Count
 }
 
 function Test-Prerequisites {
@@ -64,8 +89,8 @@ function Test-Prerequisites {
     .SYNOPSIS
         Verifies tooling, login state, and target subscription/tenant.
     .DESCRIPTION
-        Read-only: it never registers providers or installs CLI extensions. Missing extensions and
-        unregistered providers are reported together so one pass is enough to fix them.
+        Read-only: it never registers providers or subscription features or installs CLI extensions. Missing
+        extensions, unregistered providers and unregistered features are reported together so one pass is enough to fix them.
     .OUTPUTS
         Throws if any required check fails.
     #>
@@ -75,7 +100,8 @@ function Test-Prerequisites {
         [Parameter(Mandatory)][string]$TenantId,
         [string]$DeployerPrincipalId = '',
         [string[]]$Providers = (Get-DemoPrerequisiteSet).Providers,
-        [string[]]$RequiredExtensions = (Get-DemoPrerequisiteSet).Extensions
+        [string[]]$RequiredExtensions = (Get-DemoPrerequisiteSet).Extensions,
+        [string[]]$Features = (Get-DemoPrerequisiteSet).Features
     )
 
     Write-Header 'Pre-flight checks'
@@ -135,6 +161,12 @@ function Test-Prerequisites {
         $state = Invoke-DemoAz -Arguments @('provider', 'show', '--namespace', $rp, '--query', 'registrationState', '-o', 'tsv')
         if ($state -ne 'Registered') { [pscustomobject]@{ Namespace = $rp; State = $state } }
     })
+    $unregisteredFeatures = @(foreach ($feature in $Features) {
+        $namespace, $featureName = $feature -split '/', 2
+        # A feature that is no longer in the catalog (generally available) has nothing left to register.
+        $state = Invoke-DemoAz -Arguments @('feature', 'show', '--namespace', $namespace, '--name', $featureName, '--query', 'properties.state', '-o', 'tsv') -AllowNotFound
+        if ($null -ne $state -and $state -ne 'Registered') { [pscustomobject]@{ Feature = $feature; Namespace = $namespace; Name = $featureName; State = $state } }
+    })
     $problems = @()
     if ($missingExtensions) {
         $install = ($missingExtensions | ForEach-Object { "az extension add --name $_ --yes" }) -join '; '
@@ -144,8 +176,15 @@ function Test-Prerequisites {
         $listed = ($unregistered | ForEach-Object { "$($_.Namespace) ($($_.State))" }) -join ', '
         $problems += "Resource provider(s) not registered: $listed. An authorized operator must run, for each: az provider register --subscription $SubscriptionId --namespace <provider> --wait. Preflight never registers providers."
     }
+    if ($unregisteredFeatures) {
+        $listedFeatures = ($unregisteredFeatures | ForEach-Object { "$($_.Feature) ($($_.State))" }) -join ', '
+        $register = ($unregisteredFeatures | ForEach-Object { "az feature register --subscription $SubscriptionId --namespace $($_.Namespace) --name $($_.Name)" }) -join '; '
+        $refresh = (@($unregisteredFeatures.Namespace | Sort-Object -Unique) | ForEach-Object { "az provider register --subscription $SubscriptionId --namespace $_ --wait" }) -join '; '
+        $problems += "Subscription feature(s) not registered: $listedFeatures. Without them the deployment fails partway through, after the other VMs exist (BadRequest: the value 'Standard' is not available for property 'securityType' until the feature Microsoft.Compute/UseStandardSecurityType is registered). An authorized operator must run: $register; wait until az feature show reads Registered; then run: $refresh. Preflight never registers features."
+    }
     if ($problems) { throw ($problems -join ' ') }
     Write-Ok 'Required resource providers already registered (read-only check)'
+    if ($Features) { Write-Ok "Required subscription features checked: $($Features -join ', ') (read-only check)" }
 
     return $principalId
 }

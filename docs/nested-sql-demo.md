@@ -29,6 +29,18 @@ Developer ISOs. All of it is code:
 | Size, data disk, security type | `Deploy-ArcDemo.ps1`, from the skin's `nestedSqlGuest` block | `Standard_D4s_v5`, a 128 GiB `StandardSSD_LRS` disk at LUN 0, security type `Standard`; a later Deploy refuses to resize or detach them |
 | `D:` volume, Hyper-V role, switch and NAT, ISOs, build input | `Prepare-NestedSqlParent.ps1` | `D:` (NTFS, `NestedSQL`), Hyper-V running, `NestedSqlSwitch` and NAT `172.31.240.0/24`, both ISOs hash-verified in `D:\NestedSQL\Media`, `.local\nested-sql-build.json` |
 
+Security type `Standard` needs the subscription feature
+`Microsoft.Compute/UseStandardSecurityType`. Without it Compute rejects the parent
+partway through Deploy, after the other VMs exist (`BadRequest ... The value
+'Standard' is not available for property 'securityType' until the feature
+Microsoft.Compute/UseStandardSecurityType is registered`). `Test-Prerequisites.ps1`,
+the build wrapper's P0 and Deploy check it read-only from the same list and never
+register it. An authorized operator registers it once per subscription: `az feature
+register --subscription <SUB> --namespace Microsoft.Compute --name
+UseStandardSecurityType`, then `az provider register --subscription <SUB> --namespace
+Microsoft.Compute --wait`. In the rebuild that found this the feature read `Registered`
+at once and both steps took under a minute; the provider refresh is what propagates it.
+
 Copy the selected skin to `.local\demo-skin.json`; set its `azure.namePrefix` to
 the actual demo prefix, name an existing Windows fleet VM as the parent and enable:
 

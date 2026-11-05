@@ -174,6 +174,7 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
         BeforeEach {
             $script:versionJson = '{"azure-cli":"2.91.0","azure-cli-core":"2.91.0","azure-cli-telemetry":"1.1.0","extensions":{"connectedmachine":"3.0.0","monitor-control-service":"1.2.0"}}'
             $script:providerStates = @{}
+            $script:featureStates = @{}
             Mock Write-Header {}
             Mock Write-Ok {}
             Mock Initialize-DemoContext {}
@@ -189,6 +190,11 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
                 if ($Arguments[0] -eq 'role') { return 'Owner' }
                 if ($Arguments[0] -eq 'provider') {
                     $state = $script:providerStates[$Arguments[3]]
+                    return $(if ($state) { $state } else { 'Registered' })
+                }
+                if ($Arguments[0] -eq 'feature') {
+                    $state = $script:featureStates["$($Arguments[3])/$($Arguments[5])"]
+                    if ($state -eq 'absent') { return $null }
                     return $(if ($state) { $state } else { 'Registered' })
                 }
                 throw "Unexpected Azure CLI call: $($Arguments -join ' ')"
@@ -237,7 +243,75 @@ Describe 'Preflight reports every missing CLI extension and provider in one pass
             $aks.Extensions | Should -Be @('connectedmachine')
             $aks.Providers | Should -Contain 'Microsoft.ContainerService'
             $aks.Providers | Should -Not -Contain 'Microsoft.App'
+            $aks.Features.Count | Should -Be 0
+            $base.Features.Count | Should -Be 0
         }
+        It 'adds the Standard security type feature only when asked' {
+            (Get-DemoPrerequisiteSet -StandardSecurityType).Features | Should -Be @('Microsoft.Compute/UseStandardSecurityType')
+            (Get-DemoPrerequisiteSet -ContainerApps -StandardSecurityType).Extensions | Should -Be @('connectedmachine', 'containerapp')
+        }
+        It 'passes when the required subscription feature is Registered, checking it read-only' {
+            $preflight = $script:preflight
+            Test-Prerequisites @preflight -Features @('Microsoft.Compute/UseStandardSecurityType') | Should -Be '33333333-3333-3333-3333-333333333333'
+            Should -Invoke Invoke-DemoAz -Times 1 -Exactly -ParameterFilter {
+                $Arguments[0] -eq 'feature' -and $Arguments[1] -eq 'show' -and $Arguments[3] -eq 'Microsoft.Compute' -and $Arguments[5] -eq 'UseStandardSecurityType'
+            }
+        }
+        It 'names an unregistered feature with the exact commands and never registers it' {
+            $script:featureStates['Microsoft.Compute/UseStandardSecurityType'] = 'NotRegistered'
+            $preflight = $script:preflight
+            $thrown = $null
+            try { Test-Prerequisites @preflight -Features @('Microsoft.Compute/UseStandardSecurityType') }
+            catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*feature(s) not registered: Microsoft.Compute/UseStandardSecurityType (NotRegistered)*'
+            $thrown | Should -BeLike '*until the feature Microsoft.Compute/UseStandardSecurityType is registered*'
+            $thrown | Should -BeLike '*az feature register --subscription 11111111-1111-1111-1111-111111111111 --namespace Microsoft.Compute --name UseStandardSecurityType*'
+            $thrown | Should -BeLike '*az provider register --subscription 11111111-1111-1111-1111-111111111111 --namespace Microsoft.Compute --wait*'
+            $thrown | Should -BeLike '*Preflight never registers features*'
+            Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { 'register' -in $Arguments }
+        }
+        It 'reports a missing feature together with a missing extension and an unregistered provider' {
+            $script:featureStates['Microsoft.Compute/UseStandardSecurityType'] = 'Pending'
+            $script:providerStates['Microsoft.App'] = 'NotRegistered'
+            $preflight = $script:preflight
+            $thrown = $null
+            try { Test-Prerequisites @preflight -Providers @('Microsoft.App') -RequiredExtensions @('containerapp') -Features @('Microsoft.Compute/UseStandardSecurityType') }
+            catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*extension(s) not installed: containerapp*'
+            $thrown | Should -BeLike '*provider(s) not registered: Microsoft.App (NotRegistered)*'
+            $thrown | Should -BeLike '*feature(s) not registered: Microsoft.Compute/UseStandardSecurityType (Pending)*'
+        }
+        It 'has nothing to register for a feature that is no longer in the catalog' {
+            $script:featureStates['Microsoft.Compute/UseStandardSecurityType'] = 'absent'
+            $preflight = $script:preflight
+            { Test-Prerequisites @preflight -Features @('Microsoft.Compute/UseStandardSecurityType') } | Should -Not -Throw
+        }
+    }
+}
+
+Describe 'Which deployments need the Standard security type feature' {
+    BeforeAll {
+        $script:nestedSkinTable = @{ nestedSqlGuest = @{ enabled = $true; parentVmName = 'win-sql-02'; guestVmName = 'g'; arcMachineName = 'g' } }
+        $script:fleetFile = Join-Path $TestDrive 'fleet.json'
+    }
+    It 'needs it for a nested SQL parent' {
+        Test-DemoStandardSecurityTypeRequired -Skin $script:nestedSkinTable | Should -BeTrue
+    }
+    It 'does not need it for the base fleet' {
+        Test-DemoStandardSecurityTypeRequired -Skin @{ schemaVersion = 1 } | Should -BeFalse
+        Test-DemoStandardSecurityTypeRequired -Skin @{ nestedSqlGuest = @{ enabled = $false } } | Should -BeFalse
+        Test-DemoStandardSecurityTypeRequired -Skin $null | Should -BeFalse
+    }
+    It 'needs it when a fleet entry declares Standard, and not for TrustedLaunch or no declaration' {
+        Set-Content -LiteralPath $script:fleetFile -Value '[{"name":"a","securityType":"Standard"},{"name":"b"}]'
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath $script:fleetFile | Should -BeTrue
+        Set-Content -LiteralPath $script:fleetFile -Value '[{"name":"a","securityType":"TrustedLaunch"},{"name":"b"}]'
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath $script:fleetFile | Should -BeFalse
+        Set-Content -LiteralPath $script:fleetFile -Value '[{"name":"a"}]'
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath $script:fleetFile | Should -BeFalse
+    }
+    It 'leaves a missing fleet file to Deploy, which reports its path' {
+        Test-DemoStandardSecurityTypeRequired -Skin @{} -FleetPath (Join-Path $TestDrive 'absent.json') | Should -BeFalse
     }
 }
 
@@ -498,8 +572,13 @@ Describe 'Test-Prerequisites.ps1 checks what Deploy would check for the skin' {
         Set-Content -LiteralPath $script:skinPath -Value '{"schemaVersion":1}'
         & (Join-Path $repo 'scripts\Test-Prerequisites.ps1') @target -SkinPath $script:skinPath
         Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter {
-            @($RequiredExtensions).Count -eq 1 -and @($RequiredExtensions) -contains 'connectedmachine' -and @($Providers) -notcontains 'Microsoft.App'
+            @($RequiredExtensions).Count -eq 1 -and @($RequiredExtensions) -contains 'connectedmachine' -and @($Providers) -notcontains 'Microsoft.App' -and @($Features).Count -eq 0
         }
+    }
+    It 'adds the Standard security type feature when the skin declares the nested SQL parent' {
+        Set-Content -LiteralPath $script:skinPath -Value '{"schemaVersion":1,"nestedSqlGuest":{"enabled":true,"parentVmName":"win-sql-02","guestVmName":"g","arcMachineName":"g"}}'
+        & (Join-Path $repo 'scripts\Test-Prerequisites.ps1') @target -SkinPath $script:skinPath
+        Should -Invoke Test-Prerequisites -Times 1 -Exactly -ParameterFilter { @($Features) -contains 'Microsoft.Compute/UseStandardSecurityType' }
     }
 }
 

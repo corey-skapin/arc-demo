@@ -417,6 +417,32 @@ deallocated`, means a listed VM was deleted (or is running). Remove deleted VMs
 from `operations.keepParkedVmNames` in the private skin; keep a name there only
 while that VM exists and is parked.
 
+## Deploy fails partway at the nested parent: `securityType` is not available
+
+**Symptom** — most VMs, the network, the vault and the monitoring are created, then the
+nested SQL parent's module fails:
+
+```text
+BadRequest ... The value 'Standard' is not available for property 'securityType' until the feature Microsoft.Compute/UseStandardSecurityType is registered
+```
+
+**Cause** — The nested SQL parent declares security type `Standard` (Hyper-V cannot run
+under Trusted Launch) and Compute accepts it only on a subscription that has the
+`Microsoft.Compute/UseStandardSecurityType` feature registered. Current preflight
+(`Test-Prerequisites.ps1`, the build wrapper's P0 and Deploy) checks it read-only and stops
+before any spend, so this only appears with an older checkout.
+
+**Fix** — With separate approval, register the feature once, then refresh the provider (the
+refresh is what propagates it; both took under a minute in the rebuild that found this):
+
+```powershell
+az feature register --subscription <SUB> --namespace Microsoft.Compute --name UseStandardSecurityType
+az feature show --subscription <SUB> --namespace Microsoft.Compute --name UseStandardSecurityType --query properties.state -o tsv
+az provider register --subscription <SUB> --namespace Microsoft.Compute --wait
+```
+
+Then rerun the same Deploy command.
+
 ## Deploy fails immediately with `SkuNotAvailable`
 
 **Symptom** — `Deploy-ArcDemo.ps1` fails at the VM creation phase with:

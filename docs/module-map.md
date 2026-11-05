@@ -32,7 +32,7 @@ the customer-facing Arc records and observability plane are in the other group.
 
 | Entry point | Responsibility |
 | --- | --- |
-| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions and the providers/CLI extensions the skin's workload toggles need (`Get-DemoPrerequisiteSet`, shared with Deploy and the wrapper's P0); reports every gap in one error, installs/registers nothing |
+| `scripts/Test-Prerequisites.ps1` | Read-only tools/context/effective permissions and the providers, subscription features (`Microsoft.Compute/UseStandardSecurityType` for a nested parent) and CLI extensions the skin's workload toggles need (`Get-DemoPrerequisiteSet`, shared with Deploy and the wrapper's P0); reports every gap in one error, installs/registers nothing |
 | `scripts/New-NestedSqlDemoGuest.ps1`, `Connect-NestedSqlDemoGuest.ps1`, `Install-NestedSqlDemoEngine.ps1` | Primary scratch Windows/SQL/Arc guest build; private credentials and approved media |
 | `scripts/New-NestedSqlDemo.ps1`, `Invoke-NestedSqlDemoStep.ps1`, `scripts/lib/NestedSqlDemo.psm1` | Working build sequence (its onboarding credential comes from the shared identity helper), protected parent-side step transport and retained Windows answer-file generator; no retired V1-V3 controller layers |
 | `scripts/Test-NestedSqlDemoGuest.ps1`, `Enable-NestedSqlDemoExtension.ps1`, `Remove-NestedSqlDemoGuest.ps1` | Actual guest/SQL checks, Arc SQL extension and explicit scratch-guest teardown |

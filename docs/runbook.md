@@ -316,11 +316,12 @@ Relative fleet paths resolve against the repo root.
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 ```
 
-Preflight does not register providers, install CLI extensions or change context.
-It reports every unregistered provider and every missing CLI extension (`connectedmachine`,
-plus `containerapp` for Container Apps) in one error with the exact fix, for example
-`az extension add --name containerapp --yes`; resolve missing providers with
-separate operator authorization, using the exact providers reported
+Preflight does not register providers or subscription features, install CLI extensions or change context.
+It reports every unregistered provider, every unregistered subscription feature
+(`Microsoft.Compute/UseStandardSecurityType`, when the skin declares the nested SQL parent) and every
+missing CLI extension (`connectedmachine`, plus `containerapp` for Container Apps) in one error with
+the exact fix, for example `az extension add --name containerapp --yes`; resolve missing providers
+and features with separate operator authorization, using the exact ones reported
 by preflight for the skin's workload toggles (`Test-Prerequisites.ps1`, Deploy and
 the build wrapper's P0 check the same set). Supplying
 `-DeployerPrincipalId <OBJECT_ID>` bypasses only Graph user discovery, not RBAC.
