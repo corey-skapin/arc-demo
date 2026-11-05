@@ -610,6 +610,19 @@ if ($kvName) {
 Write-Header 'Deploying main.bicep'
 $vmOutput = Invoke-DemoAz -Arguments @('vm', 'list', '-g', $infraRg, '-o', 'json') -AllowNotFound
 $existingVms = @(if ($null -ne $vmOutput) { $vmOutput | ConvertFrom-Json })
+# Deploy owns the VM auto-shutdown schedule: every run sets it to the requested time, per VM as each VM module finishes,
+# so a time changed by hand does not survive a rerun. Say what is about to change instead of reverting it silently.
+if ($existingVms.Count) {
+    try {
+        $liveSchedules = @((Invoke-AzRest -Method Get -Url "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.DevTestLab/schedules?api-version=2018-09-15").value)
+        $changing = @($liveSchedules | Where-Object { $_.properties.dailyRecurrence.time -and ($_.properties.dailyRecurrence.time -ne $AutoShutdownTime -or $_.properties.timeZoneId -ne $AutoShutdownTimezone) })
+        if ($changing.Count) {
+            Write-Warn "$($changing.Count) VM auto-shutdown schedule(s) differ from the requested $AutoShutdownTime ($AutoShutdownTimezone) and this Deploy sets them to it: $((($changing | ForEach-Object { "$($_.name) $($_.properties.dailyRecurrence.time)" }) | Select-Object -First 4) -join ', ')$(if ($changing.Count -gt 4) { ', ...' }). To keep a different time, set operations.autoShutdownTime in the skin (or autoShutdownTime in the build config) and rerun; a change made by hand, or while a deployment runs, is reverted."
+        }
+    } catch {
+        Write-Warn "Could not read the existing VM auto-shutdown schedules ($($_.Exception.Message)); this Deploy sets them to $AutoShutdownTime ($AutoShutdownTimezone)."
+    }
+}
 # A VM that is already Updating holds this deployment's own write to it for as long as the platform keeps the earlier
 # operation open: about 90 minutes behind a Defender MDE.Linux install lock on a healthy Linux guest. Say so now.
 foreach ($busyVm in @($existingVms | Where-Object { $_.provisioningState -and $_.provisioningState -ne 'Succeeded' })) {

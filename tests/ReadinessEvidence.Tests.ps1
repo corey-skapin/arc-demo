@@ -135,31 +135,3 @@ Describe 'Readiness evidence for Heartbeat age, VM provisioning state and MDE' {
         @($checks | Where-Object { $_.id -match '^(provisioning|extension)/' -and $_.required }).Count | Should -Be 0
     }
 }
-
-Describe 'Deploy warns before it submits when a VM is already not Succeeded' {
-    BeforeAll {
-        $ast = [Management.Automation.Language.Parser]::ParseFile($script:deployScript, [ref]$null, [ref]$null)
-        $loop = $ast.Find({ param($node) $node -is [Management.Automation.Language.ForEachStatementAst] -and $node.Variable.VariablePath.UserPath -eq 'busyVm' }, $true)
-        $script:busyLoop = $loop.Extent.Text
-    }
-    It 'names each busy VM, says why the wait is long and what not to do, and ignores healthy and unknown ones' {
-        $global:WarnLog = [System.Collections.Generic.List[string]]::new()
-        function Write-Warn { param([string]$Message) $global:WarnLog.Add($Message) }
-        try {
-            $existingVms = @(
-                [pscustomobject]@{ name = 'lnx-app-01'; provisioningState = 'Updating' }
-                [pscustomobject]@{ name = 'lnx-app-02'; provisioningState = 'Succeeded' }
-                [pscustomobject]@{ name = 'win-app-01' }
-                [pscustomobject]@{ name = 'win-app-02'; provisioningState = 'Failed' })
-            & ([scriptblock]::Create($script:busyLoop))
-            $global:WarnLog.Count | Should -Be 2
-            $global:WarnLog[0] | Should -Match '^VM lnx-app-01 is Updating\. .*about 90 minutes.*Defender MDE\.Linux install lock'
-            $global:WarnLog[0] | Should -Match 'Do not cancel it, reapply the VM or send it a Run Command'
-            $global:WarnLog[0] | Should -Match 'docs/troubleshooting\.md, A Linux VM stays Updating behind a Defender MDE\.Linux install lock'
-            $global:WarnLog[1] | Should -Match '^VM win-app-02 is Failed\.'
-        } finally {
-            Remove-Item Function:\Write-Warn -ErrorAction SilentlyContinue
-            Remove-Variable WarnLog -Scope Global -ErrorAction SilentlyContinue
-        }
-    }
-}

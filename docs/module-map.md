@@ -180,8 +180,9 @@ daemon drop-ins, their order around `azcmagent connect`, LF line endings and `ba
 `tests/ArcMachineTags.Tests.ps1` covers the ARM tags merge (`Set-DemoResourceTags`: one
 value per key, skip when matching, read-back), Deploy's use of it and the required
 `tags/*` readiness rows; parity's `fleet/<machine>/tags` rows are in `tests/EstateParity.Tests.ps1`.
-`tests/ReadinessEvidence.Tests.ps1` covers the Heartbeat time in the readiness evidence, the soft
-`provisioning/*` and `MDE` rows and Deploy's warning for a VM that is not `Succeeded`.
+`tests/ReadinessEvidence.Tests.ps1` covers the Heartbeat time in the readiness evidence and the soft
+`provisioning/*` and `MDE` rows; `tests/DeployWarnings.Tests.ps1` covers Deploy's warnings before it submits
+(a VM that is not `Succeeded`, and the VM auto-shutdown schedules it is about to change).
 `tests/BuildPlan.Tests.ps1` covers the build wrapper's config, plan, approvals,
 resume state, runner and presenter handoff with stub scripts;
 `tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded

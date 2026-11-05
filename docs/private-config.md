@@ -36,7 +36,7 @@ prefix.
 | `schemaVersion` | `1` |
 | `arcSkinPath` | Private Arc skin (required) |
 | `deployerPrincipalId` | Optional Entra object ID (your own), only when Graph sign-in lookup is blocked; it replaces that lookup and bypasses no permission check. See [the CAE entry](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge) |
-| `autoShutdownTime` | Optional `HHmm` override for the build window. Leave it empty unless the build would cross the VM auto-shutdown; it is passed to the base deployment |
+| `autoShutdownTime` | Optional `HHmm` override of the VM auto-shutdown time. Deploy owns this schedule and sets it again on every run, so a time changed by hand is reverted (per VM, as each VM module finishes). To keep a later shutdown, set it here or as `operations.autoShutdownTime` in the skin **before** the Deploy. Leave it empty unless the build would cross the default 19:00: the plan warns when the typical minutes plus a 50% allowance would |
 | `nestedSqlBuildInputPath` | The nested guest's build inputs file listed above |
 | `mediaManifestPath` | Optional override of the tracked `config/demo-media.json` (installer URLs, sizes and SHA-256 pins; nothing in it is secret). Leave it out to use the tracked manifest |
 | `realSql` | Optional: SQL host `machineName`, the full guest-local `isoPath` in a folder (for example `C:\DemoMedia\SQLServer2022-x64-ENU-Dev.iso`) and `stageMedia` (`false` when the ISO is already on the guest). When the wrapper stages the ISO the file name must match the manifest's `fileName` for `sql-server-2022-developer`, and the install is pinned to its `sha256` |

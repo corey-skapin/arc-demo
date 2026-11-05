@@ -238,7 +238,7 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 
 | Step | What runs | Needs |
 | --- | --- | --- |
-| P0, P1 | Read-only preflight (tools, access, providers, repo state, soft-deleted workspace name, build window against the VM auto-shutdown) and onboarding-identity check | |
+| P0, P1 | Read-only preflight (tools, access, providers, repo state, soft-deleted workspace name, and the build window: the typical minutes plus a 50% allowance against the VM auto-shutdown, which Deploy sets again on every run, so set `autoShutdownTime` before the build if it would cross) and onboarding-identity check | |
 | P2 | `Deploy-ArcDemo.ps1` with the private skin. It saves the generated VM admin password to `vm-admin-credential.clixml` in the private folder before any Azure write, so a failed P2 reruns with the same password even when a tenant policy made the vault unreadable. Its last phase runs read-only Active readiness (up to 20 minutes for Heartbeats) **without** the nested guest's `nested/arc` row, because the guest is built later at P4; a failure names the rows that did not pass | `-ApproveCostStart` |
 | P3 | `Prepare-NestedSqlParent.ps1`: the Hyper-V parent for the nested guest. Runs after Deploy with the lab Active (it refuses a parked lab) and writes the nested build input into the private folder. A reported `status` of `pending` or `fail` is not recorded as done, and it is safe to re-run | `-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms` |
 | P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is resolved at the start of `-Execute`: `-GuestCredential`, else `nested-guest-credential.clixml` in the [private folder](private-config.md#saving-the-nested-guest-credential), else a prompt. A session that cannot prompt stops there, before anything starts. The wrapper only reads it and keeps it out of the evidence | |
@@ -470,7 +470,9 @@ It does not reset faults. Optional AKS can take longer and
 requires a 15-30 minute stop/start separation; capacity is not guaranteed.
 Nightly VM auto-shutdown is not whole-lab hibernation. VMs can also be
 deallocated outside these scripts: the DevTest auto-shutdown schedule (19:00 by
-default) and, in some subscriptions, governance automation that deallocates VMs
+default; Deploy owns it and sets it again on every run, so set `operations.autoShutdownTime`
+in the skin, or `autoShutdownTime` in the build config, before the Deploy to keep a later
+time) and, in some subscriptions, governance automation that deallocates VMs
 on its own schedule (observed nightly at about 02:17). Neither starts anything
 again, so a stopped fleet after a quiet night is expected, not a fault. Run
 Activate, which starts whatever is stopped, rather than repairing hosts by hand.

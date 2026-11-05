@@ -14,7 +14,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 | `nestedSqlGuest.*` | One optional nested Windows/SQL guest: enabled, parent VM name, Hyper-V guest name and Arc name; used by Activate/Hibernate/Remove. Deploy also declares the parent from it: optional `parentVmSize`, `parentDataDiskGb`, `parentDataDiskStorageAccountType` override the defaults below. | Disabled; use the [nested SQL runbook](nested-sql-demo.md) to configure a private skin. Parent defaults: `Standard_D4s_v5`, 128 GiB `StandardSSD_LRS` data disk |
 | `compute.vmSize` | VM SKU for Arc-simulated and optional native VMs. | `Standard_B2as_v2` |
 | `compute.osDiskStorageAccountType` | OS disk tier for simulated/native VMs; wrapper rejects existing-tier mismatches rather than converting disks. | `StandardSSD_LRS` for new OS disks; explicit `Standard_LRS` for retained HDD labs only |
-| `operations.*` | Auto-shutdown schedule. | 19:00 Cen. Australia Standard Time |
+| `operations.*` | Auto-shutdown schedule (`autoShutdownTime` as `HHmm`, `autoShutdownTimezone`). Deploy owns it and sets it again on every run, so set the time you want here before the Deploy; a hand-changed time is reverted, and Deploy says so before it submits. | 19:00 Cen. Australia Standard Time |
 | `cost.monthlyBudgetAmount` | Subscription budget threshold. | `200` |
 | `labels.*` | Demo title, workbook display name, opening/closing talk-track labels. | Arc Demo labels |
 | `tags.*` | Common Azure tags. | demo tags |

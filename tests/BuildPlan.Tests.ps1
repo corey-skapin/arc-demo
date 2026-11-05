@@ -928,6 +928,22 @@ Describe 'Build window' {
         Get-ArcDemoBuildWindowWarning -Minutes 60 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now ([datetime]::Parse('2026-11-02T20:00:00Z').ToUniversalTime()) | Should -BeNullOrEmpty
         Get-ArcDemoBuildWindowWarning -Minutes 60 -TimeZoneId 'No Such Zone' -Now $now | Should -Match 'Cannot evaluate'
     }
+
+    It 'applies an allowance for slow platform operations, says so, and tells the reader how to keep a later shutdown' {
+        $now = [datetime]::Parse('2026-11-02T16:00:00Z').ToUniversalTime()
+        # 150 typical minutes end at 18:30, inside the window; with a 50% allowance they would end at 19:45.
+        Get-ArcDemoBuildWindowWarning -Minutes 150 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now $now | Should -BeNullOrEmpty
+        $warning = Get-ArcDemoBuildWindowWarning -Minutes 150 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now $now -Allowance 1.5
+        $warning | Should -Match 'About 150 minutes of VM-dependent steps, plus a 50% allowance for slow or repeated platform operations \(225 minutes\), would cross the 19:00 auto-shutdown'
+        $warning | Should -Match 'Deploy sets this schedule again on every run, so a time changed by hand is reverted'
+        $warning | Should -Match 'autoShutdownTime in the build config \(or operations\.autoShutdownTime in the skin\)'
+        Get-ArcDemoBuildWindowWarning -Minutes 100 -ShutdownTime '1900' -TimeZoneId 'UTC' -Now $now -Allowance 1.5 | Should -BeNullOrEmpty
+    }
+
+    It 'plans the preflight window with that allowance' {
+        $text = Get-Content -LiteralPath (Join-Path $script:Repo 'scripts/lib/BuildPlan.psm1') -Raw
+        $text | Should -Match 'Get-ArcDemoBuildWindowWarning -Minutes \$Context\.RemainingMinutes -ShutdownTime \$time -TimeZoneId \$zone -Allowance 1\.5'
+    }
 }
 
 Describe 'Build preflight' {

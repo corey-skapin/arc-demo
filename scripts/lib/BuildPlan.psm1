@@ -707,21 +707,27 @@ function Get-ArcDemoBuildWindowWarning {
     <#
     .SYNOPSIS
         Warns when the build would run across the DevTest auto-shutdown time.
+    .DESCRIPTION
+        -Allowance multiplies the plan's typical minutes, because platform operations are often slower or repeated.
+        Deploy owns the schedule and sets it again on every run, so a time changed by hand does not survive a rerun.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][int]$Minutes,
         [string]$ShutdownTime = '1900',
         [string]$TimeZoneId = 'Cen. Australia Standard Time',
-        [datetime]$Now = [datetime]::UtcNow
+        [datetime]$Now = [datetime]::UtcNow,
+        [ValidateRange(1.0, 4.0)][double]$Allowance = 1.0
     )
     try { $zone = [TimeZoneInfo]::FindSystemTimeZoneById($TimeZoneId) }
     catch { return "Cannot evaluate the auto-shutdown window: time zone '$TimeZoneId' is unknown on this machine." }
     $start = [TimeZoneInfo]::ConvertTimeFromUtc($Now.ToUniversalTime(), $zone)
     $shutdown = $start.Date.AddHours([int]$ShutdownTime.Substring(0, 2)).AddMinutes([int]$ShutdownTime.Substring(2, 2))
     if ($shutdown -le $start) { $shutdown = $shutdown.AddDays(1) }
-    if ($shutdown -lt $start.AddMinutes($Minutes)) {
-        "About $Minutes minutes of VM-dependent steps would cross the $($shutdown.ToString('HH:mm')) auto-shutdown ($TimeZoneId) and deallocate the hosts mid-build. Start earlier or set autoShutdownTime in the build config."
+    $planned = [int][Math]::Ceiling($Minutes * $Allowance)
+    if ($shutdown -lt $start.AddMinutes($planned)) {
+        $basis = if ($Allowance -gt 1) { "About $Minutes minutes of VM-dependent steps, plus a $([int][Math]::Round(($Allowance - 1) * 100))% allowance for slow or repeated platform operations ($planned minutes)," } else { "About $Minutes minutes of VM-dependent steps" }
+        "$basis would cross the $($shutdown.ToString('HH:mm')) auto-shutdown ($TimeZoneId) and deallocate the hosts mid-build. Deploy sets this schedule again on every run, so a time changed by hand is reverted: start earlier, or set autoShutdownTime in the build config (or operations.autoShutdownTime in the skin) before the build."
     }
 }
 
@@ -804,7 +810,7 @@ function Invoke-ArcDemoBuildPreflight {
     if ($Context.RemainingMinutes -gt 0) {
         $time = if ($Context.Config.AutoShutdownTime) { $Context.Config.AutoShutdownTime } else { [string](Get-DemoSkinValue $Context.Skin 'operations.autoShutdownTime' '1900') }
         $zone = [string](Get-DemoSkinValue $Context.Skin 'operations.autoShutdownTimezone' 'Cen. Australia Standard Time')
-        $window = Get-ArcDemoBuildWindowWarning -Minutes $Context.RemainingMinutes -ShutdownTime $time -TimeZoneId $zone
+        $window = Get-ArcDemoBuildWindowWarning -Minutes $Context.RemainingMinutes -ShutdownTime $time -TimeZoneId $zone -Allowance 1.5
         if ($window) { $notes.Add($window) }
     }
     foreach ($note in $notes) { Write-Step $note }
