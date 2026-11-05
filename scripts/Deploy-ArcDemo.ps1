@@ -1196,8 +1196,17 @@ foreach ($wb in $nseilazSet) {
 # Phase 12: validation
 Write-Header 'Phase 12 — Validation'
 # Windows Heartbeats can arrive about 8 minutes after Arc connects, so poll (read-only) for up to 20 minutes.
-& (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 1200
-if ($LASTEXITCODE -ne 0) { throw 'Deployment finished, but required infrastructure/monitor readiness failed or remains pending. Inspect the checks above, then re-run Test-ArcDemoReadiness.ps1 (read-only) rather than redeploying; no faults were reset.' }
+# The nested guest is built after Deploy (wrapper step P4), so its Arc row is left out here.
+$readinessText = & (Join-Path $PSScriptRoot 'Test-ArcDemoReadiness.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -NamePrefix $NamePrefix -SkinPath $SkinPath -TimeoutSeconds 1200 -SkipNestedGuest -OutputFormat Json
+$readinessExit = $LASTEXITCODE
+$readiness = try { ($readinessText | Out-String) | ConvertFrom-Json } catch { $null }
+$openRows = @($readiness.checks | Where-Object { $_.required -and $_.status -ne 'pass' })
+foreach ($row in $openRows) { Write-Warn "$($row.id): $($row.status) (observed: $($row.observed))$(if ($row.message) { " $($row.message)" })" }
+if ($readinessExit -ne 0) {
+    $named = if ($openRows) { ": $(($openRows | ForEach-Object { "$($_.id) ($($_.status))" }) -join ', ')" } else { ' (no readable result; run Test-ArcDemoReadiness.ps1 for the reason)' }
+    throw "Deployment finished, but required infrastructure/monitor readiness rows did not pass$named. Re-run Test-ArcDemoReadiness.ps1 (read-only) rather than redeploying; no faults were reset."
+}
+Write-Ok "Readiness passed: $(@($readiness.checks | Where-Object { $_.required }).Count) required rows, $(@($readiness.checks | Where-Object { -not $_.required -and $_.status -ne 'pass' }).Count) soft warning(s)"
 
 Write-Header '🎉 Deploy complete'
 $wbUrl = "https://portal.azure.com/#@$TenantId/resource$wbId"

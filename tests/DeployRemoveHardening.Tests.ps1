@@ -877,8 +877,10 @@ Describe 'Readiness polling bound for a fresh deployment' {
     It 'allows read-only polling for up to 30 minutes and nothing unbounded' {
         { & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') @target -TimeoutSeconds 1801 } | Should -Throw '*1800*'
     }
-    It 'waits up to 20 minutes for Windows Heartbeats at the end of Deploy' {
-        (Get-Content (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -Raw) | Should -Match 'Test-ArcDemoReadiness\.ps1''\) .* -TimeoutSeconds 1200'
+    It 'waits up to 20 minutes for Windows Heartbeats at the end of Deploy, without the nested guest row, and names the rows that did not pass' {
+        $deploy = Get-Content (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -Raw
+        $deploy | Should -Match 'Test-ArcDemoReadiness\.ps1''\) .* -TimeoutSeconds 1200 -SkipNestedGuest -OutputFormat Json'
+        $deploy | Should -Match 'required infrastructure/monitor readiness rows did not pass\$named'
     }
 }
 

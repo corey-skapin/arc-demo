@@ -229,12 +229,12 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 | Step | What runs | Needs |
 | --- | --- | --- |
 | P0, P1 | Read-only preflight (tools, access, providers, repo state, soft-deleted workspace name, build window against the VM auto-shutdown) and onboarding-identity check | |
-| P2 | `Deploy-ArcDemo.ps1` with the private skin. It saves the generated VM admin password to `vm-admin-credential.clixml` in the private folder before any Azure write, so a failed P2 reruns with the same password even when a tenant policy made the vault unreadable | `-ApproveCostStart` |
+| P2 | `Deploy-ArcDemo.ps1` with the private skin. It saves the generated VM admin password to `vm-admin-credential.clixml` in the private folder before any Azure write, so a failed P2 reruns with the same password even when a tenant policy made the vault unreadable. Its last phase runs read-only Active readiness (up to 20 minutes for Heartbeats) **without** the nested guest's `nested/arc` row, because the guest is built later at P4; a failure names the rows that did not pass | `-ApproveCostStart` |
 | P3 | `Prepare-NestedSqlParent.ps1`: the Hyper-V parent for the nested guest. Runs after Deploy with the lab Active (it refuses a parked lab) and writes the nested build input into the private folder. A reported `status` of `pending` or `fail` is not recorded as done, and it is safe to re-run | `-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms` |
 | P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is requested at the start of `-Execute` (pass `-GuestCredential` to run unattended) and is never stored | |
 | P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status` | `-AcceptSqlDeveloperTerms` |
 | P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation) | |
-| P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes | |
+| P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes. This is the gate that includes the nested guest's `nested/arc` row (Deploy's own validation leaves it out) | |
 | P8 | Companion repo: LOB alert rule and LOB app | |
 | P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`; `-ApproveSubscriptionGrant` adds the opt-in alert-access grant |
 | P10 | Presenter context and guide for this repo (the SRE guide only if its context exists) | |

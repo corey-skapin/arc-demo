@@ -1243,6 +1243,24 @@ Describe 'Readiness CLI contract' {
         $LASTEXITCODE | Should -Be 2
         ($output | ConvertFrom-Json).status | Should -Be 'pending'
     }
+    It 'keeps polling while a required row is pending, even when an unrelated required row has already failed' {
+        Mock Get-DemoReadinessChecks {
+            New-DemoCheck 'resource/fixture' '/expected/id' 'exists' 'missing' 'fail'
+            New-DemoCheck 'heartbeat/fixture' '/expected/id' 'recent Heartbeat' $false 'pending'
+        }
+        Mock Start-Sleep {}
+        $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -TimeoutSeconds 1
+        $LASTEXITCODE | Should -Be 1
+        ($output | ConvertFrom-Json).status | Should -Be 'fail'
+        Should -Invoke Get-DemoReadinessChecks -Times 2
+    }
+    It 'stops at once when no required row is pending' {
+        Mock Get-DemoReadinessChecks { New-DemoCheck 'resource/fixture' '/expected/id' 'exists' 'missing' 'fail' }
+        Mock Start-Sleep {}
+        $null = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -OutputFormat Json -TimeoutSeconds 30
+        $LASTEXITCODE | Should -Be 1
+        Should -Invoke Get-DemoReadinessChecks -Times 1 -Exactly
+    }
     It 'keeps schema and exits compatible for Active' {
         Mock Get-DemoReadinessChecks { New-DemoCheck 'fixture' '/expected/id' 'ready' 'ready' 'pass' }
         $output = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -DesiredState Active -OutputFormat Json

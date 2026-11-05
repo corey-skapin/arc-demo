@@ -418,6 +418,20 @@ deallocated`, means a listed VM was deleted (or is running). Remove deleted VMs
 from `operations.keepParkedVmNames` in the private skin; keep a name there only
 while that VM exists and is parked.
 
+## Deploy finishes but says required readiness rows did not pass
+
+**Symptom** — the last phase ends with `required infrastructure/monitor readiness rows did not pass:
+heartbeat/<host> (pending), ...` (the rows are named; each is also printed as a warning).
+
+**Cause** — Deploy validates what it built, read-only, for up to 20 minutes. `heartbeat/*` rows stay
+`pending` while Azure Monitor Agent telemetry catches up (about 10 minutes, longer for Windows hosts); a
+`fail` row is a real gap. The nested SQL guest is not part of this check: it is built after Deploy (wrapper
+step P4), so its `nested/arc` row is left out here and is gated by P7. Before this was fixed, a skin with
+`nestedSqlGuest` could never pass Deploy's last phase, which stopped the wrapper at P2 on a perfect deployment.
+
+**Fix** — nothing was repaired or reset. Rerun `Test-ArcDemoReadiness.ps1 -DesiredState Active` (read-only)
+until it exits 0 rather than redeploying.
+
 ## Deploy fails partway at the nested parent: `securityType` is not available
 
 **Symptom** — most VMs, the network, the vault and the monitoring are created, then the

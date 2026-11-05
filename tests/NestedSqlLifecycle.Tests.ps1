@@ -222,6 +222,14 @@ Describe 'Nested SQL wiring in the normal entry points' {
         Should -Invoke Invoke-DemoNestedSqlGuest -Times 0
     }
 
+    It 'leaves the nested Arc row out of the base estate validation Deploy runs before the guest exists' {
+        Mock Invoke-DemoAz { throw 'no guest Arc machine exists yet' } -ParameterFilter { $Arguments[0] -eq 'connectedmachine' -and $Arguments[1] -eq 'show' }
+        $result = & (Join-Path $repo 'scripts\Test-ArcDemoReadiness.ps1') @target -OutputFormat Json -SkipNestedGuest | ConvertFrom-Json
+        $result.checks | Where-Object id -eq 'nested/arc' | Should -BeNullOrEmpty
+        $result.status | Should -Not -Be 'fail'
+        Should -Invoke Invoke-DemoAz -Times 0 -ParameterFilter { $Arguments[0] -eq 'connectedmachine' -and $Arguments[1] -eq 'show' }
+    }
+
     It 'checks nested Arc readiness without a guest command' -ForEach @(
         @{ Observed = 'Connected'; Expected = 'pass'; ExitCode = 0 }
         @{ Observed = 'Disconnected'; Expected = 'pending'; ExitCode = 2 }
