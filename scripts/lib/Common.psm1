@@ -986,6 +986,33 @@ function Get-DemoFleetWithNestedParent {
     }
 }
 
+function Get-DemoFleetWithoutRetainedSecurityType {
+    <#
+    .SYNOPSIS
+        Omits securityType from fleet entries whose VM already exists. Compute fixes the
+        security type when a VM is created and rejects a redeploy that sends it again
+        (PropertyChangeNotAllowed), so only a VM that is being created declares it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Fleet,
+        [AllowEmptyCollection()][string[]]$ExistingVmName = @()
+    )
+    foreach ($entry in $Fleet) {
+        $isTable = $entry -is [System.Collections.IDictionary]
+        $name = if ($isTable) { $entry['name'] } else { $entry.name }
+        $declaresType = if ($isTable) { $entry.Contains('securityType') } else { $null -ne $entry.PSObject.Properties['securityType'] }
+        if (-not $declaresType -or [string]$name -notin $ExistingVmName) {
+            $entry
+            continue
+        }
+        $kept = [ordered]@{}
+        if ($isTable) { foreach ($key in $entry.Keys) { if ($key -ne 'securityType') { $kept[$key] = $entry[$key] } } }
+        else { foreach ($property in $entry.PSObject.Properties) { if ($property.Name -ne 'securityType') { $kept[$property.Name] = $property.Value } } }
+        [pscustomobject]$kept
+    }
+}
+
 function Assert-DemoRetainedVmShape {
     <#
     .SYNOPSIS

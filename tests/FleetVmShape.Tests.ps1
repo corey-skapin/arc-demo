@@ -101,6 +101,55 @@ Describe 'Nested SQL parent shape from the skin' {
     }
 }
 
+Describe 'Redeploy never re-sends a security type to a VM that already exists' {
+    BeforeAll {
+        $config = [pscustomobject]@{ ParentVmName = 'win-sql-02'; ParentVmSize = 'Standard_D4s_v5'; ParentDataDiskGb = 128; ParentDataDiskStorageAccountType = 'StandardSSD_LRS' }
+    }
+    It 'keeps Standard on a nested parent that is being created' {
+        $declared = @(Get-DemoFleetWithNestedParent -Fleet @((New-FleetEntry -Name 'win-sql-01'), (New-FleetEntry -Name 'win-sql-02')) -NestedSqlGuest $config)
+        foreach ($existing in @(), @('win-sql-01')) {
+            $result = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet $declared -ExistingVmName $existing)
+            $result.Count | Should -Be 2
+            $result[1].name | Should -Be 'win-sql-02'
+            $result[1].securityType | Should -Be 'Standard'
+            $result[1].vmSize | Should -Be 'Standard_D4s_v5'
+            { Test-DemoFleet $result } | Should -Not -Throw
+        }
+    }
+    It 'omits the security type of a retained parent but still declares its size and data disk' {
+        $declared = @(Get-DemoFleetWithNestedParent -Fleet @(New-FleetEntry -Name 'win-sql-02') -NestedSqlGuest $config)
+        $declared[0].securityType | Should -Be 'Standard'
+        $result = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet $declared -ExistingVmName @('WIN-SQL-02'))
+        $result.Count | Should -Be 1
+        $result[0].PSObject.Properties.Name | Should -Not -Contain 'securityType'
+        $result[0].vmSize | Should -Be 'Standard_D4s_v5'
+        @($result[0].dataDisks).Count | Should -Be 1
+        $result[0].dataDisks[0].name | Should -Be 'nested-data'
+        { Test-DemoFleet $result } | Should -Not -Throw
+    }
+    It 'omits an explicit security type or a hashtable entry only when that VM exists' {
+        $retained = New-FleetEntry -Name 'win-app-01' -Extra @{ securityType = 'TrustedLaunch' }
+        $created = New-FleetEntry -Name 'win-app-02' -Extra @{ securityType = 'TrustedLaunch' }
+        $table = @{ name = 'win-app-03'; osType = 'Windows'; deploymentMode = 'azure-vm'; securityType = 'Standard' }
+        $result = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet @($retained, $created, $table) -ExistingVmName @('win-app-01', 'win-app-03'))
+        $result.Count | Should -Be 3
+        $result[0].name | Should -Be 'win-app-01'
+        $result[0].PSObject.Properties.Name | Should -Not -Contain 'securityType'
+        $result[1].securityType | Should -Be 'TrustedLaunch'
+        $result[2].name | Should -Be 'win-app-03'
+        $result[2].PSObject.Properties.Name | Should -Not -Contain 'securityType'
+    }
+    It 'returns entries that declare no security type, and an empty fleet, untouched' {
+        $plain = New-FleetEntry -Name 'win-app-01'
+        @(Get-DemoFleetWithoutRetainedSecurityType -Fleet @($plain) -ExistingVmName @('win-app-01'))[0] | Should -Be $plain
+        @(Get-DemoFleetWithoutRetainedSecurityType -Fleet @() -ExistingVmName @('win-app-01')).Count | Should -Be 0
+    }
+    It 'is applied by Deploy after the parent is declared and before the fleet is validated' {
+        $deploy = Get-Content -LiteralPath (Join-Path $repo 'scripts\Deploy-ArcDemo.ps1') -Raw
+        $deploy | Should -Match '(?s)Get-DemoFleetWithNestedParent -Fleet.*Get-DemoFleetWithoutRetainedSecurityType -Fleet \$onPremFleet -ExistingVmName @\(\$existingVms \| ForEach-Object \{ \$_\.name \}\).*Test-DemoFleet -Fleet \$onPremFleet'
+    }
+}
+
 Describe 'Redeploy never silently resizes a VM or detaches a data disk' {
     BeforeAll {
         function New-ExistingVm {

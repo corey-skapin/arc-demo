@@ -23,7 +23,7 @@ tiers that cannot be reliably sourced as Azure Marketplace images.
 | `supportsSql` | SQL-capable role metadata, not installation/health proof. Use the [real SQL helper](sql-engine-workload.md); never enable Arc SQL/BPA in this simulation. |
 | `esuEligible` | Surfaces the ESU discussion in Arc machine tags; it does not buy or configure ESU. |
 | `vmSize` | Optional. Azure VM size for this entry; the shared `compute.vmSize` applies when absent. Deploy never resizes a retained VM, so declare the size it already has. |
-| `securityType` | Optional `Standard` or `TrustedLaunch`; unset leaves the platform default. Nested virtualization needs `Standard`. |
+| `securityType` | Optional `Standard` or `TrustedLaunch`; unset leaves the platform default. Nested virtualization needs `Standard`. Compute fixes it when the VM is created and rejects a repeat, so Deploy sends it only for a VM that does not exist yet and omits it on a redeploy. |
 | `dataDisks` | Optional array of `{ name, lun, sizeGb, storageAccountType, caching }`. Each is a standalone managed disk named `<vm>-<name>` attached with `createOption: Attach`, so a redeploy converges on an existing disk. Deploy refuses to detach, resize or convert a retained disk that the entry does not declare. |
 
 The deploy script also tags every Arc machine with `osTier`, `monitorTier`,

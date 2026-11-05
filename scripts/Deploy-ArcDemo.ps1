@@ -633,6 +633,8 @@ if ($null -eq $onPremFleet) {
 }
 $nestedSqlGuest = Get-DemoNestedSqlGuestConfig -Skin $skin
 $onPremFleet = @(Get-DemoFleetWithNestedParent -Fleet $onPremFleet -NestedSqlGuest $nestedSqlGuest)
+# Compute rejects a repeated securityType on a VM that exists, so only a VM being created declares it.
+$onPremFleet = @(Get-DemoFleetWithoutRetainedSecurityType -Fleet $onPremFleet -ExistingVmName @($existingVms | ForEach-Object { $_.name }))
 Test-DemoFleet -Fleet $onPremFleet
 $nativePrefix = $NamePrefix.Replace('-', '')
 $expectedNativeVmName = "az-$($nativePrefix.Substring(0, [Math]::Min(9, $nativePrefix.Length)))-01"
