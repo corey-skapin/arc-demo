@@ -251,7 +251,7 @@ function New-CountBasedOnPremFleet {
     return $fleet
 }
 
-function Get-ArcMachineTagArgs {
+function Get-ArcMachineTags {
     param(
         [Parameter(Mandatory)]$Machine,
         [System.Collections.IDictionary]$BaseTags = @{}
@@ -271,7 +271,7 @@ function Get-ArcMachineTagArgs {
     $tags['machineConfig'] = 'enabled'
     $tags['inventory'] = 'arc'
 
-    return @($tags.GetEnumerator() | ForEach-Object { '{0}={1}' -f $_.Key, $_.Value })
+    return $tags
 }
 
 function Get-LogAnalyticsTableNames {
@@ -937,11 +937,14 @@ if (-not $ok) { throw 'Timed out waiting for all Arc machines to be Connected' }
 Write-Ok 'All Arc machines Connected'
 
 Write-Step 'Tagging Arc machines with OS, monitoring, and control-plane metadata...'
+# Merged through the ARM tags API and skipped when the tags already match: `az connectedmachine update --tags k=v k=v`
+# folds every pair after the first into the first key's value, and every write to a Linux host risks a Defender stall.
+$tagsWritten = 0
 foreach ($machine in $deployedFleet) {
-    $tagArgs = Get-ArcMachineTagArgs -Machine $machine -BaseTags $demoTags
-    az connectedmachine update -g $arcRg -n $($machine.name) --tags $tagArgs --only-show-errors -o none
+    $machineId = "/subscriptions/$SubscriptionId/resourceGroups/$arcRg/providers/Microsoft.HybridCompute/machines/$($machine.name)"
+    if (Set-DemoResourceTags -ResourceId $machineId -Tags (Get-ArcMachineTags -Machine $machine -BaseTags $demoTags)) { $tagsWritten++ }
 }
-Write-Ok 'Arc machine tags updated'
+Write-Ok "Arc machine tags: $tagsWritten written, $(@($deployedFleet).Count - $tagsWritten) already correct"
 
 Write-Header 'Phase 5.5 — Update Manager periodic assessment'
 foreach ($machine in $deployedFleet) {

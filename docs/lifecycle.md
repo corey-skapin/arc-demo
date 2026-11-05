@@ -419,7 +419,8 @@ eventual-consistency checks still pending at the deadline. Consumers correlate
 outside committed source because it contains live environment identifiers.
 
 Checks cover retained groups, core resources/workbook presence, exact VM power,
-Arc connection, recent Heartbeat by expected ARM ID, supported extension
+Arc connection, the `role` and `osTier` tags on every Arc machine (required `tags/*`
+rows, compared with the deployment manifest), recent Heartbeat by expected ARM ID, supported extension
 provisioning (soft, non-required `extension/*` diagnostics), DCRA identities, NAT
 attachment/presence, AKS power/provisioning and
 active Container App revision health. `RunningAtMinScale`/`RunningAtMaxScale` are

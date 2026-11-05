@@ -259,7 +259,7 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         $assignment = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$onboardArcMachines' }, $true)
         $invocation = $ast.Find({ param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Clauses[0].Item1.Extent.Text -eq '$toOnboardFleet.Count' }, $true)
         $script:onboardPhases = $assignment.Extent.Text + "`n" + $invocation.Extent.Text
-        function Get-ArcMachineTagArgs { param($Machine, $BaseTags) @('fixture=1') }
+        function Get-ArcMachineTags { param($Machine, $BaseTags) [ordered]@{ fixture = '1' } }
     }
     BeforeEach {
         New-OnboardingFixture
@@ -278,6 +278,7 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         Mock Write-Warn {}
         Mock Wait-Until { $true }
         Mock az { $global:OnboardingFixture.events.Add("az $($args[0]) $($args[1])") }
+        Mock Set-DemoResourceTags { $true }
         Mock Invoke-DemoGuestCommand {
             $fx = $global:OnboardingFixture
             $fx.events.Add('guest-command')
@@ -307,7 +308,10 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         $linux.Text | Should -Match "--service-principal-id 44444444-4444-4444-4444-444444444444 --service-principal-secret 'Synthetic-Onboarding-Secret-7419'"
         $windows.Text | Should -Match "--service-principal-id 44444444-4444-4444-4444-444444444444 --service-principal-secret 'Synthetic-Onboarding-Secret-7419'"
         Test-Path -LiteralPath $linux.Path | Should -BeFalse
-        Should -Invoke az -Times 4 -Exactly
+        # Only the two periodic-assessment updates still use az; the tags go through the ARM tags API.
+        Should -Invoke az -Times 2 -Exactly
+        Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -eq '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture/providers/Microsoft.HybridCompute/machines/vm-win' }
+        Should -Invoke Set-DemoResourceTags -Times 1 -Exactly -ParameterFilter { $ResourceId -like '*/machines/vm-lnx' -and $Tags['fixture'] -eq '1' }
     }
     It 'uses a supplied secret as is and mints nothing' {
         $fx = $global:OnboardingFixture
@@ -341,6 +345,6 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         $fx.events | Should -Not -Contain 'group-exists'
         $fx.events | Should -Not -Contain 'mint'
         $fx.guestScripts.Count | Should -Be 0
-        Should -Invoke az -Times 4 -Exactly
+        Should -Invoke az -Times 2 -Exactly
     }
 }

@@ -29,7 +29,9 @@ tiers that cannot be reliably sourced as Azure Marketplace images.
 The deploy script also tags every Arc machine with `osTier`, `monitorTier`,
 `esuEligible`, `inventory=arc`, `updateManager=assessment`, `defender=plan2`,
 and `machineConfig=enabled` so the Arc control-plane story is visible for all
-Arc-onboarded machines, including legacy entries.
+Arc-onboarded machines, including legacy entries. It merges them through the ARM
+tags API and leaves a host that already matches untouched; readiness and parity
+assert `role` and `osTier` against this manifest.
 
 ## Per-entry size and data disks
 

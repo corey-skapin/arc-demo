@@ -177,6 +177,9 @@ schema, the skin-declared nested parent, retained size/disk refusal and per-size
 capacity demand, including the Deploy preview wiring.
 `tests/LinuxArcOnboard.Tests.ps1` renders the Linux onboarding script and checks the
 daemon drop-ins, their order around `azcmagent connect`, LF line endings and `bash -n`.
+`tests/ArcMachineTags.Tests.ps1` covers the ARM tags merge (`Set-DemoResourceTags`: one
+value per key, skip when matching, read-back), Deploy's use of it and the required
+`tags/*` readiness rows; parity's `fleet/<machine>/tags` rows are in `tests/EstateParity.Tests.ps1`.
 `tests/BuildPlan.Tests.ps1` covers the build wrapper's config, plan, approvals,
 resume state, runner and presenter handoff with stub scripts;
 `tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded

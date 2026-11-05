@@ -360,6 +360,36 @@ is evidence about the agent, not about telemetry. A guest missing from the roste
 not yet an Arc machine in the group: onboard it, then republish the workbook. Do not
 change associations or collection from the workbook.
 
+## Arc machine tags are missing or one tag holds the rest
+
+**Symptom** — the Estate Overview's OS and environment filters, its Role and Tier columns and the
+governance table are empty or wrong, and every Arc machine reads *(untagged)* in the Capacity roster.
+An affected host keeps only `costcenter`, `env`, `owner` and `purpose`, and the value of `owner` holds
+the rest (`demo purpose=arc-demo role=sql osType=Windows ...`). Readiness fails the required
+`tags/<machine>` row and parity fails `fleet/<machine>/tags`.
+
+**Cause** — an earlier Deploy set the tags with `az connectedmachine update --tags k=v k=v ...`. In
+the `connectedmachine` extension 3.0.0 that option is shorthand syntax and folds every pair after the
+first into the first key's value, and the step ran on every Deploy, so each rerun corrupted the tags
+again while printing success. Deploy now merges them through the ARM tags API (`Set-DemoResourceTags`),
+reads the result back and skips a host whose tags already match.
+
+**Recovery** — rerun Deploy with the same skin; it writes only the tags that differ and recreates
+nothing. A tag edit is a resource write, and on a Linux host a write can seed the Defender stall
+described in [Linux ARM Updating while monitoring guest handlers are healthy](#linux-arm-updating-while-monitoring-guest-handlers-are-healthy),
+so to repair one host without a redeploy merge just its tags (a Merge keeps every tag it does not name):
+
+```powershell
+Import-Module .\scripts\lib\Common.psm1
+Initialize-DemoContext -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID>
+Set-DemoResourceTags -ResourceId '/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/rg-<prefix>/providers/Microsoft.HybridCompute/machines/<machine>' `
+    -Tags ([ordered]@{ owner = 'demo'; role = 'sql'; osType = 'Windows'; osTier = 'WS2022' })
+```
+
+The capacity and optimisation workbooks list the Arc machines and their tags as they were when they were
+published, so a tag repair needs a republish of both (a separately approved step; see the
+[runbook](runbook.md)).
+
 ## Linux Change Tracking missing despite healthy AMA
 
 The previous deploy implementation installed CT via Arc while AGENTS required

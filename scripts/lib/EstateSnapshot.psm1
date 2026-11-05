@@ -33,6 +33,14 @@ function Get-SnapshotValue {
     $current
 }
 
+function Test-SnapshotKey {
+    # Tells a field that was captured as empty from one an older snapshot never captured.
+    param([AllowNull()]$Object, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Object) { return $false }
+    if ($Object -is [System.Collections.IDictionary]) { return $Object.Contains($Name) }
+    $null -ne $Object.PSObject.Properties[$Name]
+}
+
 function ConvertTo-SnapshotDate {
     # A snapshot read back from JSON holds [datetime] values and a live one holds ISO text. Never go through a
     # culture-bound string: MM/dd/yyyy text parses as a different date under en-AU or de-DE.
@@ -107,7 +115,8 @@ function Get-DemoEstateSnapshot {
     $sections['arcMachines'] = Invoke-SnapshotSection {
         if (-not (Test-SnapshotGroup $groups.arc)) { return , @() }
         $machines = @(Get-SnapshotJson @('connectedmachine', 'list', '-g', $groups.arc, '-o', 'json')) | ForEach-Object {
-            [ordered]@{ name = (Get-SnapshotValue $_ 'name'); status = (Get-SnapshotValue $_ 'status'); osType = (Get-SnapshotValue $_ 'osType'); agentVersion = (Get-SnapshotValue $_ 'agentVersion') }
+            [ordered]@{ name = (Get-SnapshotValue $_ 'name'); status = (Get-SnapshotValue $_ 'status'); osType = (Get-SnapshotValue $_ 'osType'); agentVersion = (Get-SnapshotValue $_ 'agentVersion')
+                tags = (Get-SnapshotValue $_ 'tags') }
         }
         , @($machines)
     }
@@ -198,7 +207,7 @@ function Get-DemoEstateSnapshot {
         [ordered]@{
             deployment = $(if ($manifest) { $manifest[0].name } else { '' })
             machines = @(if ($manifest) { @($manifest[0].properties.outputs.vmFleet.value) | Where-Object { Get-SnapshotValue $_ 'deployed' } |
-                ForEach-Object { [ordered]@{ name = (Get-SnapshotValue $_ 'name'); osType = (Get-SnapshotValue $_ 'osType') } } })
+                ForEach-Object { [ordered]@{ name = (Get-SnapshotValue $_ 'name'); osType = (Get-SnapshotValue $_ 'osType'); role = (Get-SnapshotValue $_ 'role'); osTier = (Get-SnapshotValue $_ 'osTier') } } })
             azureVmNames = @(if ($manifest) { @(Get-SnapshotValue $manifest[0] 'properties.outputs.azureVmNames.value') | Where-Object { $_ } })
         }
     }
@@ -316,6 +325,17 @@ function Test-DemoEstateParity {
         foreach ($machine in $machines) {
             & $add "fleet/$($machine.name)/vm" 'Azure VM exists' ($machine.name -in $vmNames) ($machine.name -in $vmNames) ''
             & $add "fleet/$($machine.name)/arc" 'Arc machine exists' ($machine.name -in $arcNames) ($machine.name -in $arcNames) ''
+            # Tags are compared only when both sides captured them: a manifest from before the fleet output carried
+            # role and osTier, or a snapshot from before the Arc list kept tags, cannot be judged.
+            $wantRole = [string](Get-SnapshotValue $machine 'role')
+            $wantTier = [string](Get-SnapshotValue $machine 'osTier')
+            $arcEntry = @($arcState.Data | Where-Object { $_.name -eq $machine.name }) | Select-Object -First 1
+            if ($wantRole -and $wantTier -and $arcEntry -and (Test-SnapshotKey $arcEntry 'tags')) {
+                $tagMap = ConvertTo-DemoTagMap (Get-SnapshotValue $arcEntry 'tags')
+                $found = foreach ($tagName in 'role', 'osTier') { "$tagName=$(if ($tagMap.ContainsKey($tagName)) { $tagMap[$tagName] } else { '(missing)' })" }
+                $wanted = "role=$wantRole, osTier=$wantTier"
+                & $add "fleet/$($machine.name)/tags" "Arc machine tags $wanted" ($found -join ', ') (($found -join ', ') -ceq $wanted) 'The role/osTier tags the workbooks filter on are missing or wrong; Deploy merges them and skips a host that already matches.'
+            }
         }
         $azureVmNames = @(@(Get-SnapshotValue $fleet.Data 'azureVmNames') | Where-Object { $_ })
         foreach ($name in $azureVmNames) {

@@ -184,6 +184,46 @@ Describe 'Parity evaluation' {
         } finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $previous }
     }
 
+    Context 'Arc machine tags' {
+        BeforeEach {
+            $script:tagged = New-HealthySnapshot
+            foreach ($machine in $script:tagged.sections.fleet.data.machines) {
+                $machine | Add-Member -NotePropertyName role -NotePropertyValue 'app' -Force
+                $machine | Add-Member -NotePropertyName osTier -NotePropertyValue 'WS2022' -Force
+            }
+            foreach ($arc in $script:tagged.sections.arcMachines.data) {
+                $arc | Add-Member -NotePropertyName tags -NotePropertyValue ([pscustomobject]@{ role = 'app'; osTier = 'WS2022'; owner = 'demo' }) -Force
+            }
+        }
+        It 'passes when every manifest host carries the manifest role and osTier' {
+            $result = Invoke-Parity $script:tagged
+            Get-Failed $result | Should -HaveCount 0
+            @($result.checks | Where-Object id -like 'fleet/*/tags') | Should -HaveCount 3
+            ($result.checks | Where-Object id -eq 'fleet/win-a/tags').observed | Should -Be 'role=app, osTier=WS2022'
+        }
+        It 'fails the host whose tags were folded into one value, and says what was found' {
+            $script:tagged.sections.arcMachines.data[0].tags = [pscustomobject]@{ owner = 'demo purpose=arc-demo role=app osTier=WS2022' }
+            $failed = Get-Failed (Invoke-Parity $script:tagged)
+            $failed | Should -Be @('fleet/win-a/tags')
+            (Invoke-Parity $script:tagged).checks | Where-Object id -eq 'fleet/win-a/tags' | ForEach-Object { $_.observed | Should -Be 'role=(missing), osTier=(missing)' }
+        }
+        It 'fails a wrong value, treating a tag name as case-insensitive and a value as exact' {
+            $script:tagged.sections.arcMachines.data[1].tags = [pscustomobject]@{ ROLE = 'app'; ostier = 'ws2022' }
+            Get-Failed (Invoke-Parity $script:tagged) | Should -Be @('fleet/lnx-a/tags')
+        }
+        It 'fails a host that has no tags at all' {
+            $script:tagged.sections.arcMachines.data[0].tags = $null
+            Get-Failed (Invoke-Parity $script:tagged) | Should -Be @('fleet/win-a/tags')
+        }
+        It 'cannot judge a snapshot that predates tag capture or a manifest without role and osTier' {
+            foreach ($arc in $script:tagged.sections.arcMachines.data) { $arc.PSObject.Properties.Remove('tags') }
+            @((Invoke-Parity $script:tagged).checks | Where-Object id -like 'fleet/*/tags') | Should -HaveCount 0
+            $older = New-HealthySnapshot
+            foreach ($arc in $older.sections.arcMachines.data) { $arc | Add-Member -NotePropertyName tags -NotePropertyValue ([pscustomobject]@{ owner = 'demo' }) -Force }
+            @((Invoke-Parity $older).checks | Where-Object id -like 'fleet/*/tags') | Should -HaveCount 0
+        }
+    }
+
     It 'reports an unreadable snapshot section as failed checks with the exact error' {
         $snapshot = New-HealthySnapshot
         $snapshot.sections.subscription = [pscustomobject]@{ status = 'error'; error = '(AuthorizationFailed) denied for the test' }
@@ -221,7 +261,7 @@ Describe 'Snapshot collection' {
                 'group exists' { return $(if ($Arguments[3] -like '*-sre') { 'false' } else { 'true' }) }
                 'resource list' { return '[{"name":"law-par-test","type":"Microsoft.OperationalInsights/workspaces","location":"australiaeast","tags":null}]' }
                 'vm list' { return '[{"name":"win-a","hardwareProfile":{"vmSize":"Standard_B2as_v2"},"powerState":"VM running","storageProfile":{"osDisk":{"osType":"Windows","managedDisk":{"storageAccountType":"StandardSSD_LRS"}},"dataDisks":[{"lun":0,"diskSizeGb":128,"managedDisk":{"storageAccountType":"StandardSSD_LRS"}}]}}]' }
-                'connectedmachine list' { return '[{"name":"win-a","status":"Connected","osType":"windows","agentVersion":"1.0"}]' }
+                'connectedmachine list' { return '[{"name":"win-a","status":"Connected","osType":"windows","agentVersion":"1.0","tags":{"role":"app","osTier":"WS2022","owner":"demo"}}]' }
                 'monitor data-collection' { return '[{"dataCollectionRuleId":"/subscriptions/x/resourceGroups/rg/providers/Microsoft.Insights/dataCollectionRules/dcr-par-test"}]' }
                 'monitor log-analytics' { return '{"retentionInDays":30,"sku":{"name":"PerGB2018"},"workspaceCapping":{"dailyQuotaGb":-1}}' }
                 'keyvault list' { return '[{"name":"kv-partest-abc123","properties":{"publicNetworkAccess":"Enabled"}}]' }
@@ -231,7 +271,7 @@ Describe 'Snapshot collection' {
                 'security pricing' { return '{"value":[{"name":"VirtualMachines","pricingTier":"Standard","subPlan":"P2"}]}' }
                 'ad app' { return '[{"displayName":"sp-par-test-onboard","passwordCredentials":[{"displayName":"rbac","keyId":"k1","startDateTime":"2026-10-09T00:00:00Z","endDateTime":"2027-10-09T00:00:00Z","secretText":"must-not-be-copied"}]},{"displayName":"sp-par-test-onboard-other","passwordCredentials":[]}]' }
                 'identity list' { return '[{"name":"sre-par-test-uami","principalId":"44444444-4444-4444-4444-444444444444"}]' }
-                'deployment sub' { return '[{"name":"old","properties":{"provisioningState":"Succeeded","timestamp":"2026-10-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"vmFleet":{"value":[{"name":"old-host","deployed":true}]}}}},{"name":"new","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"azureVmNames":{"value":["az-par-01"]},"vmFleet":{"value":[{"name":"win-a","osType":"Windows","deployed":true},{"name":"skipped","deployed":false}]}}}},{"name":"other","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-02T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-other"},"vmFleet":{"value":[{"name":"x","deployed":true}]}}}}]' }
+                'deployment sub' { return '[{"name":"old","properties":{"provisioningState":"Succeeded","timestamp":"2026-10-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"vmFleet":{"value":[{"name":"old-host","deployed":true}]}}}},{"name":"new","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-01T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-par-test"},"azureVmNames":{"value":["az-par-01"]},"vmFleet":{"value":[{"name":"win-a","osType":"Windows","role":"app","osTier":"WS2022","deployed":true},{"name":"skipped","deployed":false}]}}}},{"name":"other","properties":{"provisioningState":"Succeeded","timestamp":"2026-11-02T00:00:00Z","outputs":{"arcResourceGroup":{"value":"rg-other"},"vmFleet":{"value":[{"name":"x","deployed":true}]}}}}]' }
                 default { throw "Unexpected az call: $($Arguments -join ' ')" }
             }
         } -ModuleName EstateSnapshot
@@ -255,6 +295,10 @@ Describe 'Snapshot collection' {
         $snapshot.sections.onboardingApp.data.credentials[0].displayName | Should -Be 'rbac'
         $snapshot.sections.fleet.data.deployment | Should -Be 'new'
         $snapshot.sections.fleet.data.machines.name | Should -Be @('win-a')
+        $snapshot.sections.fleet.data.machines[0].role | Should -Be 'app'
+        $snapshot.sections.fleet.data.machines[0].osTier | Should -Be 'WS2022'
+        $snapshot.sections.arcMachines.data[0].tags.role | Should -Be 'app'
+        $snapshot.sections.arcMachines.data[0].tags.osTier | Should -Be 'WS2022'
         $snapshot.sections.fleet.data.azureVmNames | Should -Be @('az-par-01')
     }
 

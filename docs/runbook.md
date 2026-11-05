@@ -276,13 +276,14 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 
 The snapshot records names, types, sizes, power states, associations, alert and
 workbook definitions, policy/budget/Defender state, onboarding-credential
-metadata and the retained manifest's fleet. It never reads a secret. A denied or
+metadata, the Arc machines' tags and the retained manifest's fleet. It never reads a secret. A denied or
 failed read is recorded verbatim in its section and the script exits 1.
 Take one before a teardown and one after a rebuild.
 
 The parity check compares a snapshot (or a fresh read) with
 [`config/expected-inventory.json`](../config/expected-inventory.json) and the
-manifest's fleet, exiting 0 only when every check passes. Run it while the estate
+manifest's fleet, exiting 0 only when every check passes. That includes the `role` and
+`osTier` tags of each Arc machine against the manifest, when both sides recorded them. Run it while the estate
 is Active (parked estates have no NAT gateway). Update the expected list in the
 same change that adds or removes a named object.
 

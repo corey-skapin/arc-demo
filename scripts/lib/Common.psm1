@@ -321,6 +321,53 @@ function Invoke-AzRest {
     Invoke-RestMethod @params
 }
 
+function ConvertTo-DemoTagMap {
+    <#
+    .SYNOPSIS
+        A tags object, as ARM or az returns it, as a case-insensitive name -> value map. $null and {} give an empty map.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()]$Tags)
+    $map = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq $Tags) { return $map }
+    if ($Tags -is [System.Collections.IDictionary]) {
+        foreach ($key in $Tags.Keys) { $map[[string]$key] = [string]$Tags[$key] }
+    } else {
+        foreach ($property in $Tags.PSObject.Properties) { $map[$property.Name] = [string]$property.Value }
+    }
+    $map
+}
+
+function Set-DemoResourceTags {
+    <#
+    .SYNOPSIS
+        Merges tags onto one resource through the ARM tags API and writes only when a wanted tag differs.
+        Returns $true when it wrote and $false when every wanted tag was already in place.
+    .DESCRIPTION
+        Not `az connectedmachine update --tags k=v k=v`: with extension 3.0.0 that is shorthand syntax and folds every
+        pair after the first into the first key's value, so a host kept four tags and `owner` held all the others. A Merge
+        leaves tags it does not name alone. The skip matters too: a tag edit is a resource write, and on a Linux host a
+        write can seed the Defender MDE.Linux install lock (see docs/troubleshooting.md). The write's response is read
+        back and a tag that did not take its value throws.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/[^/]+/.+')][string]$ResourceId,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Tags
+    )
+    $url = "https://management.azure.com$ResourceId/providers/Microsoft.Resources/tags/default?api-version=2021-04-01"
+    $member = { param($object, $name) if ($object -is [System.Collections.IDictionary]) { if ($object.Contains($name)) { $object[$name] } } elseif ($object) { $found = $object.PSObject.Properties[$name]; if ($found) { $found.Value } } }
+    $tagsOf = { param($response) & $member (& $member $response 'properties') 'tags' }
+    $wanted = ConvertTo-DemoTagMap $Tags
+    $current = ConvertTo-DemoTagMap (& $tagsOf (Invoke-AzRest -Method Get -Url $url))
+    $differs = @($wanted.Keys | Where-Object { -not $current.ContainsKey($_) -or $current[$_] -cne $wanted[$_] })
+    if (-not $differs.Count) { return $false }
+    $merged = ConvertTo-DemoTagMap (& $tagsOf (Invoke-AzRest -Method Patch -Url $url -Body @{ operation = 'Merge'; properties = @{ tags = $wanted } }))
+    $wrong = @($differs | Where-Object { -not $merged.ContainsKey($_) -or $merged[$_] -cne $wanted[$_] })
+    if ($wrong.Count) { throw "Tags on $ResourceId did not take the requested value after a Merge: $($wrong -join ', ')." }
+    $true
+}
+
 function Wait-Until {
     <#
     .SYNOPSIS
@@ -606,7 +653,7 @@ function Get-DemoInventory {
         $actual = $vmRecords | Where-Object { $_.id -eq $id } | Select-Object -First 1
         [pscustomobject]@{ Name = $entry.name; Id = $id; ArcId = "/subscriptions/$script:DemoSubscription/resourceGroups/$arcRg/providers/Microsoft.HybridCompute/machines/$($entry.name)"
             OsType = $entry.osType; Monitor = $entry.supportsAzureMonitor; VmInsights = $entry.supportsVmInsights
-            ChangeTracking = $entry.supportsChangeTracking; Native = $false; Actual = $actual }
+            ChangeTracking = $entry.supportsChangeTracking; Native = $false; Actual = $actual; Role = $entry.role; OsTier = $entry.osTier }
     }
     $machines = @($machines)
     foreach ($id in $nativeIds) {
@@ -1513,6 +1560,16 @@ function Get-DemoReadinessChecks {
         if (-not $machine.Native) {
             $arc = $arcMachines | Where-Object { $_.id -eq $machine.ArcId } | Select-Object -First 1
             New-DemoCheck "arc/$($machine.Name)" $machine.ArcId 'Connected' $arc.status $(if (-not $arc) { 'fail' } elseif ($arc.status -eq 'Connected') { 'pass' } else { 'pending' })
+            if ($arc -and $machine.Role -and $machine.OsTier) {
+                # The workbooks group and filter on these two tags; a host that is Connected but mistagged is not ready to present.
+                $tagMap = ConvertTo-DemoTagMap $arc.tags
+                $found = foreach ($tagName in 'role', 'osTier') { "$tagName=$(if ($tagMap.ContainsKey($tagName)) { $tagMap[$tagName] } else { '(missing)' })" }
+                $expectedTags = "role=$($machine.Role), osTier=$($machine.OsTier)"
+                $observedTags = $found -join ', '
+                $tagsOk = $observedTags -ceq $expectedTags
+                New-DemoCheck "tags/$($machine.Name)" $machine.ArcId $expectedTags $observedTags $(if ($tagsOk) { 'pass' } else { 'fail' }) `
+                    -Message $(if ($tagsOk) { '' } else { 'The role/osTier tags the workbooks filter on are missing or wrong. Deploy merges them through the ARM tags API and skips a host that already matches; see docs/troubleshooting.md, Arc machine tags are missing or one tag holds the rest.' })
+            }
         }
         $scope = if ($machine.Native) { $machine.Id } else { $machine.ArcId }
         $extensionScope = if ($machine.Native -or $machine.OsType -eq 'Linux') { $machine.Id } else { $machine.ArcId }
