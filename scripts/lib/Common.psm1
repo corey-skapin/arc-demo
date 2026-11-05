@@ -641,8 +641,8 @@ function Get-DemoInventory {
         $machines += @($resources | Where-Object { $_.type -eq 'Microsoft.Compute/virtualMachines' -and $_.id -notin $vmRecords.id } |
             ForEach-Object { [pscustomobject]@{ Name = $_.name; Id = $_.id; Actual = $null } })
         return [pscustomobject]@{ ArcRg = $arcRg; InfraRg = $infraRg; Resources = $resources; Machines = $machines
-            AksClusterIds = @($resources | Where-Object type -eq 'Microsoft.ContainerService/managedClusters' | ForEach-Object id)
-            ContainerAppIds = @($resources | Where-Object type -eq 'Microsoft.App/containerApps' | ForEach-Object id) }
+            AksClusterIds = @($resources | Where-Object type -eq 'Microsoft.ContainerService/managedClusters' | ForEach-Object { $_.id })
+            ContainerAppIds = @($resources | Where-Object type -eq 'Microsoft.App/containerApps' | ForEach-Object { $_.id }) }
     }
     $deployments = @(Invoke-DemoAz -Arguments @('deployment', 'sub', 'list', '--query',
         "[?properties.provisioningState=='Succeeded' && properties.outputs.arcResourceGroup.value=='$arcRg']", '-o', 'json') | ConvertFrom-Json |
@@ -858,6 +858,108 @@ function Get-DemoNetworkState {
     )
     if ($conflicts -and -not $ForHibernation) { throw ($conflicts -join ' ') }
     [pscustomobject]@{ Subnet = $subnet; Nat = $nat; PublicIp = $pip; NatId = $natId; PublicIpId = $pipId; SafeToRemove = -not $conflicts; ConflictMessage = $conflicts -join ' ' }
+}
+
+function Get-DemoRevisionSummary {
+    <#
+    .SYNOPSIS
+        The active revision names of one Container App, or a short reason when they cannot be read. Read-only.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InfraRg, [Parameter(Mandatory)][string]$Name)
+    try {
+        $active = @(@(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $InfraRg, '-n', $Name, '-o', 'json') | ConvertFrom-Json) |
+            Where-Object { $_.properties.active } | ForEach-Object { $_.name })
+        [pscustomobject]@{ Readable = $true; Active = $active; Message = '' }
+    } catch { [pscustomobject]@{ Readable = $false; Active = @(); Message = $_.Exception.Message } }
+}
+
+function Get-DemoParkPreview {
+    <#
+    .SYNOPSIS
+        One line per workload that Hibernate would park, for its -WhatIf preview.
+    .DESCRIPTION
+        Read-only: the only call it makes is listing each Container App's revisions. The lines come from the inventory
+        and network state the script has already read, so the preview says what a real run would do to this estate
+        instead of one generic sentence.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Inventory, [AllowNull()]$NestedSqlGuest, [AllowNull()]$Network)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $parked = @('VM deallocated', 'VM deallocating')
+    $machines = @($Inventory.Machines)
+    if ($NestedSqlGuest) {
+        $parent = $machines | Where-Object { $_.Name -ceq $NestedSqlGuest.ParentVmName } | Select-Object -First 1
+        $state = if ($parent -and $parent.Actual) { [string]$parent.Actual.powerState } else { 'unreadable' }
+        $lines.Add($(if ($state -eq 'VM running') {
+            "Nested SQL guest $($NestedSqlGuest.GuestVmName): stopped gracefully first, through Run Command on its parent $($NestedSqlGuest.ParentVmName) (up to 15 minutes)."
+        } else { "Nested SQL guest $($NestedSqlGuest.GuestVmName): no stop command, its parent $($NestedSqlGuest.ParentVmName) is $state." }))
+    }
+    foreach ($machine in $machines) {
+        $state = if ($machine.Actual.powerState) { [string]$machine.Actual.powerState } else { 'power state unknown' }
+        $lines.Add($(if ($machine.Actual.powerState -in $parked) { "VM $($machine.Name): $state, already parked." } else { "VM $($machine.Name): $state -> deallocate (submitted without waiting)." }))
+    }
+    foreach ($id in @($Inventory.AksClusterIds)) { $lines.Add("AKS $(($id -split '/')[-1]): stopped if it is running.") }
+    foreach ($id in @($Inventory.ContainerAppIds)) {
+        $name = ($id -split '/')[-1]
+        $summary = Get-DemoRevisionSummary -InfraRg $Inventory.InfraRg -Name $name
+        $lines.Add($(if (-not $summary.Readable) { "Container App ${name}: revisions could not be read ($($summary.Message))." }
+            elseif ($summary.Active.Count) { "Container App ${name}: active revision(s) $($summary.Active -join ', ') -> deactivate." }
+            else { "Container App ${name}: no active revision, nothing to deactivate." }))
+    }
+    if (-not $Network) { $lines.Add('Network: not inspected.') }
+    elseif (-not $Network.SafeToRemove) { $lines.Add("Network: left alone ($($Network.ConflictMessage)) NAT/PIP costs may remain.") }
+    else {
+        $names = @(
+            if ($Network.Subnet.natGateway.id -eq $Network.NatId) { 'the subnet association' }
+            if ($Network.Nat) { "NAT gateway $(($Network.NatId -split '/')[-1])" }
+            if ($Network.PublicIp) { "public IP $(($Network.PublicIpId -split '/')[-1])" })
+        $lines.Add($(if ($names.Count) { "Network: after compute has stopped, removed in this order: $($names -join ', ')." } else { 'Network: no NAT association, NAT gateway or public IP to remove.' }))
+    }
+    $lines.Add('Then: the Hibernated readiness check runs, and every required cost-state row must pass.')
+    $lines.ToArray()
+}
+
+function Get-DemoWakePreview {
+    <#
+    .SYNOPSIS
+        One line per step that Activate would take, for its -WhatIf preview.
+    .DESCRIPTION
+        Read-only: the only call it makes is listing each Container App's revisions. Nothing is started, created or tagged.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Inventory, [AllowNull()]$NestedSqlGuest, [AllowNull()]$Network, [int]$GuestCheckMinutes = 12)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($Network) {
+        $pipName = ($Network.PublicIpId -split '/')[-1]
+        $natName = ($Network.NatId -split '/')[-1]
+        $lines.Add($(if ($Network.PublicIp) { "Public IP ${pipName}: present." } else { "Public IP ${pipName}: absent -> created (Standard, static) before any VM starts." }))
+        $lines.Add($(if ($Network.Nat) { "NAT gateway ${natName}: present." } else { "NAT gateway ${natName}: absent -> created with that public IP." }))
+        $lines.Add($(if ($Network.Subnet.natGateway.id -eq $Network.NatId) { 'Subnet snet-vms: already attached to the NAT gateway.' } else { 'Subnet snet-vms: attached to the NAT gateway.' }))
+        $lines.Add('The NAT gateway and public IP carry the lab tags (owner, purpose, costcenter, env and the skin''s own).')
+    } else { $lines.Add('Network: not inspected.') }
+    foreach ($machine in @($Inventory.Machines)) {
+        $state = [string]$machine.Actual.powerState
+        $lines.Add($(switch ($state) {
+            'VM running' { "VM $($machine.Name): running, left alone." }
+            'VM starting' { "VM $($machine.Name): already starting, waited for." }
+            default { "VM $($machine.Name): $(if ($state) { $state } else { 'power state unknown' }) -> start." }
+        }))
+    }
+    foreach ($machine in @($Inventory.ParkedMachines | Where-Object { $_ })) { $lines.Add("VM $($machine.Name): kept deallocated (operations.keepParkedVmNames); never started.") }
+    if ($NestedSqlGuest) {
+        $lines.Add("Nested SQL guest $($NestedSqlGuest.GuestVmName): started through Run Command on its parent $($NestedSqlGuest.ParentVmName) as a concurrent job (5-minute budget), then its Arc connection is awaited.")
+    }
+    foreach ($id in @($Inventory.AksClusterIds)) { $lines.Add("AKS $(($id -split '/')[-1]): started if it is stopped.") }
+    foreach ($id in @($Inventory.ContainerAppIds)) {
+        $name = ($id -split '/')[-1]
+        $summary = Get-DemoRevisionSummary -InfraRg $Inventory.InfraRg -Name $name
+        $lines.Add($(if (-not $summary.Readable) { "Container App ${name}: revisions could not be read ($($summary.Message))." }
+            elseif ($summary.Active.Count) { "Container App ${name}: active revision(s) $($summary.Active -join ', ') left alone; no fault reset." }
+            else { "Container App ${name}: no active revision -> its latest revision is activated; no fault reset." }))
+    }
+    $lines.Add("Then one shared wait of up to $GuestCheckMinutes minutes for every host: VM running, Arc Connected and, for monitored hosts, a Heartbeat after the start.")
+    $lines.ToArray()
 }
 
 function Get-DemoRemovalChecks {
@@ -1095,11 +1197,12 @@ function Receive-DemoJobs {
     )
     try {
         $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-        do {
+        # Say what is awaited only when something is: a job that has already finished must not print a 15-minute budget.
+        while (@($Jobs | Where-Object State -in @('NotStarted', 'Running')).Count -and (Get-Date) -lt $deadline) {
             $remaining = [Math]::Max(0, [int]($deadline - (Get-Date)).TotalSeconds)
-            Write-Step "Waiting for guest/extension jobs: $($Jobs.Name -join ', ') ($remaining s remaining)"
-            $Jobs | Wait-Job -Timeout ([Math]::Min(15, $remaining)) | Out-Null
-        } while (@($Jobs | Where-Object State -in @('NotStarted', 'Running')).Count -and (Get-Date) -lt $deadline)
+            Write-Step "Waiting for guest/extension jobs: $(@($Jobs | Where-Object State -in @('NotStarted', 'Running')).Name -join ', ') ($remaining s remaining)"
+            $Jobs | Wait-Job -Timeout ([Math]::Min(15, [Math]::Max(1, $remaining))) | Out-Null
+        }
         foreach ($job in $Jobs) {
             if ($job.State -ne 'Completed') { throw "Job $($job.Name) did not complete: $($job.State). Inspect the target resource before retrying." }
             $output = Receive-Job $job -ErrorAction Stop
@@ -1578,7 +1681,7 @@ function Get-DemoReadinessChecks {
         $revisions = @(Invoke-DemoAz -Arguments @('containerapp', 'revision', 'list', '-g', $Inventory.InfraRg, '-n', $name, '-o', 'json') | ConvertFrom-Json)
         $active = @($revisions | Where-Object { $_.properties.active })
         $healthy = @($active | Where-Object { $_.properties.healthState -eq 'Healthy' -and $_.properties.runningState -in @('Running', 'RunningAtMaxScale', 'RunningAtMinScale') })
-        New-DemoCheck "containerapp/$name" $id $(if ($parked) { 'no active revisions' } else { 'healthy active revision' }) @($active.name) $(if (($parked -and $active.Count -eq 0) -or (-not $parked -and $healthy.Count -gt 0)) { 'pass' } else { 'pending' })
+        New-DemoCheck "containerapp/$name" $id $(if ($parked) { 'no active revisions' } else { 'healthy active revision' }) @($active | ForEach-Object { $_.name }) $(if (($parked -and $active.Count -eq 0) -or (-not $parked -and $healthy.Count -gt 0)) { 'pass' } else { 'pending' })
     }
     $network = Get-DemoNetworkState -InfraRg $Inventory.InfraRg -NamePrefix $NamePrefix -ForHibernation:$parked
     foreach ($id in $network.NatId, $network.PublicIpId) {

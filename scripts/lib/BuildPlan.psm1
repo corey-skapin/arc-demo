@@ -676,7 +676,7 @@ function Get-ArcDemoBuildPlan {
         $null
     }
     $isDone = { param($step) $State.steps.Contains($step.Id) -and $State.steps[$step.Id].status -eq 'done' -and -not $step.AlwaysRun -and -not $Force -and -not (& $staleAfter $step) }
-    $Context.PlannedSteps = @($Steps | Where-Object { -not $_.SkipReason -and -not (& $isDone $_) } | ForEach-Object Id)
+    $Context.PlannedSteps = @($Steps | Where-Object { -not $_.SkipReason -and -not (& $isDone $_) } | ForEach-Object { $_.Id })
     foreach ($step in $Steps) {
         $blockers = [System.Collections.Generic.List[string]]::new()
         $notes = [System.Collections.Generic.List[string]]::new()

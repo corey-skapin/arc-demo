@@ -593,6 +593,19 @@ Describe 'Activation with the real optional-network preflight' {
         Should -Invoke Invoke-DemoAz -Times 0
         Test-Path $path | Should -BeFalse
     }
+    It 'lists what a real wake would do from the network it read, including the tags, under -WhatIf' {
+        $global:ArcWakePreview = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Step { param($Message) $global:ArcWakePreview.Add($Message) }
+        try {
+            & (Join-Path $repo 'scripts\Activate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -WhatIf
+            $plan = $global:ArcWakePreview -join "`n"
+            $plan | Should -Match 'Public IP pip-natgw-retail-demo: absent -> created'
+            $plan | Should -Match 'NAT gateway natgw-retail-demo: absent -> created with that public IP'
+            $plan | Should -Match 'carry the lab tags'
+            $plan | Should -Match 'one shared wait of up to 12 minutes'
+            Should -Invoke Invoke-DemoAz -Times 0
+        } finally { Remove-Variable ArcWakePreview -Scope Global -ErrorAction SilentlyContinue }
+    }
     It 'normal activation reaches the mocked first write after accepting absent NAT and PIP' {
         Mock Invoke-DemoAz { throw 'TEST_WRITE_BOUNDARY' } -ParameterFilter { $Arguments[0] -eq 'network' -and $Arguments[1] -eq 'public-ip' -and $Arguments[2] -eq 'create' }
         $path = Join-Path $TestDrive 'normal-result.json'
@@ -1130,6 +1143,69 @@ Describe 'Best-effort Hibernate with real inventory and cost checks' {
     It 'never calls denied power inspection verified Hibernated' {
         $global:ArcParkFixture.denyPower = $true
         { & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo } | Should -Throw '*AuthorizationFailed*'
+    }
+    It 'keeps the steps, each VM power state, the revisions, the network outcome and the closing readiness in -ResultPath' {
+        $path = Join-Path $TestDrive 'hibernate-result.json'
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -ResultPath $path
+        $r = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $r.workload | Should -Be 'arc-demo-hibernation'
+        $r.status | Should -Be 'pass'
+        $r.readiness | Should -Be 'pass'
+        $r.error | Should -BeNullOrEmpty
+        $r.completedAtUtc | Should -Not -BeNullOrEmpty
+        @($r.vms.name) | Should -Be @('node-01', 'node-02')
+        @($r.vms | Where-Object { $_.powerStateBefore -eq 'VM running' -and $_.action -eq 'deallocate-submitted' }).Count | Should -Be 2
+        $r.aks[0].action | Should -Be 'stop-submitted'
+        @($r.containerApps[0].deactivatedRevisions) | Should -Be @('revision')
+        $r.network.status | Should -Be 'removed'
+        @($r.network.removed) | Should -Be @('subnet association', 'NAT gateway', 'public IP')
+        @($r.readinessChecks).Count | Should -BeGreaterThan 0
+        ($r.steps.message -join "`n") | Should -Match 'Submitting the deallocation of 2 of 2 VM'
+    }
+    It 'records a failed deallocation and the closing error in -ResultPath, and still throws' {
+        $global:ArcParkFixture.failVm = $true
+        $path = Join-Path $TestDrive 'hibernate-failed.json'
+        { & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -ResultPath $path } | Should -Throw '*running*'
+        $r = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $r.status | Should -Be 'fail'
+        $r.error | Should -Match 'running'
+        $r.vms[0].action | Should -Be 'deallocate-failed'
+        $r.vms[1].action | Should -Be 'deallocate-submitted'
+        ($r.warnings -join ' ') | Should -Match 'VM parking failed'
+        $r.completedAtUtc | Should -Not -BeNullOrEmpty
+    }
+    It 'rejects a -ResultPath folder that does not exist before parking anything' {
+        $f = $global:ArcParkFixture
+        { & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -ResultPath (Join-Path $TestDrive 'missing\result.json') } | Should -Throw '*parent directory must already exist*'
+        @($f.ops | Where-Object { $_ -match ' (deallocate|stop|deactivate|delete|update) ' }).Count | Should -Be 0
+    }
+    It 'prints a progress line before the first Azure read and a time-stamped line for each parking phase' {
+        $f = $global:ArcParkFixture
+        $f.steps = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Step { param($Message) $global:ArcParkFixture.steps.Add($Message) }
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo
+        $f.steps[0] | Should -Match '^Reading the inventory of rg-retail-demo-infra first'
+        $stamped = @($f.steps | Where-Object { $_ -match '^\d\d:\d\d:\d\d ' })
+        ($stamped -join "`n") | Should -Match 'Submitting the deallocation of 2 of 2 VM\(s\)'
+        ($stamped -join "`n") | Should -Match 'Stopping AKS fixture'
+        ($stamped -join "`n") | Should -Match 'Deactivating revision revision of Container App fixture'
+        ($stamped -join "`n") | Should -Match 'removing the NAT association, the NAT gateway and the public IP'
+        ($stamped -join "`n") | Should -Match 'Verifying the Hibernated state'
+    }
+    It 'prints what each workload would do under -WhatIf, writes no result file and changes nothing' {
+        $f = $global:ArcParkFixture
+        $f.steps = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Step { param($Message) $global:ArcParkFixture.steps.Add($Message) }
+        $path = Join-Path $TestDrive 'hibernate-preview.json'
+        & (Join-Path $repo 'scripts\Hibernate-ArcDemo.ps1') -SubscriptionId '11111111-1111-1111-1111-111111111111' -TenantId '22222222-2222-2222-2222-222222222222' -NamePrefix retail-demo -WhatIf -ResultPath $path
+        Test-Path -LiteralPath $path | Should -BeFalse
+        @($f.ops | Where-Object { $_ -match ' (deallocate|stop|deactivate|delete|update) ' }).Count | Should -Be 0
+        $plan = $f.steps -join "`n"
+        $plan | Should -Match 'VM node-01: VM running -> deallocate'
+        $plan | Should -Match 'VM node-02: VM running -> deallocate'
+        $plan | Should -Match 'AKS fixture: stopped if it is running'
+        $plan | Should -Match 'Container App fixture: active revision\(s\) revision -> deactivate'
+        $plan | Should -Match 'Network: after compute has stopped, removed in this order: the subnet association, NAT gateway natgw-retail-demo, public IP pip-natgw-retail-demo'
     }
 }
 

@@ -101,7 +101,7 @@ try {
     $raw = Receive-DemoJobs -Jobs @($job) -TimeoutSeconds $timeout -PassThru | ConvertFrom-Json
 } finally { [IO.File]::Delete($path) }
 $entries = @($raw.value | Where-Object { $_ })
-$stdout = @($entries | Where-Object code -Match '^ComponentStatus/StdOut/succeeded$|^ProvisioningState/succeeded$' | ForEach-Object message) -join "`n"
+$stdout = @($entries | Where-Object code -Match '^ComponentStatus/StdOut/succeeded$|^ProvisioningState/succeeded$' | ForEach-Object { $_.message }) -join "`n"
 if (-not $entries -or @($entries | Where-Object { $_.code -match 'failed|error' -or $_.level -eq 'Error' }).Count -or
     @($entries | Where-Object { $_.code -match '^ComponentStatus/StdErr/' -and $_.message }).Count -or
     $stdout -notmatch '(?m)^ARC_DEMO_OK\r?$') {

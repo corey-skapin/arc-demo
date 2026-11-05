@@ -90,7 +90,7 @@ if (-not $run) {
         } catch { $warnings.Add("Read-only checks stopped: $($_.Exception.Message)") }
     }
     Write-ArcDemoBuildPlan -Plan $plan -Warnings $warnings
-    $needed = @($plan | Where-Object { $_.Status -in @('ready', 'blocked') } | ForEach-Object Needs)
+    $needed = @($plan | Where-Object { $_.Status -in @('ready', 'blocked') } | ForEach-Object { $_.Needs })
     $switches = @((Get-ArcDemoApprovalSwitch).GetEnumerator() | Where-Object { $_.Key -in $needed } | ForEach-Object { "-$($_.Value)" })
     Write-Step ("To run it: .\scripts\Invoke-ArcDemoBuild.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -BuildConfigPath <CONFIG> -Execute " + ($switches -join ' ')).TrimEnd()
     if ($PassThru) { $plan | Select-Object -ExcludeProperty Definition -Property * }

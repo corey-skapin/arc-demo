@@ -554,7 +554,7 @@ function Set-DemoOperationalLayout {
     if ($duplicate) { throw "Workbook item name is not unique: $($duplicate.Name)." }
     $byName = @{}
     foreach ($item in $queryItems) { $byName[[string]$item.name] = $item }
-    $entries = @($Layout.PSObject.Properties | ForEach-Object Name)
+    $entries = @($Layout.PSObject.Properties | ForEach-Object { $_.Name })
     foreach ($name in $byName.Keys) { if ($name -notin $entries) { throw "Layout has no entry for workbook item $name." } }
     foreach ($name in $entries) {
         if (-not $byName.ContainsKey($name)) { throw "Layout entry $name is not a query item of this workbook." }
