@@ -44,11 +44,11 @@ the customer-facing Arc records and observability plane are in the other group.
 | `.github/workflows/lint.yml` Windows job | Executes nested guest and real SQL regressions with mocked Windows APIs |
 | `scripts/Deploy-ArcDemo.ps1` | Selected-provider/feature/CLI-extension and per-size SKU/quota checks (one `-Requirements` call covers every size); refuses to resize a retained VM or detach/convert its data disks; declares the nested parent's size and disk from the skin; stale-manifest handling after Remove; resumes an unfinished build from its own Failed deployment's vault and refuses to start over a Running one; Bicep preview, then a non-blocking submit (`--no-wait`) polled with progress, a transient-error check before any resubmit and a bounded wait that never stops the deployment, with allocation-failure guidance (never a size/region switch); Key Vault secret write through ARM and a protected `-AdminPasswordPath` copy of the generated password saved before any Azure write; preserve credentials/faults; NAT; Arc onboarding; checked extension jobs; DCRAs; workbook upsert; required infrastructure/monitor readiness (waits up to 20 minutes for Windows Heartbeats) |
 | `scripts/New-PresenterRunsheet.ps1` | Offline `.local` context validation and concrete presenter links/KQL (including the optional nested guest, LOB alert, data collection rule and the Machine Intelligence, Compliance, Asset Inventory and SQL Estate workbook links) from the single tracked `docs/runsheet.md` template; with `-SreGuidePath` it also writes `.local/full-demo-runsheet.md` (whole-demo table, the Arc guide, the SRE guide's own text as "The night shift (SRE half)" and one close); no Azure calls or lifecycle changes |
-| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads, one shared Heartbeat/Arc/ARM wait with a single global deadline (no Run Command host checks by default; opt-in `-GuestChecks`), concurrent nested-guest start, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness |
-| `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data |
+| `scripts/Activate-ArcDemo.ps1` | Explicit target, retained manifests, restore NAT/start workloads, one shared Heartbeat/Arc/ARM wait with a single global deadline (no Run Command host checks by default; opt-in `-GuestChecks`), concurrent nested-guest start, leave explicitly configured unused parents deallocated, optional asynchronous patch submission, readiness; tags the NAT gateway and public IP it recreates with the lab tags (a failure only warns); `-WhatIf` lists each step from the inventory it read |
+| `scripts/Hibernate-ArcDemo.ps1` | Best-effort all-compute parking inside the explicit infra RG despite manifest/skin drift; safe NAT cleanup afterward; retains faults/data; time-stamped progress, a per-workload `-WhatIf` plan and optional `-ResultPath` evidence (steps, power states, revisions, network outcome, closing readiness) |
 | `scripts/Remove-ArcDemo.ps1` | Named policy/budget and group deletion with a bounded, progress-printing wait (`-TimeoutMinutes`, default 60; exit 2 while deletion is still in progress); bounded nested-guest stop that warns and continues and is skipped for a guest that never became an Arc machine; optional identity/Defender changes, `-ForceDeleteWorkspace` (first, irreversible) and `-PruneDeploymentHistory` (own manifest records only) |
 | `scripts/Test-ArcDemoReadiness.ps1` | Read-only JSON v1/Table; Active (Ready alias), compute-only Hibernated with network cost diagnostics, Removed; bounded retries, exit 0/1/2 |
-| `scripts/lib/Common.psm1` | Skin/fleet validation (optional per-entry size, security type, data disks), checked CLI/REST with subscription pinning, tenant-only directory guards and CLI 2.91 not-found text, retained inventory, retained VM size/disk guards and per-size demand, bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota (CLI string quotas read as numbers; `-Requirements` adds several sizes per family), allocation guidance, Key Vault secret write through ARM (transient-only retry) and the DPAPI secret file helpers, stale-manifest selection, readiness checks |
+| `scripts/lib/Common.psm1` | Skin/fleet validation (optional per-entry size, security type, data disks), checked CLI/REST with subscription pinning, tenant-only directory guards and CLI 2.91 not-found text, retained inventory, retained VM size/disk guards (a deallocated VM's data disks are judged by the disk resource, and a tier mismatch says exactly what to declare) and per-size demand, the lab tag set (`Get-DemoResourceTags`), the `-WhatIf` plans (`Get-DemoParkPreview`, `Get-DemoWakePreview`), bounded waits/jobs, the shared host-readiness wait (`Wait-DemoHostsReady`: one Heartbeat query, parallel time-boxed ARM reads, opt-in guest-check script), `@file` guest-script transport/markers, capacity/quota (CLI string quotas read as numbers; `-Requirements` adds several sizes per family), allocation guidance, Key Vault secret write through ARM (transient-only retry) and the DPAPI secret file helpers, stale-manifest selection, readiness checks |
 | `Get-DemoNestedSqlGuestConfig`, `Invoke-DemoNestedSqlGuest`, `Wait-DemoNestedSqlArcConnected` in `Common.psm1`, `tests/NestedSqlLifecycle.Tests.ps1` | One skin-defined nested guest, normal graceful shutdown/start and bounded Arc connection wait across Activate/Hibernate/Remove |
 | `Initialize-DemoOnboardingIdentity`, `Invoke-DemoOnboardingCredential`, `Remove-DemoCreationCredential` and the Graph helpers in `Common.psm1`, `tests/OnboardingIdentity.Tests.ps1` | Shared by Deploy and the nested build: an existing onboarding SP keeps its credentials, its Arc-group role is ensured after the group exists, a one-day credential is minted through Graph, passed as a SecureString and removed in `finally` with the original key IDs verified; with no SP it is created with the role, its creation-time credential is used once and then removed (that key only) and nothing is stored |
 | `New-DemoArcLinuxOnboardScript`, `Get-DemoArcTestServiceEnvScript` in `Common.psm1`, `tests/LinuxArcOnboard.Tests.ps1` | Linux Arc onboarding script, always LF: `MSFT_ARC_TEST` for `azcmagent connect` plus a persistent systemd drop-in for `himdsd`, `extd` and `gcad` (best-effort restart of `extd`/`gcad` after connect). The drop-in step is idempotent and is also the one-off fix for a host onboarded by an older Deploy. Checked with `bash -n`; not yet run on a Linux host |
@@ -162,7 +162,12 @@ not a live fault or ingestion.
 
 `tests/Lifecycle.Tests.ps1` exercises waits, errors, config, mixed/native
 classification, retained additive manifests, ShouldProcess previews, guest/job
-failures and the JSON/exit-code contract without a cloud deployment.
+failures, Hibernate's `-ResultPath` evidence and progress lines, Activate's NAT/PIP
+tagging and the JSON/exit-code contract without a cloud deployment.
+`tests/LifecyclePreview.Tests.ps1` covers the park and wake plan lines, the guard that no
+script uses `ForEach-Object` with a bare member name (under `-WhatIf` that form prints a line
+per object and returns nothing, which emptied the Container App and AKS IDs), the job wait
+lines and the Hibernated Container App readiness row.
 `tests/GuestReadinessWait.Tests.ps1` covers the shared Activate wait on a simulated
 clock: all-fresh Heartbeats with Updating extensions, one pending host, deadline
 bounds for nine hosts, no Run Command by default, opt-in checks, the nested guest
@@ -173,7 +178,8 @@ CLI not-found text, clean-subscription and stale-manifest Deploy, the ARM Key Va
 write and its transient-only retry, the saved admin password file, the resume of an
 unfinished build, allocation guidance and the Remove workspace/history options.
 `tests/FleetVmShape.Tests.ps1` covers the optional per-entry size/security/disk
-schema, the skin-declared nested parent, retained size/disk refusal and per-size
+schema, the skin-declared nested parent, retained size/disk refusal (including a
+deallocated VM whose model reports no disk size or tier) and per-size
 capacity demand, including the Deploy preview wiring.
 `tests/LinuxArcOnboard.Tests.ps1` renders the Linux onboarding script and checks the
 daemon drop-ins, their order around `azcmagent connect`, LF line endings and `bash -n`.
@@ -189,7 +195,7 @@ the generated guest script, including Remove's stop-only `-AllowAbsent`.
 `tests/BuildPlan.Tests.ps1` covers the build wrapper's config, plan, approvals,
 resume state, runner and presenter handoff with stub scripts;
 `tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded
-denials) and the parity rules, both without Azure.
+denials) and the parity rules (including the lab tags on the NAT gateway and public IP), both without Azure.
 Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
 conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile

@@ -294,9 +294,27 @@ Take one before a teardown and one after a rebuild.
 The parity check compares a snapshot (or a fresh read) with
 [`config/expected-inventory.json`](../config/expected-inventory.json) and the
 manifest's fleet, exiting 0 only when every check passes. That includes the `role` and
-`osTier` tags of each Arc machine against the manifest, when both sides recorded them. Run it while the estate
+`osTier` tags of each Arc machine against the manifest, when both sides recorded them,
+and the lab tags (owner, purpose, costcenter, env) on the NAT gateway and public IP that
+Activate recreates. Run it while the estate
 is Active (parked estates have no NAT gateway). Update the expected list in the
 same change that adds or removes a named object.
+
+`-SnapshotPath` accepts only a snapshot that `Export-ArcDemoInventory.ps1` wrote
+(`workload: arc-demo-inventory`, `schemaVersion: 1`); a snapshot from any other tool is
+rejected, so take the before/after pair with the export script above.
+
+The onboarding-application rows (`snapshot/onboardingApp`, `tenant/onboarding-app`,
+`tenant/no-residual-credentials`, `tenant/no-long-lived-credentials`) read Microsoft Graph.
+When Graph answers with a continuous access evaluation challenge
+(`TokenCreatedWithOutdatedPolicies`), the scripts retry the call once without the CAE
+capability; if that cannot clear it, those rows fail with the hint in their message while
+every Azure row passes. That is not an estate fault: set
+`$env:AZURE_IDENTITY_DISABLE_CP1 = '1'` in the shell, or `az logout` then
+`az login --tenant <TENANT>`, and run the parity check again
+([troubleshooting](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge)).
+Observed on 5 November 2026: 3 of 57 checks failed with the cached token and 57 of 57
+passed with the variable set, in 151 seconds.
 
 ## 1. Choose the target and skin
 
@@ -461,13 +479,21 @@ It verifies deallocation/AKS stop/inactive revisions before safe NAT/PIP removal
 Foreign/shared bindings skip only networking with a loud residual-cost warning.
 Data, identities and fault flags remain. Failed compute attempts do not block
 attempts on other hosts/workloads; unknown/denied final power is not success.
+Hibernate prints a time-stamped line for each phase and takes the same optional
+`-ResultPath` as Activate (an existing private directory); allow about 7 minutes
+(observed 6 min 56 s and 7 min 16 s on eight VMs). The `-WhatIf` of Hibernate and of
+Activate lists what each workload would do instead of one generic line; Hibernate's
+takes about 80 seconds because it reads the full inventory first.
 Activation restores outbound NAT first, then starts retained workloads. Every run
 verifies the hosts, including already-connected ones, without restarting anything:
 one shared wait with a 12-minute global deadline (`-GuestCheckMinutes`) passes a host
 when its VM is running, Arc is `Connected` and, for a monitored host, a Heartbeat was
 generated after the VM start. No Run Command is used for host checks by default, so a
 VM extension update that is still `Updating` (a warning, never a gate) cannot stall the
-wake; expect about 12-15 minutes. A host with no Heartbeat at the deadline is pending
+wake; expect about 12-15 minutes (observed 11 min 55 s). The Arc status itself lags: Arc
+machines keep reading `Connected` for 11-16 minutes after a stop and then read
+`Disconnected`, so only the Heartbeat after the start decides a host. A host with no
+Heartbeat at the deadline is pending
 for that host only; a stopped VM or an Arc identity that never connects fails. Opt in
 to Run Command guest checks with `-GuestChecks WhenStalled|Always` (Windows Arc
 `himds`/`MonAgentCore`, Linux services) and to service restarts with
@@ -491,6 +517,9 @@ time) and, in some subscriptions, governance automation that deallocates VMs
 on its own schedule (observed nightly at about 02:17). Neither starts anything
 again, so a stopped fleet after a quiet night is expected, not a fault. Run
 Activate, which starts whatever is stopped, rather than repairing hosts by hand.
+A governance automation can also convert a parked estate's disks to Standard HDD; the
+next Deploy then refuses the tier
+([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
 
 Retain runtime target/skin/fleet inputs and deployment history outside git.
 If SRE is attached, park that dependent layer first through its own maintained
@@ -505,7 +534,13 @@ Use normal lifecycle `-WhatIf`, not deployment Graph/Owner/quota preflight or
 historical whole-group index comparisons. Exact network sharing is checked
 before network writes. On partial failure, retry without redeploying or waking compute.
 Enabled alerts can still evaluate/notify and incur charges; there is no automatic
-pause/restore of their previous enabled state.
+pause/restore of their previous enabled state. Each Hibernate fires the Sev2
+missing-heartbeat alert about 8-10 minutes after the VMs stop; it clears itself 16-21
+minutes after it fired (once with every host still silent), and nothing is paused. That
+is why a companion SRE agent is parked first. Other quiet-estate noise (Arc `Disconnected`,
+Resource Health flaps, failed platform patch writes, activity-log entries for names that
+are not in the subscription) is listed in
+[lifecycle](lifecycle.md#what-still-happens-to-a-parked-estate).
 
 ## 6. Remove permanently (separate destructive approval)
 

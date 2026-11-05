@@ -173,6 +173,10 @@ retention cost ([retention guidance](https://learn.microsoft.com/azure/azure-mon
 This does not make new ingestion, longer retention or enabled log alerts free.
 Automatic alert pausing is deliberately deferred: blindly re-enabling rules on
 wake would lose prior disabled state or override concurrent routing decisions.
+The cost of leaving them enabled is the evaluation and notification charges, plus a
+surprise: each Hibernate fires the Sev2 missing-heartbeat alert about 8-10 minutes
+after the VMs stop, and it clears itself 16-21 minutes after it fired, once with every host
+still silent ([lifecycle](lifecycle.md#what-still-happens-to-a-parked-estate)).
 
 ## Proposed disposable smoke cycle (not executed)
 

@@ -180,8 +180,20 @@ generated **after the VM start time**: the moment activation requested the start
 the start of the attempt for a host that was already running or starting. A host
 with no Heartbeat at the deadline is `pending` for that host only. A VM that is no
 longer running, an Arc identity that never connects, or no Heartbeat together with
-a `Failed` AMA extension fails. Expected wake is about 12-15 minutes (VM start 3-4,
-NAT 1-2, Windows Heartbeat up to about 9) rather than 30-45+.
+a `Failed` AMA extension fails. Observed wake: 11 min 55 s (5 November 2026, Linux hosts
+ready about 3 minutes after their start, Windows hosts about 7.5) and 14 min 54 s
+(2 November); expect about 12-15 minutes (VM start 3-4, NAT 1-2, Windows Heartbeat up
+to about 9) rather than 30-45+.
+
+The Arc `status` is the slowest signal to move, in both directions. After a
+deallocation the Arc machines kept reading `Connected` for 11-16 minutes (observed;
+Microsoft documents a heartbeat every five minutes and `Disconnected` "within 15 to 30
+minutes" of the last one, see [agent status](https://learn.microsoft.com/azure/azure-arc/servers/overview#agent-status)),
+so an Arc row that reads `Connected` just after a start proves nothing. Trust the
+Heartbeat that was generated after the start; it is the condition that decides the wait.
+After a park longer than that, the next wake meets machines that read `Disconnected`.
+Learn says the status changes back to `Connected` on the next heartbeat; this lab has
+not yet shown that reverse transition (see [validation boundaries](#validation-boundaries)).
 
 **No Run Command is used for host checks by default.** Run Command queues behind VM
 extension updates (Defender MDE, AMA, Change Tracking), so N blocked Linux VMs used
@@ -217,7 +229,10 @@ including retrying a failed assessment phase after compute is already running.
 It conflicts with `-SkipPatchAssessment`; native VMs are not Arc assessment
 targets. The activation result records `not-required` when no hosts need default
 submission. This is not proof of earlier assessment success or freshness.
-Submission is **not** assessment completion. `-SkipPatchAssessment` opts out;
+Submission is **not** assessment completion. The first assessment also makes the Update
+Manager identity add one `WindowsOsUpdateExtension` or `LinuxOsUpdateExtension` Arc
+extension per host (eight on the eight-host lab). They are not drift: an inventory count
+taken before and after the first wake rises by that many. `-SkipPatchAssessment` opts out;
 if Azure returns `OperationConflict` because an assess/patch operation is already
 running, activation warns and records `already-in-progress` in its per-host
 assessment output. It does not retry, cancel or claim completion. Other errors,
@@ -240,7 +255,14 @@ The AI must poll the read-only readiness command to pass before continuing the
 presentation, dependent SRE readiness or the conversational incident offer;
 activation exit 0 alone does not prove telemetry has arrived.
 Completion must come from stdout with no failed/Error-level result; a marker in
-stderr alone is not success. `-WhatIf` neither invokes guests nor writes this report.
+stderr alone is not success. `-WhatIf` neither invokes guests nor writes this report;
+it lists what a real run would do from the inventory and network it read (the NAT
+gateway and public IP it would create and tag, each VM with what happens to it, the
+nested guest, AKS, the Container App revisions and the shared wait). The tags are the
+lab's own (owner, purpose, costcenter, env and the skin's `tags`): Bicep stops declaring
+the NAT gateway and public IP once they exist, so Activate writes them again on the pair
+it recreates and checks them on every run. A tagging failure warns and never stops the
+wake, and parity reports an untagged pair.
 
 Fresh deployment creates NAT/PIP before backing compute/extension provisioning;
 it does not rely on implicit default outbound. Redeployment preserves an existing
@@ -261,6 +283,17 @@ parking steps intact: do not wake/redeploy to undo a partial stop. Retry the sam
 target to finish remaining known transitions (for example a failed PIP deletion).
 Network sharing is inspected again before removal after compute has stopped.
 
+Hibernate prints a time-stamped line for each phase, so its seven minutes are not
+silent. Its `-WhatIf` lists what each workload would do (each VM with its power state,
+the nested guest, AKS, the Container App revisions, the NAT gateway and public IP)
+instead of one generic sentence; it takes about 80 seconds on eight VMs because the
+full inventory is read first. `-ResultPath <PRIVATE_EXISTING_DIRECTORY>\hibernation-attempt.json`
+keeps the same evidence Activate's does outside git: the steps with their times, each
+VM's power state before parking, the revisions deactivated, the network outcome and the
+closing Hibernated readiness rows. The file is written when the run starts and again
+when it ends, passed or failed; a folder that does not exist is refused before anything
+is parked. Use a new file per attempt.
+
 Hibernated **required** acceptance is VM deallocation, deployed AKS
 Stopped/Succeeded and no active Container App revision. Named NAT/PIP absence
 is reported as **non-required cost diagnostics**: unsafe binding conflicts or
@@ -279,6 +312,24 @@ enabled as before and may incur evaluation/notification costs. Safe restoration
 would require preserving exact previous enabled state and reconciling concurrent
 changes/companion routing; a generic disable/enable would be unsafe. Evaluate a
 separate explicit pause only if measured savings justify that added state.
+
+**Every Hibernate fires the Sev2 missing-heartbeat alert.** The rule
+`alert-<prefix>-host-missing-heartbeat` looks for a host whose last Heartbeat is older
+than 10 minutes, so it fires about 8-10 minutes after the VMs are deallocated (observed
+7.7-9.7 minutes after the VMs read deallocated, 11.5 minutes after the last Heartbeat)
+and notifies the one e-mail receiver on the action group. It cleared itself 16-21
+minutes after it fired, and after the second Hibernate it did so while every host was
+still silent, so a cleared alert is not evidence that the hosts came back (the rule's
+15-minute query window probably explains it; that was not tested on a real outage).
+Nothing is paused and the rule is not faulty.
+A short park fires it during the next Activate too, until the last Windows host's
+Heartbeat returns (observed: cleared about 12 minutes after). The nested guest sends no
+Heartbeat rows, so the rule never covers it. E-mail delivery was not verified. This is
+why the companion SRE agent is parked first and woken last: an agent that is active
+during a Hibernate would receive this Sev2 as a live incident. Muting it while parked
+(an alert processing rule that suppresses the action group, created by Hibernate and
+removed by Activate; see [alert processing rules](https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-processing-rules))
+is an owner decision and is not implemented.
 
 Before parking, preserve the confirmed target, exact skin/fleet files and their
 hashes, prefix/region, deployment-manifest identities and optional revision/fault
@@ -320,6 +371,38 @@ retained tenant applications are explicit exceptions, not verified absence.
 Default removal deliberately retains the tenant onboarding identity; opt-in SP
 deletion does not claim application-object deletion. No purge is performed.
 Review these exclusions/delayed billing separately; do not promise a zero bill.
+
+### What still happens to a parked estate
+
+Observed on 5-6 November 2026 from read-only reads of an estate that stayed parked for
+about three hours. None of it is a lab fault and none of it needs action; it is listed
+so that nobody chases it in the activity log of a parked lab.
+
+- **Arc status** reads `Disconnected` 11-16 minutes after the stop. Resource Health for a
+  parked Arc machine flaps between `Available` and `Unavailable` and disagreed with the
+  `status` field for 16-20 minutes, so read `status`, not Resource Health. Hibernated
+  readiness has no Arc row, so the delayed flip cannot fail it. The reverse reconnection
+  at the next wake is not yet proven.
+- **No Defender push** arrives while the VMs are deallocated: three hourly slots passed
+  with no event. That says nothing about the push after a wake
+  ([below](#linux-vms-and-the-defender-mdelinux-install-lock)).
+- **The Sev2 heartbeat alert** fires and clears itself, as described above.
+- **Platform patch writes**: a platform update service writes the patch extensions on the
+  Arc machines about every 4.5 hours. A write to a parked machine stays `Running` for
+  about 31 minutes and then fails with `HCRP400` "The Hybrid Compute machine is not
+  connected to Azure."
+- **Linux VM extensions** (AMA, Change Tracking, `MDE.Linux`) read ARM `Updating` for at
+  least 86 minutes after a Hibernate that cancelled a stuck Defender write. Their effect
+  at the next Activate is not known.
+- **Activity-log noise**: hourly `upgradeExtensions` `HCRP404` failures on the Linux Arc
+  machines, Advisor recommendations for names that are not in the subscription, and
+  `Failed` `deployIfNotExists` evaluations of the repo's own `nist-<prefix>` assignment
+  after every VM write. See
+  [troubleshooting](troubleshooting.md#activity-log-noise-on-an-idle-or-parked-estate)
+  and [the policy entry](troubleshooting.md#failed-deployifnotexists-policy-events-follow-every-vm-write).
+- **Disk tier**: a governance automation can convert the disks to Standard HDD while the
+  estate is parked, and the next Deploy then refuses the tier. See
+  [troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself).
 
 ### Adding an optional workload to a running estate
 
@@ -545,17 +628,28 @@ has the cause and the recovery. For the lifecycle this means:
   after an Activate can leave that VM `Updating`. With the observed hourly push and
   independent timing that is roughly three in five VMs (derived from the 36-of-60-minute
   window, not measured; the push cadence did not stay hourly after one recovery, so treat
-  it as an upper bound). Activation is unaffected: it passes a host on VM running, Arc
+  it as an upper bound). It happened to all three Linux VMs after the Activate of 5 November
+  2026: a push 26 minutes after they finished starting left them `Updating` with
+  Heartbeats fresh, and the next Hibernate cancelled it 16.5 minutes later (left alone the
+  platform would have timed the write out about 91 minutes after it began). A Run Command,
+  a tag edit or a Deploy re-PUT during the window adds another `enable` and lengthens it, so
+  do none of them on those VMs while they are `Updating`: wait, or Hibernate, and never
+  redeploy. Activation is unaffected: it passes a host on VM running, Arc
   `Connected` and a fresh Heartbeat, and shows the extension state as a soft warning.
+  Nothing pushes to a deallocated estate (three hourly slots passed with no event while it was
+  parked), and one slot after a wake does not show that the cadence after a wake is hourly.
 - Readiness reports the VM's ARM provisioning state and `MDE.Linux` state as non-required
   `provisioning/*` and `extension/*` rows with a pointer to the entry; they never gate.
-- Hibernate meets such a VM only if one is `Updating` when it runs. What `az vm
-  deallocate` does then (queue, conflict or success) has not been tested. Hibernate
-  submits every deallocation without waiting, then waits up to 20 minutes for each VM
-  to read deallocated; a VM that is still not deallocated fails the run with an error
-  (never "verified stopped") and keeps the progress made, and a rerun after the VM
-  settles finishes the job. The DevTest auto-shutdown and any governance deallocation
-  face the same unknown.
+- Hibernate on `Updating` Linux VMs is proven (5 November 2026). With all three Linux VMs
+  `Updating` behind a Defender write that had been open for about 14 minutes, every
+  deallocation was accepted at once, with no 409 and no queueing; the stuck writes show
+  `Canceled` in the activity log 11-15 seconds before the VMs first read deallocated, and the
+  run exited 0 in 416.4 seconds. Hibernate submits every deallocation without waiting, then
+  waits up to 20 minutes for each VM to read deallocated; a VM that is still not deallocated
+  fails the run with an error (never "verified stopped") and keeps the progress made, and a
+  rerun after the VM settles finishes the job. The DevTest auto-shutdown and a governance
+  deallocation against `Updating` VMs were not exercised: the estate was already deallocated
+  by then.
 - Deploy warns before it submits when a VM is already `Updating`, then polls with progress.
   A tag edit or a re-PUT of a Linux VM is a write that can seed the stall, so Deploy skips
   the Arc tag write when the tags already match.
@@ -628,7 +722,9 @@ This proves one short retained-estate park/wake, including fresh post-start
 Heartbeats without the old explicit service restarts. Arc records still read
 `Connected` before wake while their backing VMs were parked, so an observed
 `Disconnected` to `Connected` transition, long-park reconnection and guest service
-health were not proven. Fresh deployment, double-deploy idempotency, AKS,
+health were not proven. The
+[5-6 November proof](#park-wake-and-park-again-5-6-november-2026) later showed the
+`Disconnected` half; the reconnection is still open. Fresh deployment, double-deploy idempotency, AKS,
 assessment completion, full removal and rebuild remain outside this proof;
 drift, denial and partial-failure paths remain mocked. The estate was left awake.
 
@@ -642,3 +738,50 @@ stderr and explicit-null JSON regressions remain. Mocks cannot prove Azure
 allocation, guest boot timing, RunCommand delivery/truncation, eventual ARM
 consistency or ingestion latency. Approve a disposable smoke cycle separately;
 see [cost.md](cost.md#proposed-disposable-smoke-cycle-not-executed).
+
+### Park, wake and park again: 5-6 November 2026
+
+An explicitly approved cycle on a rebuilt eight-host estate (nine Arc machines with the
+nested guest) ran Hibernate, Activate and Hibernate again. Durations are wall-clock from
+the scripts' own timing, not promises. The 2 November figures above came from a different
+estate and are kept as dated evidence.
+
+| Phase | Result | Duration | 2 November figure |
+| --- | --- | --- | --- |
+| Hibernate `-WhatIf`, twice | exit 0; one generic line then (a per-workload plan now) | 75.6 s and 81.6 s | n/a |
+| Hibernate | exit 0, Hibernated status pass | 435.6 s (7 min 16 s) | 8 min 35.2 s |
+| Independent Hibernated readiness | pass, 12 of 12 rows | 0.9 min | n/a |
+| Activate | exit 0, result pass, readiness pass | 715.4 s (11 min 55 s) | 14 min 54.1 s |
+| Independent Active readiness | pass, 80 rows, no required or soft row failing | 2.7 min | n/a |
+| SQL engine status, nested guest test, Arc SQL inventory | pass | 76.7 s, 36.8 s, 13 s | n/a |
+| Live parity | pass, 57 of 57 checks, with the [Graph workaround](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge) | 151 s | n/a |
+| Hibernate again, three Linux VMs `Updating` | exit 0, Hibernated status pass | 416.4 s (6 min 56 s) | n/a |
+| Independent Hibernated readiness | pass, 12 of 12 rows | 0.8 min | n/a |
+
+What this proves, for this estate and these dates:
+
+- All eight deallocations were accepted together with no 409 or queueing; Windows VMs read
+  deallocated within about a minute and Linux VMs within about three.
+- Hibernate preserved the DevTest schedules, the Defender plan and extensions, the fault
+  flag, the disks, the vault, the Arc identities and extensions and the alert rules.
+- Everything came back after Activate with no manual action: the SQL engine and orders
+  worker, the nested guest's Arc agent and SQL extension, the Arc SQL inventory (four system
+  databases online) and the Container App revision.
+- Hibernate with the three Linux VMs `Updating` from a Defender push is accepted at once
+  with no 409 and cancels the stuck writes. The post-Activate Defender stall is real (a push
+  26 minutes after boot stalled all three Linux VMs) and cleared on that Hibernate.
+- The Arc machines read `Disconnected` 11-16 minutes after the stop and stayed so, and
+  nothing pushed to the estate while it was deallocated
+  ([what still happens to a parked estate](#what-still-happens-to-a-parked-estate)).
+
+Still not proven:
+
+- The reverse transition. The Activate in this cycle began about three minutes after the
+  first Hibernate ended, before any machine read `Disconnected`, and the machines were not
+  woken after the second park. Only an Activate after a long park shows whether the Arc
+  machines reconnect without help; the wake wait's Arc `Connected` and Heartbeat-after-start
+  conditions decide it.
+- Whether the ARM `Updating` state that the Linux VM extensions kept after the deallocate
+  matters at the next Activate, and whether a platform patch write that is still pending
+  when an Activate starts overlaps the boot-time `MDE.Linux` lock.
+- Delivery of the heartbeat alert e-mail.

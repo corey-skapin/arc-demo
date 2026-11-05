@@ -301,9 +301,26 @@ was pending only on the six Linux AMA/Change Tracking extension models reporting
 `Updating`, with fresh Heartbeats. This is not full Ready or completed patch
 assessment proof. The estate was retained awake for separately approved work.
 
-Arc Connected is not SQL readiness. After wake, run the parent-side SQL check:
+Arc Connected is not SQL readiness. After a wake, in a new shell, reload what the
+Build section created: `$build` and `$result` exist only in the shell that ran the
+build, so read them back from the build input, the saved result and the guest
+credential in the [private folder](private-config.md#saving-the-nested-guest-credential)
+(use `Get-Credential -UserName Administrator` instead when no credential was saved),
+then run the parent-side SQL check:
 
 ```powershell
+Import-Module .\scripts\lib\Common.psm1
+$skin = Get-DemoSkin -Path '<PRIVATE>\arc-skin.json'
+$guest = Get-DemoNestedSqlGuestConfig -Skin $skin
+$prefix = Get-DemoSkinValue $skin 'azure.namePrefix' 'arc-demo'
+$build = Get-Content '<PRIVATE>\nested-sql-build.json' -Raw | ConvertFrom-Json -AsHashtable
+$build.ParentResourceGroup = "rg-$prefix-infra"
+$build.ResourceGroup = "rg-$prefix"
+$build.ParentVmName = $guest.ParentVmName
+$build.VmName = $guest.GuestVmName
+$build.VmRoot = "D:\NestedSQL\VMs\$($guest.GuestVmName)"
+$build.GuestCredential = Import-Clixml -LiteralPath '<PRIVATE>\nested-guest-credential.clixml'
+$result = Get-Content '<PRIVATE>\nested-sql-result.json' -Raw | ConvertFrom-Json
 $parent = @{ SubscriptionId = $build.SubscriptionId; TenantId = $build.TenantId;
     ParentResourceGroup = $build.ParentResourceGroup; ParentVmName = $build.ParentVmName;
     ParentVmId = $build.ParentVmId }
@@ -315,12 +332,19 @@ $parent = @{ SubscriptionId = $build.SubscriptionId; TenantId = $build.TenantId;
     -ArcName $build.VmName -SqlResourceName $build.VmName
 ```
 
+Each Test step runs as a managed Run Command on the parent and keeps one of the
+parent's 25 saved commands: the helper removes a completed `nestedDemo20*` command
+only once the parent already holds 25 ([the limit](troubleshooting.md#nested-sql-build-and-cold-wake-lessons)).
+Observed after a wake on 5 November 2026: the step took about 37 seconds, the Arc SQL
+inventory about 13 seconds, and the parent went from 6 to 7 saved commands.
+
 Allow extension/service and inventory startup lag; no manual login grants or
 repair are a normal wake step. See [troubleshooting](troubleshooting.md).
 
 ## Remove
 
-For a guest-only rebuild, wake its parent first and use the saved build identities:
+For a guest-only rebuild, wake its parent first and use the saved build identities
+(`$build` and `$parent` come from the post-wake snippet above; run that first in a new shell):
 
 ```powershell
 $saved = Get-Content '<PRIVATE>\nested-sql-result.json' -Raw | ConvertFrom-Json

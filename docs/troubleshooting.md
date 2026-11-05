@@ -136,7 +136,9 @@ restarting anything. No reinstall/restart is part of read-only rehearsal preflig
 wake or a deployment should take, while the guest is healthy: the agent is active, Heartbeats are fresh and AMA
 and Change Tracking run. A Deploy rerun waits at that VM's module with nothing else wrong, and a Run Command sent
 to it queues. It recurs, because Defender pushes the extension about hourly: in one build window three Linux VMs
-spent most of four hours `Updating`. Readiness shows non-required `provisioning/<vm>` and `extension/<vm>/MDE.Linux` rows.
+spent most of four hours `Updating`. After an Activate it is likely rather than rare: on 5 November 2026 a push
+26 minutes after the three Linux VMs finished starting stalled all three, until the next Hibernate cancelled it.
+Readiness shows non-required `provisioning/<vm>` and `extension/<vm>/MDE.Linux` rows.
 
 **Cause** — the vendor's MDE.Linux handler (observed in version 1.0.16.6) writes an install lock with a 36-minute
 expiry at the end of every real `enable`, even when its installer wrapper already finished and removed its own, so
@@ -164,10 +166,19 @@ defect in the vendor extension: nothing here removes, reinstalls or patches Defe
   best effort). It only inspects: an Arc-channel run command produces no goal state and cannot heal the VM.
 - Deploy warns before it submits when a VM is already `Updating` and then polls its deployment with progress, so the
   wait is visible rather than silent. It does not skip, cancel or reorder anything.
-- What a deallocate does to a VM that is `Updating` (queue, conflict or success) has not been tested. Hibernate
-  submits the deallocation without waiting and then waits up to 20 minutes for the VM to read deallocated; if it
-  does not, the run fails with an error rather than reporting verified stopped compute, and a rerun after the VM
-  settles finishes the job; see [the lifecycle note](lifecycle.md#linux-vms-and-the-defender-mdelinux-install-lock).
+- Hibernate is safe on a VM that is `Updating`, and is the quickest way out. Proven on 5 November 2026 with all
+  three Linux VMs `Updating` behind a Defender write that had been open for about 14 minutes: every deallocation was
+  accepted at once (no 409, no queueing), the stuck writes show `Canceled` in the activity log 11-15 seconds before
+  the VMs read deallocated, and the run exited 0 in 416.4 seconds. Hibernate submits the deallocation without
+  waiting and then waits up to 20 minutes for the VM to read deallocated; if it does not, the run fails with an
+  error rather than reporting verified stopped compute, and a rerun after the VM settles finishes the job; see
+  [the lifecycle note](lifecycle.md#linux-vms-and-the-defender-mdelinux-install-lock). While deallocated, the VMs'
+  AMA, Change Tracking and `MDE.Linux` extensions kept reading ARM `Updating` for at least 86 minutes; the effect at
+  the next Activate is not known.
+- Do not use the `MDE.Linux` VM-extension status time as a push detector: it read the same constant (11 May 2026
+  00:00 UTC) in every capture of the lab, whether or not an `enable` had run. Detect a push from the VM's
+  provisioning-state transitions, from `extensions/write` events in the activity log whose caller is the Defender
+  resource provider, or from the vmSettings goal-state events.
 
 The defect belongs to the Defender for Endpoint extension owners (create the lock before starting the wrapper and
 delete it when the wrapper ends, or write a status file in the "already in progress" branch, and do not share one
@@ -565,6 +576,12 @@ Continuous access evaluation resulted in challenge with result: InteractionRequi
 ```
 
 Repeated `az login` (even with the Graph scope) does not clear it.
+
+Live `Test-ArcDemoParity.ps1` shows it only as failed onboarding-application rows
+(`snapshot/onboardingApp`, `tenant/onboarding-app`, `tenant/no-residual-credentials`,
+`tenant/no-long-lived-credentials`; the message carries the hint) while every Azure row passes.
+They are not estate faults. Observed on 5 November 2026: 3 of 57 checks failed with the
+cached token and 57 of 57 passed with the variable below set, in 151 seconds.
 
 **Cause** — the Azure CLI keeps reusing a cached CAE-capable Graph token that was minted before a
 tenant policy event, and cannot answer the interactive challenge non-interactively.
@@ -1082,6 +1099,62 @@ az policy state trigger-scan --subscription <SUB> --resource-group rg-arc-demo
 ```
 
 The scan remains asynchronous with no fixed demo-time completion guarantee.
+
+## Failed deployIfNotExists policy events follow every VM write
+
+**Symptom** — After a Deploy (or any other write to a VM) the activity log holds one `Started`
+and one `Failed` `deployIfNotExists` policy event per VM, about 60-110 seconds after the write
+finished: "Evaluation of DeployIfNotExists policy was unsuccessful. The policy assignment
+'.../nist-<prefix>' resource identity does not have the necessary permissions to create
+deployment ...". Observed on the eight-host lab: 54 `Failed` and no `Succeeded` over seven
+batches of VM writes. Nothing follows a deallocate, a start, an extension write or a disk write.
+
+**Cause** — `bicep/modules/policy.bicep` assigns the NIST SP 800-53 initiative with
+`enforcementMode: 'Default'` and a system-assigned identity, but grants that identity no
+role. The audit half of the initiative works; its remediation (for example installing the
+Guest Configuration extension) can never deploy. The VMs are unaffected.
+
+**What to do** — Nothing; it is expected. Do not remove the assignment, change its
+enforcement mode or hand-grant roles to clear the rows: granting the roles would install
+Guest Configuration extensions on every VM, a visible change to confirm first, and
+[AGENTS.md](../AGENTS.md) keeps the existing policy as it is. Leaving the assignment
+audit-only (the demo as built) or granting the policy identities the roles named in each
+definition is an owner decision.
+
+## Activity log noise on an idle or parked estate
+
+**Symptom** — The activity log of a parked or idle lab shows operations nobody started:
+hourly `upgradeExtensions` failures on the Linux Arc machines with `HCRP404`, patch-extension
+writes on the Arc machines that end `Failed` with `HCRP400`, and Advisor recommendations for
+machine, database or disk names that are not in the subscription. Nothing is stuck and
+nothing notifies.
+
+**Cause** — All of it comes from the platform, not from this repo or the operator:
+
+- `upgradeExtensions` ran about once an hour on one Linux machine at a time and failed
+  within about a second with `HCRP404` ("The VM extension with publisher
+  'microsoft.cplat.core' and type 'linuxpatchextension' could not be found"). The patch
+  extension is installed and `Succeeded` on those machines, so this reads as the platform's
+  automatic-upgrade lookup failing, not a failure on the machine (inferred). Observed six
+  times over five hours, then not again.
+- A platform update service writes `LinuxPatchExtension` and `WindowsPatchExtension` on the
+  Arc machines about every 4.5 hours. Against a running machine it succeeds in under a
+  minute; against a machine whose VM is deallocated the write sits `Running` for about 31
+  minutes and then fails with `HCRP400` "The Hybrid Compute machine is not connected to Azure."
+- Advisor recommendation events kept arriving while the lab was parked. Some name resources
+  that exist (secure-communication protocols on an un-hardened Windows host, availability
+  zones for a VM) and are expected on this deliberately un-hardened demo. Others name SQL
+  Server hosts, databases and a disk that are not in the subscription or in this repo:
+  probably stale records of an earlier lab that used the same group names (unverified).
+
+**What to do** — Nothing. Do not remove, reinstall or reconfigure anything to stop them: the
+patch extensions and the SQL-only block belong to the lab, and
+[AGENTS.md](../AGENTS.md) keeps Defender for SQL and the existing policy as they are. See
+[what still happens to a parked estate](lifecycle.md#what-still-happens-to-a-parked-estate).
+Open item: a platform patch write that is still pending when an Activate starts (a burst
+less than 31 minutes earlier) could overlap the boot-time `MDE.Linux` lock; it was not
+observed. The related policy events after VM writes are in
+[the previous entry](#failed-deployifnotexists-policy-events-follow-every-vm-write).
 
 ## Hibernation blocked by unrelated preflight or monitoring health
 
