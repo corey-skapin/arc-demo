@@ -35,8 +35,10 @@
     The Entra tenant ID.
 
 .PARAMETER DeployerPrincipalId
-    Optional Entra object ID for the deploying user/service principal. Use this when
-    ARM access works but Graph signed-in-user lookup is blocked by CAE.
+    Optional Entra object ID for the deploying user/service principal (your own). Use this when
+    ARM access works but Graph signed-in-user lookup is blocked by CAE. It replaces only that
+    lookup: the same RBAC check still runs against it. The scripts also retry a Graph call that fails
+    with the CAE challenge once with AZURE_IDENTITY_DISABLE_CP1=1; see docs/troubleshooting.md.
 
 .PARAMETER AdminEmail
     Email address for budget + alert notifications. Defaults from config\demo-skin.json when omitted.

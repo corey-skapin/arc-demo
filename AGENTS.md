@@ -95,7 +95,7 @@
 
 ## Deployment preflight only
 
-1. Verify the explicitly requested tenant/subscription and effective inherited/group Owner, or Contributor plus User Access Administrator; do not bypass permissions with a supplied principal ID.
+1. Verify the explicitly requested tenant/subscription and effective inherited/group Owner, or Contributor plus User Access Administrator; do not bypass permissions with a supplied principal ID. (`-DeployerPrincipalId` only replaces the Graph signed-in-user lookup with the operator's own object ID when Graph is blocked, see [troubleshooting](docs/troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge); the same RBAC check still runs against it.)
 2. Run `Test-Prerequisites` for PowerShell 7.4+, CLI 2.60+, Bicep and the `connectedmachine` CLI extension (plus `containerapp` for Container Apps); stop on failure rather than workaround. It reports all gaps at once and installs/registers nothing.
 3. Check needed providers, including DevTestLab and optional AKS dependencies, and the `Microsoft.Compute/UseStandardSecurityType` feature when the skin declares the nested SQL parent (or any fleet entry sets `securityType: Standard`); obtain approval separately for registration.
 4. Check exact SKU restrictions and regional/family vCPU quota for every VM size; never claim listings, what-if or validation guarantee allocation, especially B-series in AU regions. On an allocation failure report the options; never switch size or region silently.

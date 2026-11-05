@@ -44,6 +44,111 @@ Describe 'AllowNotFound against Azure CLI 2.91 error text' {
     }
 }
 
+Describe 'Microsoft Graph continuous access evaluation challenge' {
+    BeforeAll {
+        # A real process stands in for az: it fails with the CAE challenge unless AZURE_IDENTITY_DISABLE_CP1 is set (or fails always in that mode).
+        $fakeBin = Join-Path $TestDrive 'cae-bin'
+        $null = New-Item -ItemType Directory -Path $fakeBin
+        $global:CaeFixture = @{
+            Stderr = Join-Path $TestDrive 'cae-stderr.txt'; Log = Join-Path $TestDrive 'cae-calls.log'; Mode = Join-Path $TestDrive 'cae-mode.txt'
+        }
+        if ($IsWindows) {
+            Set-Content -Path (Join-Path $fakeBin 'az.cmd') -Value @(
+                '@echo off'
+                "echo cp1=%AZURE_IDENTITY_DISABLE_CP1% args=%*>> `"$($global:CaeFixture.Log)`""
+                'if "%1"=="account" (echo 22222222-2222-2222-2222-222222222222& exit /b 0)'
+                "set /p mode=<`"$($global:CaeFixture.Mode)`""
+                'if "%mode%"=="always-fail" goto fail'
+                'if defined AZURE_IDENTITY_DISABLE_CP1 (echo []& exit /b 0)'
+                ':fail'
+                "type `"$($global:CaeFixture.Stderr)`" 1>&2"
+                'exit /b 3'
+            )
+        } else {
+            $log = $global:CaeFixture.Log; $mode = $global:CaeFixture.Mode; $err = $global:CaeFixture.Stderr
+            Set-Content -Path (Join-Path $fakeBin 'az') -Value @(
+                '#!/bin/sh'
+                ('echo "cp1=$AZURE_IDENTITY_DISABLE_CP1 args=$*" >> ''{0}''' -f $log)
+                'if [ "$1" = "account" ]; then echo 22222222-2222-2222-2222-222222222222; exit 0; fi'
+                ('if [ "$(cat ''{0}'')" = "always-fail" ]; then cat ''{1}'' >&2; exit 3; fi' -f $mode, $err)
+                'if [ -n "$AZURE_IDENTITY_DISABLE_CP1" ]; then echo "[]"; exit 0; fi'
+                ('cat ''{0}'' >&2' -f $err)
+                'exit 3'
+            )
+            chmod +x (Join-Path $fakeBin 'az')
+        }
+        $script:caeOriginalPath = $env:PATH
+        $script:caeOriginalCp1 = $env:AZURE_IDENTITY_DISABLE_CP1
+        $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
+    }
+    AfterAll {
+        $env:PATH = $script:caeOriginalPath
+        $env:AZURE_IDENTITY_DISABLE_CP1 = $script:caeOriginalCp1
+        Remove-Variable CaeFixture -Scope Global -ErrorAction SilentlyContinue
+    }
+    BeforeEach {
+        Set-Content -Path $global:CaeFixture.Stderr -Value 'ERROR: Continuous access evaluation resulted in challenge with result: InteractionRequired and code: TokenCreatedWithOutdatedPolicies'
+        Set-Content -Path $global:CaeFixture.Mode -Value 'cp1-fixes-it'
+        Remove-Item -LiteralPath $global:CaeFixture.Log -ErrorAction SilentlyContinue
+        $env:AZURE_IDENTITY_DISABLE_CP1 = $null
+    }
+    It 'retries a Graph call once with CAE disabled for that child process only, and keeps doing so for later Graph calls' {
+        InModuleScope Common {
+            Mock Write-Warn {}
+            $script:DemoGraphWithoutCae = $null
+            $script:DemoSubscription = $null
+            $script:DemoTenant = '22222222-2222-2222-2222-222222222222'
+            $graph = @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me')
+            Invoke-DemoAz -Arguments $graph | Should -Be '[]'
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -BeNullOrEmpty
+            @(Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=rest*' }).Count | Should -Be 2
+            (Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=rest*' })[0] | Should -BeLike 'cp1= *'
+            (Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=rest*' })[1] | Should -BeLike 'cp1=1 *'
+            Should -Invoke Write-Warn -Times 1 -Exactly -ParameterFilter { $Message -like '*continuous access evaluation (CAE) challenge*AZURE_IDENTITY_DISABLE_CP1=1*' }
+            # Later Graph calls in the process go straight through with the variable set, and directory calls use it too.
+            Remove-Item -LiteralPath $global:CaeFixture.Log
+            Invoke-DemoAz -Arguments @('ad', 'sp', 'list', '--display-name', 'x') | Should -Be '[]'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=ad*' }).Count | Should -Be 1
+            @(Get-Content -LiteralPath $global:CaeFixture.Log | Where-Object { $_ -like 'cp1=* args=ad*' })[0] | Should -BeLike 'cp1=1 *'
+            Should -Invoke Write-Warn -Times 1 -Exactly
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -BeNullOrEmpty
+        }
+    }
+    It 'never retries ARM calls or other Graph errors, and never overrides the operator''s own setting' {
+        InModuleScope Common {
+            Mock Write-Warn {}
+            $script:DemoGraphWithoutCae = $null
+            $script:DemoSubscription = $null
+            { Invoke-DemoAz -Arguments @('vm', 'list', '-g', 'rg-x') } | Should -Throw '*Continuous access evaluation*'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
+            Remove-Item -LiteralPath $global:CaeFixture.Log
+            Set-Content -Path $global:CaeFixture.Stderr -Value 'ERROR: (Forbidden) Insufficient privileges to complete the operation.'
+            { Invoke-DemoAz -Arguments @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me') } | Should -Throw '*Insufficient privileges*'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
+            Should -Invoke Write-Warn -Times 0
+            Remove-Item -LiteralPath $global:CaeFixture.Log
+            $env:AZURE_IDENTITY_DISABLE_CP1 = 'operator'
+            Invoke-DemoAz -Arguments @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me') | Should -Be '[]'
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -Be 'operator'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 1
+        }
+    }
+    It 'names the workaround when the challenge survives the retry' {
+        InModuleScope Common {
+            Mock Write-Warn {}
+            $script:DemoGraphWithoutCae = $null
+            $script:DemoSubscription = $null
+            Set-Content -Path $global:CaeFixture.Mode -Value 'always-fail'
+            $thrown = $null
+            try { Invoke-DemoAz -Arguments @('rest', '--method', 'GET', '--url', 'https://graph.microsoft.com/v1.0/me') } catch { $thrown = $_.Exception.Message }
+            $thrown | Should -BeLike '*TokenCreatedWithOutdatedPolicies*AZURE_IDENTITY_DISABLE_CP1*az logout then az login --tenant*'
+            @(Get-Content -LiteralPath $global:CaeFixture.Log).Count | Should -Be 2
+            $script:DemoGraphWithoutCae | Should -BeNullOrEmpty
+            $env:AZURE_IDENTITY_DISABLE_CP1 | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Compute capacity preflight with Azure CLI 2.91 string quotas' {
     InModuleScope Common {
         BeforeEach {

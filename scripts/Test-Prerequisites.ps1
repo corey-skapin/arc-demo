@@ -17,7 +17,8 @@
     The Entra tenant ID for the subscription.
 
 .PARAMETER DeployerPrincipalId
-    Optional Entra object ID to use when Graph signed-in-user lookup is blocked.
+    Optional Entra object ID (your own) to use when Graph signed-in-user lookup is blocked. It replaces
+    only that lookup; the RBAC check still runs. See docs/troubleshooting.md (continuous access evaluation).
 
 .PARAMETER SkinPath
     Optional demo skin JSON. Defaults to config\demo-skin.json. Its workloads.deployContainerApps

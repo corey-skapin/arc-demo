@@ -33,7 +33,7 @@ prefix.
 | --- | --- |
 | `schemaVersion` | `1` |
 | `arcSkinPath` | Private Arc skin (required) |
-| `deployerPrincipalId` | Optional Entra object ID, only when Graph sign-in lookup is blocked |
+| `deployerPrincipalId` | Optional Entra object ID (your own), only when Graph sign-in lookup is blocked; it replaces that lookup and bypasses no permission check. See [the CAE entry](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge) |
 | `autoShutdownTime` | Optional `HHmm` override for the build window. Leave it empty unless the build would cross the VM auto-shutdown; it is passed to the base deployment |
 | `nestedSqlBuildInputPath` | The nested guest's build inputs file listed above |
 | `mediaManifestPath` | Optional override of the tracked `config/demo-media.json` (installer URLs, sizes and SHA-256 pins; nothing in it is secret). Leave it out to use the tracked manifest |

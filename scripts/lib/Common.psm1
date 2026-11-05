@@ -462,6 +462,18 @@ function Test-DemoNotFoundText {
 }
 
 function Invoke-DemoAz {
+    <#
+    .SYNOPSIS
+        The one checked Azure CLI call: explicit subscription pinning, tenant guard for directory calls, not-found handling.
+    .DESCRIPTION
+        A Microsoft Graph call (az ad, or az rest against graph.microsoft.com) can be refused with a continuous
+        access evaluation (CAE) challenge, "TokenCreatedWithOutdatedPolicies", while ARM calls keep working: the
+        Azure CLI keeps reusing a cached CAE-capable Graph token minted before a tenant policy event, and az login
+        does not clear it. The documented workaround is AZURE_IDENTITY_DISABLE_CP1=1. Because every directory call
+        in the repo goes through here, a Graph call that fails with exactly that challenge is retried once with the
+        variable set for that child process only, and later Graph calls in the process keep it. Nothing else is
+        changed and a setting the operator made is never overridden.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
@@ -473,6 +485,9 @@ function Invoke-DemoAz {
     }
     $stderr = [System.IO.Path]::GetTempFileName()
     $captureWhatIfPreference = $WhatIfPreference
+    $isGraphCall = $Arguments[0] -eq 'ad' -or ($Arguments[0] -eq 'rest' -and ($Arguments -join ' ') -match 'graph\.microsoft\.com')
+    $caePattern = 'Continuous access evaluation resulted in challenge|TokenCreatedWithOutdatedPolicies'
+    $cp1Disabled = $false
     try {
         # Caller ShouldProcess guards Azure writes; preview must still capture local stderr.
         $WhatIfPreference = $false
@@ -484,17 +499,34 @@ function Invoke-DemoAz {
                 throw 'Directory operations use the CLI default tenant, which differs from the explicitly requested tenant. Select the intended tenant before retrying; no CLI defaults were changed.'
             }
         }
+        if ($isGraphCall -and $script:DemoGraphWithoutCae -and -not $env:AZURE_IDENTITY_DISABLE_CP1) {
+            $env:AZURE_IDENTITY_DISABLE_CP1 = '1'
+            $cp1Disabled = $true
+        }
         $output = & $az @Arguments 2> $stderr
         $exitCode = $LASTEXITCODE
         $detail = [System.IO.File]::ReadAllText($stderr).Trim()
+        if ($exitCode -ne 0 -and $isGraphCall -and -not $env:AZURE_IDENTITY_DISABLE_CP1 -and $detail -match $caePattern) {
+            Write-Warn 'Microsoft Graph refused the cached token with a continuous access evaluation (CAE) challenge. Retrying this call once with AZURE_IDENTITY_DISABLE_CP1=1, for this call only (docs/troubleshooting.md).'
+            $env:AZURE_IDENTITY_DISABLE_CP1 = '1'
+            $cp1Disabled = $true
+            $output = & $az @Arguments 2> $stderr
+            $exitCode = $LASTEXITCODE
+            $detail = [System.IO.File]::ReadAllText($stderr).Trim()
+            if ($exitCode -eq 0) { $script:DemoGraphWithoutCae = $true }
+        }
         if ($exitCode -ne 0) {
             if ($AllowNotFound -and (Test-DemoNotFoundText $detail)) { return $null }
+            $hint = if ($isGraphCall -and $detail -match $caePattern) {
+                ' Continuous access evaluation challenge: set $env:AZURE_IDENTITY_DISABLE_CP1 = ''1'' in the shell that runs this script, or run az logout then az login --tenant <TENANT>, and retry (docs/troubleshooting.md).'
+            } else { '' }
             # Do not echo arguments: run-command and identity commands can carry credentials.
-            throw "Azure CLI $($Arguments[0]) $($Arguments[1]) failed (exit $exitCode): $detail"
+            throw "Azure CLI $($Arguments[0]) $($Arguments[1]) failed (exit $exitCode): $detail$hint"
         }
         if ($detail) { Write-Verbose $detail }
         return $output
     } finally {
+        if ($cp1Disabled) { Remove-Item -Path Env:\AZURE_IDENTITY_DISABLE_CP1 -ErrorAction SilentlyContinue }
         $WhatIfPreference = $captureWhatIfPreference
         [System.IO.File]::Delete($stderr)
     }

@@ -418,6 +418,48 @@ deallocated`, means a listed VM was deleted (or is running). Remove deleted VMs
 from `operations.keepParkedVmNames` in the private skin; keep a name there only
 while that VM exists and is parked.
 
+## Microsoft Graph calls fail with a continuous access evaluation challenge
+
+**Symptom** — every `az ad ...` call (the preflight's signed-in-user lookup, the onboarding identity,
+the nested build, inventory snapshots, `Prepare-NestedSqlParent.ps1`, `Remove-ArcDemo.ps1`) starts failing,
+often an hour into a session, while ARM calls keep working:
+
+```text
+Continuous access evaluation resulted in challenge with result: InteractionRequired and code: TokenCreatedWithOutdatedPolicies
+```
+
+Repeated `az login` (even with the Graph scope) does not clear it.
+
+**Cause** — the Azure CLI keeps reusing a cached CAE-capable Graph token that was minted before a
+tenant policy event, and cannot answer the interactive challenge non-interactively.
+
+**Fix** — The scripts now retry a Graph call that fails with exactly this challenge once with
+`AZURE_IDENTITY_DISABLE_CP1=1` for that one child process (the CLI then requests a token without the CAE
+capability), warn that they did, and keep doing so for later Graph calls in the process. A setting you made
+yourself is never overridden. You can also set it for the whole shell before running a script or an `az`
+call, which is the documented workaround and affects neither ARM calls nor the default subscription:
+
+```powershell
+$env:AZURE_IDENTITY_DISABLE_CP1 = '1'
+```
+
+The alternative is a fresh sign-in, `az logout` then `az login --tenant <TENANT>`. A new login can change the
+CLI's default subscription; the scripts always pass the explicit subscription and refuse a directory call
+when the CLI's default tenant differs from the requested one, so re-select the tenant and subscription
+afterwards and never rely on the default.
+
+`-DeployerPrincipalId` (and `deployerPrincipalId` in `build.json`) replaces only the preflight's signed-in-user
+lookup. It bypasses no permission: the same Owner (or Contributor plus User Access Administrator) check runs
+against that ID, so supply your own object ID, never someone else's. When Graph is the blocked service, read it
+from the `oid` claim of your own ARM token, locally:
+
+```powershell
+$jwt = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv
+$p = $jwt.Split('.')[1].Replace('-', '+').Replace('_', '/')
+$p = $p.PadRight($p.Length + (4 - $p.Length % 4) % 4, '=')
+([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p)) | ConvertFrom-Json).oid
+```
+
 ## Deploy finishes but says required readiness rows did not pass
 
 **Symptom** — the last phase ends with `required infrastructure/monitor readiness rows did not pass:

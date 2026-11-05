@@ -324,7 +324,9 @@ the exact fix, for example `az extension add --name containerapp --yes`; resolve
 and features with separate operator authorization, using the exact ones reported
 by preflight for the skin's workload toggles (`Test-Prerequisites.ps1`, Deploy and
 the build wrapper's P0 check the same set). Supplying
-`-DeployerPrincipalId <OBJECT_ID>` bypasses only Graph user discovery, not RBAC.
+`-DeployerPrincipalId <OBJECT_ID>` (your own; read it from your ARM token when Graph is blocked, see
+[the CAE entry](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge))
+bypasses only Graph user discovery, not RBAC.
 SKU restriction and regional/family vCPU quota checks do not guarantee capacity. If Azure still
 refuses allocation, Deploy prints the options and never switches VM size or
 region on its own; re-running the same command resumes.
