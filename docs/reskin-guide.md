@@ -1,6 +1,6 @@
 # Reskin guide — Arc/Monitor foundation
 
-The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a customer **skin** in `config\demo-skin.json`. Bundled skins are fictitious handoff examples, not a live customer's configuration; change `notifications.email` before a live deploy.
+The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a customer **skin** in `config\demo-skin.json`. Bundled skins are fictitious examples, not a live customer's configuration; change `notifications.email` before a live deploy.
 
 ## Variable surface
 
@@ -29,7 +29,7 @@ Change per customer:
 - Match `compute.osDiskStorageAccountType` to the existing OS disks for a
   retained lab, and `nestedSqlGuest.parentDataDiskStorageAccountType` to the
   nested parent's data disk. New labs should keep SSD: HDD OS disks retire on
-  8 September 2028. Tier changes are separately approved maintenance, not
+  8 September 2028. Tier changes are separate maintenance, not
   reskinning; a tier that changed by itself is declared as it is
   ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
 
@@ -42,7 +42,7 @@ Keep constant unless the lab requirement changes:
 
 1. Copy `config\demo-skin.json` or `config\dummy-customer.demo-skin.json` to a private runtime file outside git.
 2. Set `azure.namePrefix` to 3-20 lowercase letters/digits/hyphens, starting with a letter and ending with a letter/digit. Workload toggles must be JSON booleans, not strings. Missing or malformed skins fail explicitly.
-3. Set `notifications.email` to the demo operator or customer-approved distribution list.
+3. Set `notifications.email` to your address or the customer's distribution list.
 4. Choose workload toggles.
 5. Run scripts without repeating those variables:
 
@@ -69,17 +69,17 @@ NAT Gateway and public IP, stops optional AKS, and deactivates optional Containe
 App revisions. Fault flags are preserved, not reset. It keeps the estate intact: resource groups,
 Arc records, workbooks, DCRs, alerts, disks, and Log Analytics remain.
 
-`Remove-ArcDemo.ps1` is cleanup deletion. Use it only when the demo should be
-permanently removed.
+`Remove-ArcDemo.ps1` is cleanup deletion: it deletes both resource groups. Use it
+only when the demo should be permanently removed.
 
-Both operations require explicit operator approval. Removal preserves shared
+Preview either operation with `-WhatIf` first. Removal preserves shared
 subscription Defender by default. See [lifecycle.md](lifecycle.md) for exact
 scope, retained deployment manifests, optional-workload costs and the readiness
 JSON/exit-code contract. Changing skin toggles alone does not delete previously
 deployed workloads; lifecycle still accounts for retained manifests.
-Keep the chosen runtime target, skin/fleet files and deployment history in a
-private operator handoff for reactivation; do not copy live IDs/secrets into the
-customer skin. Park an attached SRE layer first through its own procedure.
+Keep the chosen runtime target, skin/fleet files and deployment history in your
+[private folder](private-config.md) for reactivation; do not copy live IDs/secrets
+into the customer skin. Park an attached SRE layer first with its own scripts.
 
 ## Examples
 

@@ -2,7 +2,7 @@
 
 This lab is cost-controlled, not free. Price the selected skin/workloads using the
 [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) and
-check actual Cost Management charges in the **confirmed** subscription.
+check actual Cost Management charges in your subscription.
 Dated retail examples below are not a current quote or a complete bill.
 
 ## Reviewed demo choices (21 October 2026)
@@ -15,8 +15,8 @@ patching, Change Tracking or alert data to make a smaller bill look equivalent.
 The optional [real SQL Developer workload](sql-engine-workload.md) adds no new VM
 or disk through its helper and is nonproduction-only, not a free all-in SQL lab.
 Account for media/setup and system/database footprint on the retained disk,
-existing VM uptime/CPU/I/O and roughly one added healthy event per minute when
-its narrow collection is approved. The 512-MB buffer-pool cap is not total SQL
+existing VM uptime/CPU/I/O and roughly one added healthy event per minute once you
+add its narrow collection. The 512-MB buffer-pool cap is not total SQL
 process RAM; demo database-file caps do not cap installer/system-database usage.
 Hibernate retains the installed engine/data and existing storage charges.
 The optional SQL incident adds an active one-minute scheduled log alert plus
@@ -27,8 +27,8 @@ the self-recovering incident or automatic investigation as free.
 The observed eight-host lab already uses Standard HDD OS disks: five 127 GiB
 Windows disks and three 30 GiB Linux disks. It is not recorded whether that lab
 was built on HDD or converted to it: on a governed subscription a tenant
-automation can convert a parked estate's disks to Standard HDD without an owner
-choice ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
+automation can convert a parked estate's disks to Standard HDD without you
+choosing it ([troubleshooting](troubleshooting.md#the-os-disk-tier-changed-by-itself)).
 Its successful warm activation and
 fresh 79-check Monitor snapshot show that this tier can support the current
 inventory/telemetry rehearsal. They do not benchmark cold boot, sustained SQL
@@ -48,7 +48,7 @@ Arc and optional native VM modules. Plan HDD migration before retirement.
 The deployment wrapper verifies targeted existing OS disks and refuses a tier
 mismatch, including in a preview. A new default or skin must never silently
 retier an attached disk. Select the **current** tier for reconciliation; this
-input is not a conversion command. A separately approved conversion follows
+input is not a conversion command. A conversion is a separate task that follows
 Microsoft's stop/deallocate/change-tier/restart procedure, with associated
 downtime and allocation/readiness risks. Hibernate/activate does not convert
 disks, and hibernation continues to bill retained storage.
@@ -94,7 +94,7 @@ total twice. Heartbeat was nonbillable in this sample.
 1. **Park the complete stack between demos.** Reducing eight-VM runtime from
    730 to 176 hours changes illustrative compute charges by about AUD 635.38,
    before networking savings. This is a scheduling scenario, not a measured
-   saving or an automatic 22-day schedule. Use the approved lifecycle order and
+   saving or an automatic 22-day schedule. Use the order in [lifecycle](lifecycle.md) and
    retain a wake-up/rehearsal buffer. VM auto-shutdown alone leaves NAT/PIP and
    optional workloads running.
 2. **Retain working HDD deliberately, while planning its retirement.** No live
@@ -125,8 +125,8 @@ charges are **not included** in the compute-plus-storage illustration. Do not
 disable paid security or claim license entitlements to reduce its number.
 Two retained vaults are not automatically orphaned cleanup candidates. The
 read-only alignment review also found live public access disabled versus
-source enabled; preserve that live setting pending a separate access decision,
-not an incidental cost deployment.
+source enabled; preserve that live setting until you decide to change access, not
+as an incidental cost deployment.
 
 Sources:
 [Azure Retail Prices API](https://learn.microsoft.com/rest/api/cost-management/retail-prices/azure-retail-prices),
@@ -180,12 +180,12 @@ still silent ([lifecycle](lifecycle.md#what-still-happens-to-a-parked-estate)).
 
 ## Proposed disposable smoke cycle (not executed)
 
-After separate approval, deploy an isolated `arctest` prefix with the default
-five Windows/three Linux hosts, SSD defaults and the small optional Container App
-(no SRE, SQL installation or AKS). Preview, deploy twice, check exact IDs and fresh
-Heartbeat, hibernate, check all compute and network cost rows, activate with
-per-host results, recheck fresh telemetry, then Remove and verify Removed.
-Retain normal target/ownership/ShouldProcess checks; never use the existing demo.
+Deploy an isolated `arctest` prefix with the default five Windows/three Linux hosts,
+SSD defaults and the small optional Container App (no SRE, SQL installation or
+AKS). Preview, deploy twice, check exact IDs and fresh Heartbeat, hibernate, check
+all compute and network cost rows, activate with per-host results, recheck fresh
+telemetry, then Remove and verify Removed. Keep the scripts' normal target,
+ownership and ShouldProcess checks; never run it against the existing demo.
 Allow roughly two hours plus a cleanup buffer; allocation/ingestion can extend it.
 
 Using only the dated official retail evidence above, **two hours is about
@@ -195,25 +195,24 @@ This is a qualified priced subtotal, **not an all-in quote or spending ceiling**
 NAT gateway/processing, Defender, Monitor/CT/log ingestion, alerts, ACA/environment
 and egress are additional; subscription benefits/taxes/applicable meters vary.
 Each extra compute hour adds about AUD 1.15 before those other costs.
-Approve duration, target, cleanup and unpriced services before execution; no live
-read, deployment, price/extension/permission change or cycle has been authorized
-or performed by this local source review. Mocks cannot prove allocation,
+Decide the duration, target, cleanup and unpriced services before you start. This
+cycle is a proposal only; none of it has been run. Mocks cannot prove allocation,
 RunCommand/guest boot timing or real ingestion latency.
 
 ## Safe cost controls
 
-Use the [lifecycle scripts](lifecycle.md) between demos, with operator approval.
+Use the [lifecycle scripts](lifecycle.md) between demos.
 Reduce the fleet or optional workloads before deploying if they are not needed
 for the story. The budget is an **alert**, not a spending cap or shutdown trigger.
 Keep notification emails and the currency/threshold aligned to the actual
 subscription. The default amount 200 is a configurable threshold, not proof the
 lab fits within AUD 200.
 
-Do not advise four-day workspace retention (the configured Analytics workspace
-uses supported retention settings), snapshot-and-delete as a supported lifecycle
-(the scripts do not implement disk restoration), or Defender plan changes without
-checking scope/features/prices. Defender prices are commonly quoted per
-server/month, not USD 5 or 15 per server-hour.
+Don't plan on four-day workspace retention (the configured Analytics workspace
+uses supported retention settings) or on snapshot-and-delete as a supported
+lifecycle (the scripts do not implement disk restoration), and check
+scope/features/prices before changing a Defender plan. Defender prices are
+commonly quoted per server/month, not USD 5 or 15 per server-hour.
 
 AKS stop releases capacity; restart may fail if regional capacity is exhausted.
 Do not promise a fixed five-minute wakeup for the optional AKS beat. Retain a

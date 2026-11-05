@@ -13,7 +13,7 @@ tiers that cannot be reliably sourced as Azure Marketplace images.
 | `name` | VM and Arc machine name. |
 | `role` | Demo role, for example `sql`, `app`, or `legacy`. |
 | `osType` | `Windows` or `Linux`. |
-| `osTier` | Human-readable OS tier such as `WS2012R2`, `WS2016`, `WS2019`, `WS2022`, or `Ubuntu22.04`. |
+| `osTier` | OS tier label such as `WS2012R2`, `WS2016`, `WS2019`, `WS2022`, or `Ubuntu22.04`. |
 | `imagePublisher`, `imageOffer`, `imageSku`, `imageVersion` | Azure Marketplace image reference used by the VM module. |
 | `deploymentMode` | `azure-vm` to deploy/onboard, or `represent-not-run` for old tiers that are discussed but not deployed. |
 | `monitorTier` | Demo classification: `full-monitor`, `arc-control-plane-only`, `full-monitor-no-vmi-map`, or `represent-not-run`. |

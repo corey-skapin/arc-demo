@@ -1,237 +1,152 @@
 # Azure Arc demo build and operations runbook
 
-**Operator procedure, not the presentation script.** Presenters start at
-[the docs index](README.md), then their generated `.local/presenter-runsheet.md`.
+This page is how you set up, validate, present, park and wake, and remove the lab. It
+is not the presentation script: you present from the runsheet generated at
+`.local/presenter-runsheet.md` ([the docs index](README.md) lists everything else).
+Work down the page: [choose the target](#1-choose-the-target-and-skin),
+[preflight](#2-read-only-preflight-and-preview), [deploy](#3-deploy) or
+[build everything in order](#build-everything-in-order-optional-wrapper),
+[validate](#4-validate-then-rehearse), [prepare your runsheet](#prepare-the-local-presenter-guide)
+and the [optional workbooks](#optional-capacity-and-optimisation-workbooks),
+[park and wake](#5-park-and-wake), then [remove](#6-remove-permanently). If you change
+the repo, [validate it locally](#7-local-development-validation).
+
 The maintained deployment path is `scripts\Deploy-ArcDemo.ps1` plus Bicep. Do not
 replay old ad-hoc portal/CLI builds against a running demo. Start with
-[AGENTS.md](../AGENTS.md), [lifecycle safety/contract](lifecycle.md), and the
-[presenter template](runsheet.md) only when preparing the local guide.
+[AGENTS.md](../AGENTS.md) and the [lifecycle safety/contract](lifecycle.md); the
+[runsheet template](runsheet.md) matters only when you generate your runsheet.
 
-## Prepare the local presenter guide
+## 1. Choose the target and skin
 
-Do this after successful approved deployment/activation and independent Active
-readiness. The presenter receives `.local/presenter-runsheet.md` and follows it
-top to bottom; no input card, customer customization or ID lookup is required.
-Deployment/lifecycle behavior is unchanged.
-
-Plain Markdown cannot interpolate an external JSON file. The offline
-`scripts\New-PresenterRunsheet.ps1` fills the single tracked `docs\runsheet.md`
-template from `.local\demo-context.json`. The entire `.local/` folder is ignored.
-Capture the following **nonsecret** fields from the explicit setup inputs and
-actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
-
-| Field | Source |
-| --- | --- |
-| `schemaVersion` | Numeric `1` |
-| `subscriptionId`, `tenantId` | The operator-confirmed runtime target |
-| `recordedAtUtc` | UTC timestamp of the context/evidence being saved, not the generation time. The build wrapper's P10 uses the `checkedAtUtc` of the last passing P7 readiness evidence (when the estate was last seen healthy), and the current time only when there is no such evidence |
-| `resourceGroups` | Object with actual `arc` and `infra` group names |
-| `workspaceResourceId`, `workbookResourceId` | Exact workspace and saved Estate Overview workbook IDs |
-| `windowsMachineResourceId`, `linuxMachineResourceId` | Exact monitored Arc machine IDs selected for the tour, not backing VM IDs |
-| `heartbeatAlertResourceId`, `actionGroupResourceId` | Exact heartbeat rule and action group IDs |
-| `lobMachineName` (optional) | The separately prepared LOB host; omit if not part of this demo |
-| `sqlMachineResourceId` (optional) | Actual prepared SQL host Arc ID, with adjacent verified `sql-engine-status.json` from [real SQL Status](sql-engine-workload.md); omit until actually prepared |
-| `sqlIncidentAlertResourceId` (optional) | Exact prepared SQL log-alert ID; requires the SQL host/proof above. Adds a concrete alert link, not an alert-delivery or investigation claim |
-| `lobIncidentAlertResourceId` (optional) | Exact prepared LOB log-alert rule ID; requires `lobMachineName`. Adds a concrete alert link, not an alert-delivery or investigation claim |
-| `nestedSqlMachineResourceId` (optional) | Exact Arc machine ID of the nested SQL guest; enables the experimental nested Arc SQL beat. A link, not proof of current state: the presenter judges the beat by the live status and last collected time |
-| `nestedSqlInstanceResourceId`, `nestedSqlParentMachineResourceId` (optional) | The guest's Arc-enabled SQL Server instance and its Hyper-V parent Arc machine; each requires the nested guest above |
-| `dataCollectionRuleResourceId` (optional) | Exact core data collection rule ID, opened read-only in the "how the data gets here" beat |
-| `machineIntelligenceWorkbookResourceId`, `complianceWorkbookResourceId` (optional) | Exact IDs of the original Machine Intelligence Center and Compliance, Security and Governance workbooks, used in the "show me one server" and "safe and up to date" chapters |
-| `assetInventoryWorkbookResourceId`, `sqlEstateWorkbookResourceId` (optional) | Exact IDs of the Asset Inventory and SQL Estate workbooks: the optional extra minute in the estate chapter and the database chapter. Without them the guide skips those steps and says so |
-| `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview or draft IDs. Adds optional links, not current-health or savings proof |
-| `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
-
-The ordered build wrapper's P10 captures these for you. It writes every field above that it can verify
-against Azure, including the data collection rule, the four original workbooks (found by their
-`workbookTag`) and the nested guest with its SQL instance and parent, and it prints and records the
-optional chapters it left out because the resource was not found. Fill in by hand only what it cannot
-know, such as the LOB alert rule.
-
-The assistant/operator writes the approved values once, then runs:
+Use a demo subscription where you have effective subscription Owner or
+Contributor plus User Access Administrator, and permission to create an Arc
+onboarding identity if needed, or to add and remove a credential on the existing
+one (application owner or administrator). PowerShell 7.4+, Azure CLI 2.60+ and
+Bicep are required. No Az PowerShell module, production framework or SRE Agent
+is required.
 
 ```powershell
-# $context contains only the fields above, from approved inputs and saved outputs.
-New-Item -ItemType Directory -Path .\.local -Force | Out-Null
-$context | ConvertTo-Json -Depth 4 | Set-Content .\.local\demo-context.json
-.\scripts\New-PresenterRunsheet.ps1
+az login --tenant <TENANT>
+az account show --subscription <SUB> --query "{id:id,tenantId:tenantId,user:user.name}" -o table
+$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVATE_SKIN_PATH>' }
 ```
 
-No sign-in, Azure read/write, guest command or health check occurs in generation.
-Pass `-AbsoluteLocalLinks` when the generated guide will be copied away from the
-repository: the companion-guide and saved SQL-proof links then become absolute file
-links instead of paths relative to `.local`.
-Missing/foreign/malformed IDs fail explicitly before replacing the output.
-The context timestamp is printed prominently: old evidence is not current health.
-The generator does not read a credential store, copy a whole deployment manifest
-or retain passwords, recipient emails, tokens or private configuration files.
+Confirm those values; do not rely on default CLI context. Copy a bundled skin
+outside git for a new lab; edit that private copy's email, labels, prefix and
+workload toggles. Preserve an existing lab's retained inputs instead.
+IDs and secrets stay out of source.
+`config\dummy-customer.demo-skin.json` illustrates portability. An explicit missing
+skin, malformed boolean, invalid prefix or fleet is an error, never a fallback.
+Relative fleet paths resolve against the repo root.
 
-Refresh the context and regenerate after successful preparation changes the
-resources or selected hosts. An activation that leaves telemetry pending is not
-a successful presenter handoff; poll readiness under the normal contract first.
-The operator owns that check, not the presenter. Use the same convention in the
-companion repo; a missing companion guide produces a plain handoff note, not a
-broken or guessed relative path.
-
-### One page for the whole demo (optional)
-
-To run the Arc half and the SRE half from one page, add the companion's actual generated
-guide as `-SreGuidePath` (an absolute local path; the SRE guide is read, never changed):
+## 2. Read-only preflight and preview
 
 ```powershell
-.\scripts\New-PresenterRunsheet.ps1 -AbsoluteLocalLinks -SreGuidePath <absolute path to the generated SRE guide>
+.\scripts\Test-Prerequisites.ps1 @target
+.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 ```
 
-It still writes `.local/presenter-runsheet.md` as before and also
-`.local/full-demo-runsheet.md`, which is untracked like everything under `.local/`:
+Preflight does not register providers or subscription features, install CLI extensions or change context.
+It reports every unregistered provider, every unregistered subscription feature
+(`Microsoft.Compute/UseStandardSecurityType`, when the skin declares the nested SQL parent) and every
+missing CLI extension (`connectedmachine`, plus `containerapp` for Container Apps) in one error with
+the exact fix, for example `az extension add --name containerapp --yes` (that extension is
+preview-only today and takes about 2 minutes, so installing it means your build uses a preview
+extension); resolve missing providers and features yourself, using the exact ones reported
+by preflight for the skin's workload toggles (`Test-Prerequisites.ps1`, Deploy and
+the build wrapper's P0 check the same set). Supplying
+`-DeployerPrincipalId <OBJECT_ID>` (your own; read it from your ARM token when Graph is blocked, see
+[the CAE entry](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge))
+bypasses only Graph user discovery, not RBAC.
+SKU restriction and regional/family vCPU quota are checked by Deploy's own first step, not by this
+preflight or the wrapper's P0: about 4 minutes, announced on the console, before anything is created.
+These checks do not guarantee capacity. If Azure still
+refuses allocation, Deploy prints the options and never switches VM size or
+region on its own; re-running the same command resumes.
+Review the [cost assumptions](cost.md) before you deploy.
 
-1. A **Whole demo in order** table: the Arc clock times from the chapter headings, then the SRE
-   steps, with the live-fault points (say GO after chapter 7 has shown the alert rules and the
-   assistant runs Prepare; fire SQL, then LOB; fire T09 with the user's Review click; Restore).
-2. The Arc guide as generated, up to and including **Hand over to the SRE half**.
-3. **The night shift (SRE half)**: the SRE guide's own text from *This afternoon: verified
-   existing investigations* through step 6, byte for byte, with only its numbered steps headed
-   **SRE step N**. Its step 7 (the close) becomes a one-line pointer.
-4. The single close, **The close: the Monday answers**, then the prepared answers, fallback
-   queries and operator notes.
-
-The generator stops without writing either page when the SRE guide has no *This afternoon*,
-*Live faults* or steps 1 to 7 once each, in order, so a changed SRE guide is noticed rather than
-spliced blindly. Regenerate whenever either guide changes. The Arc template stays the single
-source: the combined page adds no presentation text of its own beyond the table and the
-part titles.
-
-## Optional capacity and optimisation workbooks
-
-These are optional read-only engineer surfaces after setup, chapters 5 and 6 of the
-25-28 minute presenter story rather than additional workload infrastructure.
-They reuse existing `Perf`/`InsightsMetrics` and Arc inventory; the views make no
-guest, SQL, extension, power, price or schedule changes. The one collection change
-is the explicitly approved Linux memory and disk counters in the core DCR, which
-replaced three placeholder names that were never valid for Linux AMA.
-What each section shows, the evidence rules and the thresholds are in the
-[workbook reference](operational-workbooks.md). DR and Azure Migrate assessment
-are outside this demo.
-
-The scoped entry point defaults to **Preview**, which verifies the explicit
-tenant/subscription, reads only the existing workspace/Arc group and the
-deterministic workbook target, then returns rendered JSON with `published=false`.
-It does not invoke ARM deployment or ARM what-if. It never silently registers a
-provider or changes CLI defaults. Failed/denied/unknown reads stop the operation.
-Use the same confirmed prefix/skin; an explicitly supplied missing skin fails.
+## 3. Deploy
 
 ```powershell
-$workbookTarget = @{
-    SubscriptionId = '<SUB>'; TenantId = '<TENANT>'
-    NamePrefix = '<CONFIRMED_PREFIX>'; SkinPath = '<PRIVATE_SKIN_PATH>'
-    WorkspaceResourceId = '<EXISTING_LAW_RESOURCE_ID>'
-}
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation
-# Only after separate publication approval; this is still a no-write preview.
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Action Deploy -WhatIf
-# Review copies: a separate "(draft)" resource; the published workbook stays intact.
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Draft -Action Deploy
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation -Draft -Action Deploy
-# Promotion after review: the same command without -Draft replaces the published workbook in place.
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Action Deploy
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation -Action Deploy
-# Remove only an owned draft (no Arc roster is read).
-.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Draft -Action Remove
+.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL>
 ```
 
-Actual publication is a separate approved operation, confirmed by ShouldProcess.
-`-DisplayUtcOffsetHours` sets the default display time zone of the scheduling heat-map
-(the workbook selector can change it) and the clock stamped on each workbook's roster
-footer, which names the offset (for example *UTC+10:30*) instead of calling a local time UTC.
-Pass the offset the workbook already carries when republishing in place, or its times shift.
+Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
+Arc-enabled with `MSFT_ARC_TEST=true` for this demo-only simulation. SQL-capable
+hosts do not imply SQL Server is installed. Optional flags are independent:
+`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. Add a slow
+optional workload (the Container Apps environment alone takes 17-23 minutes and can fail on its
+own) as a second pass once the base Deploy has Succeeded, so a failure there cannot strand the base:
+[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
+For custom tiers, use `-OnPremFleetPath <fleet.json>`; see
+[legacy fleet support](legacy-os-fleet.md). Represented legacy hosts are not
+reported as deployed.
 
-Only the selected shared workbook is created/updated by the small Bicep module,
-with an exact-content readback. Stable IDs are derived from workspace/purpose
-(drafts use their own ID, a `lifecycle: draft` tag and a banner);
-a foreign existing workbook is never adopted. No whole-lab deployment, IAM or
-repair is used. Workbooks survive parking with the workspace, contain no active
-jobs and disappear with the Arc group on approved normal removal. Existing
-lifecycle/readiness gates are unchanged. Re-publishing changed source or
-refreshing roster/topology requires new approval, not an incidental wake. The roster
-and the Arc tags it shows are a snapshot taken when the workbook is published, so a
-later onboarding, tag repair or new host needs another publish. The ordered build
-wrapper publishes both workbooks once, after the guest exists (its P6), and that
-approval belongs with the build's other up-front approvals.
-The roster is bounded to 1-50 exact Arc IDs because every item query embeds it.
-Each workbook links to the other (a draft to the draft, a published workbook to the published one), so publish both
-for the links to resolve; the portal URL carries the confirmed tenant.
+Real SQL setup is a separate step using
+[the isolated Developer workload helper](sql-engine-workload.md).
+Deployment has no SQL installation switch; use the separate SQL build/workload helpers.
 
-**Coverage before conclusions:** each table starts with every selected Arc ID,
-including hosts without samples. One canonical source is selected per host and
-metric across the window, source names and observed hours stay visible, missing
-values are null (never zero), invalid samples warn, and the column charts leave
-absent intervals blank instead of drawing zeros. The default window is 14 days because the lab
-runs sporadically; coverage is observed one-minute bins, not uptime or an agent SLA.
-Evidence is adequate only with the selected observed hours (default 3, an illustrative
-setting for an on-demand lab) and 80% sampling while active, so newly collected Linux memory
-and disk read as thin for its first few running hours. Low CPU alone never yields a sizing recommendation, and SQL host
-telemetry does not establish engine capacity, database performance or licence needs.
-Thresholds (CPU 80%, sustained 30 minutes, memory 85%, disk free 15%, low CPU P95
-20%) are editable, labelled illustrative triage values, not right-sizing or
-availability guarantees; the fixed constants are listed on each workbook's
-*Evidence and method* tab.
+Bicep provisions static resources in `rg-<prefix>` (Arc/Monitor) and
+`rg-<prefix>-infra` (backing/optional compute). Deploy submits the deployment without
+blocking (`--no-wait`) and polls it every 30 seconds, printing which modules are still
+running whenever that changes (a Container Apps environment takes 17 to 23 minutes, a
+VM behind a vendor extension update can take much longer), so a lost client connection no
+longer ends the build and the console is never silent for tens of minutes. Polling gives up
+after 4 hours without stopping the deployment, and a rerun refuses to start while one is still
+Running. The wrapper handles DCR table
+readiness/retries, NAT, Arc onboarding, supported extensions/DCRAs and workbooks.
+Linux AMA and CT use VM extensions but Arc DCRAs. Windows VM Insights map is
+supported by the lab; Linux map remains disabled. Runtime errors stop deployment
+rather than printing a false success.
 
-**Topology and ownership:** the roster contains exact Arc IDs only, never their
-Azure backing-VM duplicates. The nested guest is declared once in the private
-skin's `nestedSqlGuest` block (parent VM and Arc machine name); the script adds
-the pair to the roster as a declared parent and guest. A guest that is not yet an
-Arc machine in the group is skipped with a warning and appears after onboarding
-and a republish; a disconnected guest is still listed and reads *No telemetry*
-until it reports. Any other machine is `unclassified` unless an optional private
-`-TopologyPath` JSON declares it: `{"schemaVersion":1,"machines":[...]}`, each
-entry with `resourceId`, `layer` (`parent`, `guest` or `standalone`) and, for
-guests only, `parentResourceId` referencing another selected, explicitly classified
-parent. A conflict between the file and the skin is an error. Declared topology is a
-relationship, not physical hardware capacity: no hardware totals are calculated and
-parent and guest measurements are never added. A parent's own counters do not reflect
-its guest's load, so a quiet parent is insufficient evidence, not headroom. The
-optimisation view reads current `owner`/`costcenter`/`role` tags through Resource
-Graph for those exact IDs. Empty/missing ARG results are missing inventory evidence,
-not proof that a resource or owner is absent; query failures must be reported.
+### Existing estates and partial failures
 
-The optional cost scenario is typed into the workbook for one selected non-guest
-workload: `baseline x eligible share x hours off / 168`, labelled illustrative and
-not billing, a price, a calendar month, realised savings or a safe shutdown schedule.
-Fixed, licensed, retained-storage, monitoring and security costs stay outside it.
-No price API, inferred currency, estate multiplication, or stop/delete/schedule
-action is provided.
+Do not deploy over an in-use estate just to test a code change. First collect
+read-only readiness and work out the exact reconciliation you need.
+Preserve subscription deployment history while the estate exists: it is the
+lifecycle manifest. After `Remove-ArcDemo` the infra group is gone, so Deploy ignores
+the stale manifest and builds a fresh Key Vault; `Remove-ArcDemo.ps1
+-PruneDeploymentHistory` (opt-in) deletes this demo's own old records.
+Incremental optional-only deployments do not delete earlier Arc hosts.
 
-After actual publication, save only the returned published workbook IDs as the
-optional context fields above and regenerate the existing presenter guide.
-Do not add preview or draft IDs or claim portal rendering has been observed from
-source validation alone. Documented workbook deployment and scope conventions:
-[programmatic workbooks](https://learn.microsoft.com/azure/azure-monitor/visualize/workbooks-automate)
-and [workbook resource templates](https://learn.microsoft.com/azure/templates/microsoft.insights/2023-06-01/workbooks).
+`Deploy-ArcDemo.ps1` does not regenerate VM credentials on a routine redeploy. Reuse the existing
+Key Vault secret; old labs without it, and labs whose vault a tenant policy made private-only,
+must supply their **current** `-AdminPassword` as a SecureString or the file an earlier run saved
+with `-AdminPasswordPath` (a fresh build saves one before any Azure write, so a build that fails part way
+resumes with the same command; the wrapper always passes it, see
+[the private folder](private-config.md)). New Arc onboarding needs no supplied secret:
+Deploy ensures an existing SP's Arc-group role and uses a one-day credential it
+removes afterwards (see [credentials](lifecycle.md#credentials-and-partial-deployments));
+no routine SP credential reset. If the VM credentials are missing, supply the
+current ones as above; never silently rotate them. The VM password is an estate-deployment
+input, not a nested-build prerequisite: the
+[nested build](nested-sql-demo.md) needs no vault and uses the same one-day
+credential flow.
 
-Local Pester covers rendering, scoping, roster and topology guards, size bounds,
-draft handling, scenario arithmetic and the portal layout rules
-(`tests/OperationalWorkbooksLayout.Tests.ps1`). `tests/OperationalWorkbookQueries.Tests.ps1`
-is deliberately opt-in: pass explicit workspace/subscription/tenant via
-`New-PesterContainer -Data` to execute the production item queries read-only
-against deterministic literal tables. It ingests nothing, touches no guests and
-covers spikes versus sustained pressure, missing, invalid and thin evidence, parked
-gaps, Linux counter names and pseudo mounts, separate parent/guest rows and the
-scenario arithmetic. Normal CI skips those Azure-dependent tests; a local mock
-pass does not imply KQL execution or a published workbook.
+Match the effective disk tier too: fresh deployments default to SSD, but an
+existing HDD lab requires `-OsDiskStorageAccountType Standard_LRS` or that value
+in its private skin. The wrapper refuses mismatches even during preview; it
+does not convert disks. Keep the HDD tier your lab has and plan any
+migration separately before HDD OS support retirement. See [cost.md](cost.md).
+A governance automation can also convert a parked estate's disks to HDD on its
+own, so a Deploy that refuses the tier after a Hibernate is not a script fault:
+declare the tier the disks have now (and
+`nestedSqlGuest.parentDataDiskStorageAccountType` for the nested parent), see
+[the OS disk tier changed by itself](troubleshooting.md#the-os-disk-tier-changed-by-itself).
 
 ## Build everything in order (optional wrapper)
 
 `scripts\Invoke-ArcDemoBuild.ps1` runs the maintained scripts in one fixed order
 (P0-P11) for a from-zero build of the base estate and the optional parts. It adds
-no logic of its own: every step is an existing script, so the sections below still
-describe what each step does. It is **plan only by default**. `-Execute` runs the
+no logic of its own: every step is an existing script, so the other sections of this
+page still describe what each step does. It is **plan only by default**. `-Execute` runs the
 steps not yet recorded as done in the private `build-state.json`, so a stopped
 build resumes where it stopped. Keep the config, state and evidence in the
 [private build folder](private-config.md).
 
 ```powershell
 $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '<PRIVATE>\build.json' }
-.\scripts\Invoke-ArcDemoBuild.ps1 @build        # plan: order, status, approvals, blockers, time
+.\scripts\Invoke-ArcDemoBuild.ps1 @build        # plan: order, status, switches needed, blockers, time
 .\scripts\Invoke-ArcDemoBuild.ps1 @build -Execute -From P2 -To P4 `
     -ApproveCostStart -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms
 ```
@@ -242,18 +157,24 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 | P2 | `Deploy-ArcDemo.ps1` with the private skin. It saves the generated VM admin password to `vm-admin-credential.clixml` in the private folder before any Azure write, so a failed P2 reruns with the same password even when a tenant policy made the vault unreadable. Its last phase runs read-only Active readiness (up to 20 minutes for Heartbeats) **without** the nested guest's `nested/arc` row, because the guest is built later at P4; a failure names the rows that did not pass | `-ApproveCostStart` |
 | P3 | `Prepare-NestedSqlParent.ps1`: the Hyper-V parent for the nested guest. Runs after Deploy with the lab Active (it refuses a parked lab) and writes the nested build input into the private folder. A reported `status` of `pending` or `fail` is not recorded as done, and it is safe to re-run | `-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms` |
 | P4 | `New-NestedSqlDemo.ps1`: takes the build input from P3, adds the parent and guest names, resolves the parent VM ID and onboarding application at run time, uses a one-day onboarding credential. The guest Administrator credential is resolved at the start of `-Execute`: `-GuestCredential`, else `nested-guest-credential.clixml` in the [private folder](private-config.md#saving-the-nested-guest-credential), else a prompt. A session that cannot prompt stops there, before anything starts. The wrapper only reads it and keeps it out of the evidence. Each guest step prints when it starts and, about once a minute, that it is still running | |
-| P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status`. A fresh host often reports a routine pending file rename at `Install`: ask the owner for one graceful `az vm restart` of the SQL host up front, with the other approvals, and see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename) | `-AcceptSqlDeveloperTerms` |
+| P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status`. A fresh host often reports a routine pending file rename at `Install`: restart the SQL host once with a graceful `az vm restart` before P5, and see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename) | `-AcceptSqlDeveloperTerms` |
 | P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation). The alert (P6.1) watches the SQL engine, so it needs P5.4's saved proof (`.local/sql-engine-status.json` with status `pass`): run on its own before P5 it is blocked rather than deploying an alert for an engine that does not exist, and inside one selection it runs after P5.4 and stops the same way if the proof is not `pass`. Each workbook records the Arc roster and tags at publish time, so a from-zero build publishes them once, here, after the guest exists, and a rerun after P2 or P4 finished later publishes them again (the plan says so). To refresh just the two workbooks later, for example after a tag repair or a new host, run `-Only P6.2, P6.3 -Force`: it leaves the SQL alert (P6.1) alone | |
 | P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes. This is the gate that includes the nested guest's `nested/arc` row (Deploy's own validation leaves it out) | |
 | P8 | Companion repo: LOB alert rule and LOB app | |
-| P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`; `-ApproveSubscriptionGrant` adds the opt-in alert-access grant |
-| P10 | Presenter context and guide for this repo (the SRE guide only if its context exists). It stamps the context with the time of the last passing P7 readiness evidence, not the time P10 ran. It adds every optional chapter it can verify (the data collection rule, the four original workbooks found by their tag, the nested guest, its SQL instance and its parent) and prints and records the chapters it had to leave out because their resource was not found; build them, then run P10 again | |
+| P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`; optionally `-ApproveSubscriptionGrant` |
+| P10 | Presenter context (`.local/demo-context.json`) and runsheet for this repo (the SRE guide only if its context exists). It stamps the context with the time of the last passing P7 readiness evidence, not the time P10 ran. It adds every optional chapter it can verify (the data collection rule, the four original workbooks found by their tag, the nested guest, its SQL instance and its parent) and prints and records the chapters it had to leave out because their resource was not found; build them, then run P10 again | |
 | P11 | `Export-ArcDemoInventory.ps1`, then `Test-ArcDemoParity.ps1` | |
+
+Pass `-ApproveCostStart` to confirm you want to start billable resources.
+`-AcceptWindowsEvaluationTerms` and `-AcceptSqlDeveloperTerms` accept the Windows
+evaluation and SQL Developer licence terms. `-ApproveSreCreation` creates the paid SRE
+parent, and `-ApproveSubscriptionGrant` adds the opt-in subscription-scope alert-access
+grant for the SRE identity. The plan lists the switches your selection still needs.
 
 - The plan shows each step as `ready`, `done`, `skipped` (with the reason) or
   `blocked`. Blocked means the script is not in the checkout yet, it does not
   accept an argument the wrapper passes, or an input file is missing.
-- Nothing starts if any selected step is blocked, an approval switch is missing,
+- Nothing starts if any selected step is blocked, a switch it needs is missing,
   or the state records P2 as done while the infra group no longer exists (a
   teardown happened; delete the state file to start a new build).
 - Read-only steps (P0, P1, P5 `Status`, P7, P9 readiness, P11) run
@@ -264,7 +185,7 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 - `Deploy-SreAgent.ps1` refuses an existing SRE parent, even with `-WhatIf`. So a
   read-only check of `rg-<prefix>-sre` (the agent name comes from the SRE skin)
   runs first: when the parent exists, P9 preview and create are **skipped**, not
-  failed, and need no approval; when the check cannot be read, they are `blocked`
+  failed, and do not need `-ApproveSreCreation`; when the check cannot be read, they are `blocked`
   with the exact error. P9 therefore belongs after a confirmed removal; use
   `Initialize-SreConfiguration` for configuration-only changes to a running agent.
 - `-From` and `-To` take phase names; `-Only` takes phases or single steps (`-Only P6.2, P6.3`);
@@ -316,124 +237,6 @@ every Azure row passes. That is not an estate fault: set
 Observed on 5 November 2026: 3 of 57 checks failed with the cached token and 57 of 57
 passed with the variable set, in 151 seconds.
 
-## 1. Choose the target and skin
-
-Use a demo subscription where the operator has effective subscription Owner or
-Contributor plus User Access Administrator, and permission to create an Arc
-onboarding identity if needed, or to add and remove a credential on the existing
-one (application owner or administrator). PowerShell 7.4+, Azure CLI 2.60+ and
-Bicep are required. No Az PowerShell module, production framework or SRE Agent
-is required.
-
-```powershell
-az login --tenant <TENANT>
-az account show --subscription <SUB> --query "{id:id,tenantId:tenantId,user:user.name}" -o table
-$target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVATE_SKIN_PATH>' }
-```
-
-Confirm those values; do not rely on default CLI context. Copy a bundled skin
-outside git for a new lab; edit that private copy's email, labels, prefix and
-workload toggles. Preserve an existing lab's retained inputs instead.
-IDs and secrets stay out of source.
-`config\dummy-customer.demo-skin.json` illustrates portability. An explicit missing
-skin, malformed boolean, invalid prefix or fleet is an error, never a fallback.
-Relative fleet paths resolve against the repo root.
-
-## 2. Read-only preflight and preview
-
-```powershell
-.\scripts\Test-Prerequisites.ps1 @target
-.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
-```
-
-Preflight does not register providers or subscription features, install CLI extensions or change context.
-It reports every unregistered provider, every unregistered subscription feature
-(`Microsoft.Compute/UseStandardSecurityType`, when the skin declares the nested SQL parent) and every
-missing CLI extension (`connectedmachine`, plus `containerapp` for Container Apps) in one error with
-the exact fix, for example `az extension add --name containerapp --yes` (that extension is
-preview-only today and takes about 2 minutes, so approving it approves a preview build); resolve missing providers
-and features with separate operator authorization, using the exact ones reported
-by preflight for the skin's workload toggles (`Test-Prerequisites.ps1`, Deploy and
-the build wrapper's P0 check the same set). Supplying
-`-DeployerPrincipalId <OBJECT_ID>` (your own; read it from your ARM token when Graph is blocked, see
-[the CAE entry](troubleshooting.md#microsoft-graph-calls-fail-with-a-continuous-access-evaluation-challenge))
-bypasses only Graph user discovery, not RBAC.
-SKU restriction and regional/family vCPU quota are checked by Deploy's own first step, not by this
-preflight or the wrapper's P0: about 4 minutes, announced on the console, before anything is created.
-These checks do not guarantee capacity. If Azure still
-refuses allocation, Deploy prints the options and never switches VM size or
-region on its own; re-running the same command resumes.
-Review [cost assumptions](cost.md) before agreeing to a budget.
-
-## 3. Deploy (approved creation/reconciliation)
-
-```powershell
-.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL>
-```
-
-Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
-Arc-enabled with `MSFT_ARC_TEST=true` for this demo-only simulation. SQL-capable
-hosts do not imply SQL Server is installed. Optional flags are independent:
-`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. Add a slow
-optional workload (the Container Apps environment alone takes 17-23 minutes and can fail on its
-own) as a second pass once the base Deploy has Succeeded, so a failure there cannot strand the base:
-[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
-For custom tiers, use `-OnPremFleetPath <fleet.json>`; see
-[legacy fleet support](legacy-os-fleet.md). Represented legacy hosts are not
-reported as deployed.
-
-Real SQL setup is a separate approved operation using
-[the isolated Developer workload helper](sql-engine-workload.md).
-Deployment has no SQL installation switch; use the separate SQL build/workload helpers.
-
-Bicep provisions static resources in `rg-<prefix>` (Arc/Monitor) and
-`rg-<prefix>-infra` (backing/optional compute). Deploy submits the deployment without
-blocking (`--no-wait`) and polls it every 30 seconds, printing which modules are still
-running whenever that changes (a Container Apps environment takes 17 to 23 minutes, a
-VM behind a vendor extension update can take much longer), so a lost client connection no
-longer ends the build and the console is never silent for tens of minutes. Polling gives up
-after 4 hours without stopping the deployment, and a rerun refuses to start while one is still
-Running. The wrapper handles DCR table
-readiness/retries, NAT, Arc onboarding, supported extensions/DCRAs and workbooks.
-Linux AMA and CT use VM extensions but Arc DCRAs. Windows VM Insights map is
-supported by the lab; Linux map remains disabled. Runtime errors stop deployment
-rather than printing a false success.
-
-### Existing estates and partial failures
-
-Do not deploy over an in-use estate just to test a code change. First collect
-read-only readiness and propose the exact required reconciliation.
-Preserve subscription deployment history while the estate exists: it is the
-lifecycle manifest. After `Remove-ArcDemo` the infra group is gone, so Deploy ignores
-the stale manifest and builds a fresh Key Vault; `Remove-ArcDemo.ps1
--PruneDeploymentHistory` (opt-in) deletes this demo's own old records.
-Incremental optional-only deployments do not delete earlier Arc hosts.
-
-`Deploy-ArcDemo.ps1` does not regenerate VM credentials on a routine redeploy. Reuse the existing
-Key Vault secret; old labs without it, and labs whose vault a tenant policy made private-only,
-must supply their **current** `-AdminPassword` as a SecureString or the file an earlier run saved
-with `-AdminPasswordPath` (a fresh build saves one before any Azure write, so a build that fails part way
-resumes with the same command; the wrapper always passes it, see
-[the private folder](private-config.md)). New Arc onboarding needs no supplied secret:
-Deploy ensures an existing SP's Arc-group role and uses a one-day credential it
-removes afterwards (see [credentials](lifecycle.md#credentials-and-partial-deployments));
-no routine SP credential reset. Resolve missing VM credentials with the
-operator, never silently rotate them. The VM password is an estate-deployment
-input, not a nested-build prerequisite: the
-[nested build](nested-sql-demo.md) needs no vault and uses the same one-day
-credential flow.
-
-Match the effective disk tier too: fresh deployments default to SSD, but an
-existing HDD lab requires `-OsDiskStorageAccountType Standard_LRS` or that value
-in its private skin. The wrapper refuses mismatches even during preview; it
-does not convert disks. Preserve the operator-chosen HDD tier and plan any
-migration separately before HDD OS support retirement. See [cost.md](cost.md).
-A governance automation can also convert a parked estate's disks to HDD on its
-own, so a Deploy that refuses the tier after a Hibernate is not a script fault:
-declare the tier the disks have now (and
-`nestedSqlGuest.parentDataDiskStorageAccountType` for the nested parent), see
-[the OS disk tier changed by itself](troubleshooting.md#the-os-disk-tier-changed-by-itself).
-
 ## 4. Validate, then rehearse
 
 ```powershell
@@ -453,17 +256,228 @@ completed assessment. Policy scores and CT cycles may take substantially longer
 than infrastructure provisioning.
 
 For Linux, inspect direct sensor health separately from MDE extension state.
-The approved diagnostics found healthy/licensed sensors in passive mode with
-real-time protection disabled, and retained an extension/direct-health
-event-provider discrepancy. A Monitor pass is not active AV or full EDR proof.
+Diagnostics found healthy/licensed sensors in passive mode with
+real-time protection disabled, plus an extension/direct-health
+event-provider discrepancy that remained. A Monitor pass is not active AV or full EDR proof.
 
-Rehearse the [25-28 minute Arc story](runsheet.md). The optional companion
+Rehearse the [25-28 minute Arc story](runsheet.md) from the runsheet you
+[prepare next](#prepare-the-local-presenter-guide). The optional companion
 SRE repo consumes these existing alerts; it does not replace the standalone Arc
-operations plane. Reset/induce faults only as separately authorized scenario
+operations plane. Reset/induce faults only as deliberate scenario
 actions. Do not claim Arc SQL validation: the nested guest is experimental
 and license-only; see [SQL stance](sql-arc-spike.md).
 
-## 5. Park and wake (separate disruptive approval)
+## Prepare the local presenter guide
+
+Do this after deployment or activation has succeeded and an independent Active
+readiness check passes ([section 4](#4-validate-then-rehearse)). You then present
+from `.local/presenter-runsheet.md`, top to bottom; no customer customization or
+ID lookup is required. Generating it changes no deployment or lifecycle behavior.
+
+Plain Markdown cannot interpolate an external JSON file. The offline
+`scripts\New-PresenterRunsheet.ps1` fills the single tracked `docs\runsheet.md`
+template from `.local\demo-context.json`. The entire `.local/` folder is ignored.
+Capture the following **nonsecret** fields from the explicit setup inputs and
+actual deployment outputs/saved evidence, never CLI defaults or guessed IDs:
+
+| Field | Source |
+| --- | --- |
+| `schemaVersion` | Numeric `1` |
+| `subscriptionId`, `tenantId` | The target you confirmed |
+| `recordedAtUtc` | UTC timestamp of the context/evidence being saved, not the generation time. The build wrapper's P10 uses the `checkedAtUtc` of the last passing P7 readiness evidence (when the estate was last seen healthy), and the current time only when there is no such evidence |
+| `resourceGroups` | Object with actual `arc` and `infra` group names |
+| `workspaceResourceId`, `workbookResourceId` | Exact workspace and saved Estate Overview workbook IDs |
+| `windowsMachineResourceId`, `linuxMachineResourceId` | Exact monitored Arc machine IDs selected for the tour, not backing VM IDs |
+| `heartbeatAlertResourceId`, `actionGroupResourceId` | Exact heartbeat rule and action group IDs |
+| `lobMachineName` (optional) | The separately prepared LOB host; omit if not part of this demo |
+| `sqlMachineResourceId` (optional) | Actual prepared SQL host Arc ID, with adjacent verified `sql-engine-status.json` from [real SQL Status](sql-engine-workload.md); omit until actually prepared |
+| `sqlIncidentAlertResourceId` (optional) | Exact prepared SQL log-alert ID; requires the SQL host/proof above. Adds a concrete alert link, not an alert-delivery or investigation claim |
+| `lobIncidentAlertResourceId` (optional) | Exact prepared LOB log-alert rule ID; requires `lobMachineName`. Adds a concrete alert link, not an alert-delivery or investigation claim |
+| `nestedSqlMachineResourceId` (optional) | Exact Arc machine ID of the nested SQL guest; enables the experimental nested Arc SQL beat. A link, not proof of current state: you judge the beat by the live status and last collected time |
+| `nestedSqlInstanceResourceId`, `nestedSqlParentMachineResourceId` (optional) | The guest's Arc-enabled SQL Server instance and its Hyper-V parent Arc machine; each requires the nested guest above |
+| `dataCollectionRuleResourceId` (optional) | Exact core data collection rule ID, opened read-only in the "how the data gets here" beat |
+| `machineIntelligenceWorkbookResourceId`, `complianceWorkbookResourceId` (optional) | Exact IDs of the original Machine Intelligence Center and Compliance, Security and Governance workbooks, used in the "show me one server" and "safe and up to date" chapters |
+| `assetInventoryWorkbookResourceId`, `sqlEstateWorkbookResourceId` (optional) | Exact IDs of the Asset Inventory and SQL Estate workbooks: the optional extra minute in the estate chapter and the database chapter. Without them the runsheet skips those steps and says so |
+| `capacityWorkbookResourceId`, `optimisationWorkbookResourceId` (optional) | Actual published IDs from the scoped [operational workbook setup](#optional-capacity-and-optimisation-workbooks); never preview or draft IDs. Adds optional links, not current-health or savings proof |
+| `companionSreRunsheetPath` (optional) | Absolute path to the companion's actual generated guide; linked only if it exists |
+
+The ordered build wrapper's P10 captures these for you. It writes every field above that it can verify
+against Azure, including the data collection rule, the four original workbooks (found by their
+`workbookTag`) and the nested guest with its SQL instance and parent, and it prints and records the
+optional chapters it left out because the resource was not found. Fill in by hand only what it cannot
+know, such as the LOB alert rule.
+
+Write the values once, then run:
+
+```powershell
+# $context contains only the fields above, from your setup inputs and saved outputs.
+New-Item -ItemType Directory -Path .\.local -Force | Out-Null
+$context | ConvertTo-Json -Depth 4 | Set-Content .\.local\demo-context.json
+.\scripts\New-PresenterRunsheet.ps1
+```
+
+No sign-in, Azure read/write, guest command or health check occurs in generation.
+Pass `-AbsoluteLocalLinks` when you will copy the generated runsheet away from the
+repository: the companion-guide and saved SQL-proof links then become absolute file
+links instead of paths relative to `.local`.
+Missing/foreign/malformed IDs fail explicitly before replacing the output.
+The context timestamp is printed prominently: old evidence is not current health.
+The generator does not read a credential store, copy a whole deployment manifest
+or retain passwords, recipient emails, tokens or private configuration files.
+
+Refresh the context and regenerate after preparation changes the resources or
+selected hosts. An activation that leaves telemetry pending is not ready to
+present from: poll readiness under the normal contract first. A missing
+companion guide produces a plain note in the runsheet, not a broken or guessed
+relative path.
+
+### One page for the whole demo (optional)
+
+To run the Arc half and the SRE half from one page, add the companion's actual generated
+guide as `-SreGuidePath` (an absolute local path; the SRE guide is read, never changed):
+
+```powershell
+.\scripts\New-PresenterRunsheet.ps1 -AbsoluteLocalLinks -SreGuidePath <absolute path to the generated SRE guide>
+```
+
+It still writes `.local/presenter-runsheet.md` as before and also
+`.local/full-demo-runsheet.md`, which is untracked like everything under `.local/`:
+
+1. A **Whole demo in order** table: the Arc clock times from the chapter headings, then the SRE
+   steps, with the live-fault points (say GO after chapter 7 has shown the alert rules, then run
+   Prepare yourself; fire SQL, then LOB; fire T09 with your own Review click; Restore).
+2. The Arc guide as generated, up to and including **Continue with the SRE half**.
+3. **The night shift (SRE half)**: the SRE guide's own text from *This afternoon: verified
+   existing investigations* through step 6, byte for byte, with only its numbered steps headed
+   **SRE step N**. Its step 7 (the close) becomes a one-line pointer.
+4. The single close, **The close: the Monday answers**, then the prepared answers, fallback
+   queries and notes.
+
+The generator stops without writing either page when the SRE guide has no *This afternoon*,
+*Live faults* or steps 1 to 7 once each, in order, so a changed SRE guide is noticed rather than
+spliced blindly. Regenerate whenever either guide changes. The Arc template stays the single
+source: the combined page adds no presentation text of its own beyond the table and the
+part titles.
+
+## Optional capacity and optimisation workbooks
+
+These are optional read-only engineer surfaces after setup, chapters 5 and 6 of the
+25-28 minute story rather than additional workload infrastructure.
+They reuse existing `Perf`/`InsightsMetrics` and Arc inventory; the views make no
+guest, SQL, extension, power, price or schedule changes. The one collection change
+is the Linux memory and disk counters in the core DCR, which
+replaced three placeholder names that were never valid for Linux AMA.
+What each section shows, the evidence rules and the thresholds are in the
+[workbook reference](operational-workbooks.md). DR and Azure Migrate assessment
+are outside this demo.
+
+The scoped entry point defaults to **Preview**, which verifies the explicit
+tenant/subscription, reads only the existing workspace/Arc group and the
+deterministic workbook target, then returns rendered JSON with `published=false`.
+It does not invoke ARM deployment or ARM what-if. It never silently registers a
+provider or changes CLI defaults. Failed/denied/unknown reads stop the operation.
+Use the same confirmed prefix/skin; an explicitly supplied missing skin fails.
+
+```powershell
+$workbookTarget = @{
+    SubscriptionId = '<SUB>'; TenantId = '<TENANT>'
+    NamePrefix = '<CONFIRMED_PREFIX>'; SkinPath = '<PRIVATE_SKIN_PATH>'
+    WorkspaceResourceId = '<EXISTING_LAW_RESOURCE_ID>'
+}
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation
+# Preview publishing: still no writes.
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Action Deploy -WhatIf
+# Review copies: a separate "(draft)" resource; the published workbook stays intact.
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Draft -Action Deploy
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation -Draft -Action Deploy
+# Promotion after review: the same command without -Draft replaces the published workbook in place.
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Action Deploy
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose optimisation -Action Deploy
+# Remove only an owned draft (no Arc roster is read).
+.\scripts\Set-OperationalWorkbook.ps1 @workbookTarget -Purpose capacity -Draft -Action Remove
+```
+
+Actual publication is a separate step from the preview, confirmed by ShouldProcess.
+`-DisplayUtcOffsetHours` sets the default display time zone of the scheduling heat-map
+(the workbook selector can change it) and the clock stamped on each workbook's roster
+footer, which names the offset (for example *UTC+10:30*) instead of calling a local time UTC.
+Pass the offset the workbook already carries when republishing in place, or its times shift.
+
+Only the selected shared workbook is created/updated by the small Bicep module,
+with an exact-content readback. Stable IDs are derived from workspace/purpose
+(drafts use their own ID, a `lifecycle: draft` tag and a banner);
+a foreign existing workbook is never adopted. No whole-lab deployment, IAM or
+repair is used. Workbooks survive parking with the workspace, contain no active
+jobs and disappear with the Arc group on a normal removal. Existing
+lifecycle/readiness gates are unchanged. Re-publishing changed source or
+refreshing roster/topology is a deliberate publish, not an incidental wake. The roster
+and the Arc tags it shows are a snapshot taken when the workbook is published, so a
+later onboarding, tag repair or new host needs another publish. The ordered build
+wrapper publishes both workbooks once, after the guest exists (its P6).
+The roster is bounded to 1-50 exact Arc IDs because every item query embeds it.
+Each workbook links to the other (a draft to the draft, a published workbook to the published one), so publish both
+for the links to resolve; the portal URL carries the confirmed tenant.
+
+**Coverage before conclusions:** each table starts with every selected Arc ID,
+including hosts without samples. One canonical source is selected per host and
+metric across the window, source names and observed hours stay visible, missing
+values are null (never zero), invalid samples warn, and the column charts leave
+absent intervals blank instead of drawing zeros. The default window is 14 days because the lab
+runs sporadically; coverage is observed one-minute bins, not uptime or an agent SLA.
+Evidence is adequate only with the selected observed hours (default 3, an illustrative
+setting for an on-demand lab) and 80% sampling while active, so newly collected Linux memory
+and disk read as thin for its first few running hours. Low CPU alone never yields a sizing recommendation, and SQL host
+telemetry does not establish engine capacity, database performance or licence needs.
+Thresholds (CPU 80%, sustained 30 minutes, memory 85%, disk free 15%, low CPU P95
+20%) are editable, labelled illustrative triage values, not right-sizing or
+availability guarantees; the fixed constants are listed on each workbook's
+*Evidence and method* tab.
+
+**Topology and ownership:** the roster contains exact Arc IDs only, never their
+Azure backing-VM duplicates. The nested guest is declared once in the private
+skin's `nestedSqlGuest` block (parent VM and Arc machine name); the script adds
+the pair to the roster as a declared parent and guest. A guest that is not yet an
+Arc machine in the group is skipped with a warning and appears after onboarding
+and a republish; a disconnected guest is still listed and reads *No telemetry*
+until it reports. Any other machine is `unclassified` unless an optional private
+`-TopologyPath` JSON declares it: `{"schemaVersion":1,"machines":[...]}`, each
+entry with `resourceId`, `layer` (`parent`, `guest` or `standalone`) and, for
+guests only, `parentResourceId` referencing another selected, explicitly classified
+parent. A conflict between the file and the skin is an error. Declared topology is a
+relationship, not physical hardware capacity: no hardware totals are calculated and
+parent and guest measurements are never added. A parent's own counters do not reflect
+its guest's load, so a quiet parent is insufficient evidence, not headroom. The
+optimisation view reads current `owner`/`costcenter`/`role` tags through Resource
+Graph for those exact IDs. Empty/missing ARG results are missing inventory evidence,
+not proof that a resource or owner is absent; query failures must be reported.
+
+The optional cost scenario is typed into the workbook for one selected non-guest
+workload: `baseline x eligible share x hours off / 168`, labelled illustrative and
+not billing, a price, a calendar month, realised savings or a safe shutdown schedule.
+Fixed, licensed, retained-storage, monitoring and security costs stay outside it.
+No price API, inferred currency, estate multiplication, or stop/delete/schedule
+action is provided.
+
+After actual publication, save only the returned published workbook IDs as the
+optional context fields above and regenerate your runsheet.
+Do not add preview or draft IDs or claim portal rendering has been observed from
+source validation alone. Documented workbook deployment and scope conventions:
+[programmatic workbooks](https://learn.microsoft.com/azure/azure-monitor/visualize/workbooks-automate)
+and [workbook resource templates](https://learn.microsoft.com/azure/templates/microsoft.insights/2023-06-01/workbooks).
+
+Local Pester covers rendering, scoping, roster and topology guards, size bounds,
+draft handling, scenario arithmetic and the portal layout rules
+(`tests/OperationalWorkbooksLayout.Tests.ps1`). `tests/OperationalWorkbookQueries.Tests.ps1`
+is deliberately opt-in: pass explicit workspace/subscription/tenant via
+`New-PesterContainer -Data` to execute the production item queries read-only
+against deterministic literal tables. It ingests nothing, touches no guests and
+covers spikes versus sustained pressure, missing, invalid and thin evidence, parked
+gaps, Linux counter names and pseudo mounts, separate parent/guest rows and the
+scenario arithmetic. Normal CI skips those Azure-dependent tests; a local mock
+pass does not imply KQL execution or a published workbook.
+
+## 5. Park and wake
 
 ```powershell
 .\scripts\Hibernate-ArcDemo.ps1 @target -WhatIf
@@ -500,8 +514,8 @@ to Run Command guest checks with `-GuestChecks WhenStalled|Always` (Windows Arc
 `-RepairStalledAgents`; both share the same deadline. The nested SQL guest start keeps
 its Run Command concurrently with a five-minute budget. Per-host evidence records
 `method`, `startedAtUtc`, `lastHeartbeatUtc` and `extensionStates`.
-Telemetry-only pending does not fail activation, but must be rechecked through
-readiness before the presentation or dependent SRE/incident-offer flow continues.
+Telemetry-only pending does not fail activation, but recheck it through
+readiness before you present or start the dependent SRE flow.
 Default assessment submissions cover newly started/waking Arc hosts only;
 already-active retries do not resubmit. `-AssessPatches` explicitly requests
 all-host assessments (including assessment-phase retries). Use optional `-ResultPath`
@@ -542,7 +556,7 @@ Resource Health flaps, failed platform patch writes, activity-log entries for na
 are not in the subscription) is listed in
 [lifecycle](lifecycle.md#what-still-happens-to-a-parked-estate).
 
-## 6. Remove permanently (separate destructive approval)
+## 6. Remove permanently
 
 ```powershell
 .\scripts\Remove-ArcDemo.ps1 @target -WhatIf
@@ -551,10 +565,10 @@ are not in the subscription) is listed in
 ```
 
 This deletes both demo groups and named policies/budget and verifies all their
-absence. It is `ConfirmImpact='High'` and prompts: after the user's separate approval,
-add `-Confirm:$false` when running from an unattended or AI-driven shell (Deploy,
-Hibernate and Activate do not prompt; the wrapper, `Prepare-NestedSqlParent.ps1` and
-the nested helpers do, like Remove). A running nested parent gets one bounded graceful guest stop that warns
+absence. It is `ConfirmImpact='High'` and prompts: add `-Confirm:$false` when running
+from an unattended or AI-driven shell (Deploy, Hibernate and Activate do not prompt;
+the wrapper, `Prepare-NestedSqlParent.ps1` and the nested helpers do, like Remove).
+A running nested parent gets one bounded graceful guest stop that warns
 and continues if it fails; it is skipped when the guest never became an Arc machine, and a parent without
 the Hyper-V role has nothing to stop. Allow **25-35 minutes**: a Container Apps environment sits in
 `ScheduledForDelete` for about 25 minutes before its group can go. Remove prints `Still present: ...`
@@ -566,10 +580,10 @@ Two opt-in switches serve an intended clean same-prefix
 rebuild: `-ForceDeleteWorkspace` first permanently deletes `law-<prefix>` (irreversible;
 otherwise re-creating that name within 14 days recovers the old workspace and its
 data) and `-PruneDeploymentHistory` deletes this demo's own old `arc-demo-<timestamp>`
-deployment records after removal is verified. Defender pricing is preserved unless `-DisableDefender` is explicitly
-requested. `-RemoveOnboardingIdentity` is separately opt-in and rejects shared or
-ambiguous identities. Inspect remaining subscription/tenant resources and delayed
-billing; do not promise zero charges just because group deletion completed.
+deployment records after removal is verified. Defender pricing is preserved unless you
+pass `-DisableDefender`. `-RemoveOnboardingIdentity` is separately opt-in and rejects
+shared or ambiguous identities. Inspect remaining subscription/tenant resources and
+delayed billing; completed group deletion does not guarantee zero charges.
 Default Removed verification needs no deployment history or Graph lookup;
 tenant identities/applications, shared services and soft-deleted vaults are
 explicit exclusions. Active readiness also accepts the legacy `Ready` name.
@@ -584,7 +598,7 @@ az bicep build --file .\bicep\main.bicep --stdout > $null
 
 Pester is development-only, installed in CI; it is not a deployment dependency.
 Fresh deploy, double deploy, park/wake and teardown/recreate remain separate
-live smoke tests needing a disposable lab and explicit approval. See
+live smoke tests that need a disposable lab. See
 [troubleshooting](troubleshooting.md) for known failure modes.
 The [dated retained-estate wake/park evidence](nested-sql-demo.md) does not prove
 fresh deployment, double-deploy idempotency, AKS lifecycle or full teardown/rebuild.

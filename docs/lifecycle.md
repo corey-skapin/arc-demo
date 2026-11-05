@@ -1,11 +1,12 @@
 # Demo lifecycle and readiness contract
 
-**Operator/integrator reference.** For presenting without changing the lab, use
-[the docs index](README.md) and [the presenter guide](runsheet.md).
+This page is the reference for parking, waking, removing and checking the lab. To
+present without changing it, use [the docs index](README.md) and
+[the runsheet](runsheet.md).
 
 This is a deliberately un-hardened, single-region demo, not a production
 reference. The maintained entry points are the PowerShell scripts. Always pass
-the **confirmed** subscription and tenant at runtime; neither belongs in a skin.
+your subscription and tenant at runtime; neither belongs in a skin.
 Use the same skin/prefix throughout. CLI defaults are not changed by the scripts.
 
 ## Supported operations
@@ -25,14 +26,14 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -WhatIf
 .\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json
 
-# Disruptive: run only when the operator explicitly asks to park the demo.
+# Park: deallocates compute, keeps disks and data.
 .\scripts\Hibernate-ArcDemo.ps1 @target -WhatIf
 .\scripts\Hibernate-ArcDemo.ps1 @target
 .\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Hibernated
 .\scripts\Activate-ArcDemo.ps1 @target -WhatIf
 .\scripts\Activate-ArcDemo.ps1 @target
 
-# Permanent removal: separate, explicit operator approval.
+# Remove: deletes both resource groups; preview with -WhatIf first.
 .\scripts\Remove-ArcDemo.ps1 @target -WhatIf
 .\scripts\Remove-ArcDemo.ps1 @target
 .\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Removed -OutputFormat Json
@@ -41,13 +42,13 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 **Deployment** preflight is **read-only**: tooling, explicit context, effective inherited/group
 Owner (or Contributor + User Access Administrator), and needed provider
 registrations. Supplying a deployer principal ID does not bypass RBAC checks.
-Missing registrations must be approved and registered separately. Baseline
+Missing registrations are reported, not fixed: register them separately. Baseline
 providers include KeyVault, DevTestLab and Consumption. Optional Container Apps
 requires Microsoft.App and the `containerapp` CLI extension; AKS additionally needs
 ContainerService, ManagedIdentity, Resources, Storage and ContainerInstance for its
 deployment script. A nested SQL parent (security type `Standard`) also needs the
-subscription feature `Microsoft.Compute/UseStandardSecurityType`, registered by an
-authorized operator once ([nested-sql-demo.md](nested-sql-demo.md#prepare-the-parent)).
+subscription feature `Microsoft.Compute/UseStandardSecurityType`, which you register
+once ([nested-sql-demo.md](nested-sql-demo.md#prepare-the-parent)).
 `Test-Prerequisites.ps1 @target`, Deploy and the build wrapper's
 P0 all read the same set for the skin's workload toggles.
 The retired mixed SQL path no longer requests AzureArcData registration;
@@ -61,8 +62,8 @@ Before wake writes, exact subnet/NAT/PIP GETs refuse a foreign NAT,
 another attached subnet/public IP/prefix, or a PIP bound to another resource.
 Hibernate parks compute first; these same conflicts skip only network cleanup,
 with a loud warning and retained-network cost diagnostics.
-These narrow sharing guards replace neither normal authorization nor ownership
-review. Do not compare whole resource-group counts or historical generic
+These narrow sharing guards cover network sharing only; RBAC permissions still
+apply. Do not compare whole resource-group counts or historical generic
 extension indexes as a lifecycle gate. Optional identity removal checks directory
 ownership/access before any removal writes, including on its preview.
 
@@ -101,7 +102,7 @@ Define the guest once in the private skin:
 }
 ```
 
-These are names in the confirmed demo groups, not credentials or arbitrary
+These are names in the demo resource groups, not credentials or arbitrary
 resource IDs. Defaults leave it disabled. Use the same skin for every operation.
 The exact configured Windows parent may already be in the retained fleet (the default
 fleet's `win-sql-02`, which Deploy then creates as `Standard_D4s_v5` with a 128 GiB data
@@ -159,7 +160,7 @@ in the same change. Hibernate instead discovers all
 VMs, AKS and Container Apps in the explicitly targeted `rg-<prefix>-infra`;
 manifest/OS/skin drift is a warning, not a reason to leave that compute running.
 No workload ID outside that exact subscription/group is accepted. If the skin
-cannot be read, supply the confirmed `-NamePrefix` explicitly; do not guess a
+cannot be read, pass `-NamePrefix` explicitly; do not guess a
 target from a broken skin. Preserve manifests for the stricter later activation.
 
 Actual `storageProfile.osDisk.osType` is checked against the manifest. Azure-native
@@ -237,8 +238,8 @@ if Azure returns `OperationConflict` because an assess/patch operation is alread
 running, activation warns and records `already-in-progress` in its per-host
 assessment output. It does not retry, cancel or claim completion. Other errors,
 including denied or missing resources, still fail activation.
-`-SkipValidate` opts out of final readiness and must never be reported as a
-validated demo. Activation never changes workload fault flags.
+`-SkipValidate` opts out of final readiness, so a run that used it has not
+validated the demo. Activation never changes workload fault flags.
 
 Use `-ResultPath <PRIVATE_EXISTING_DIRECTORY>\activation-attempt.json` to retain
 schema-versioned per-host `guestChecks` (`method`, `startedAtUtc`, `lastHeartbeatUtc`,
@@ -251,9 +252,9 @@ If only required `heartbeat/*` checks are pending, activation exits 0 but record
 `status:pending`, `readiness:pending` and exact readiness rows, with a re-check
 message; a host left pending by the wait also records `status:pending` even with
 `-SkipValidate`. Any other required pending/failed check remains a failed activation.
-The AI must poll the read-only readiness command to pass before continuing the
-presentation, dependent SRE readiness or the conversational incident offer;
-activation exit 0 alone does not prove telemetry has arrived.
+Poll the read-only readiness command until it passes before you present or check
+the dependent SRE layer; activation exit 0 alone does not prove telemetry has
+arrived.
 Completion must come from stdout with no failed/Error-level result; a marker in
 stderr alone is not success. `-WhatIf` neither invokes guests nor writes this report;
 it lists what a real run would do from the inventory and network it read (the NAT
@@ -306,8 +307,7 @@ detached. Retained groups/Arc records/Monitor configuration and telemetry are
 not queried by Hibernated readiness. Use Active readiness before the next demo.
 Readiness does not repeat strict manifest or skin validation while parked.
 Unknown power or denied/malformed required reads still return nonzero, not
-verified Hibernated. This is a deliberate exception to the literal "nonzero only
-if still running" request: an unreadable state cannot prove stopped compute.
+verified Hibernated: an unreadable state cannot prove stopped compute.
 Actual network inspection/auth errors also remain visible errors, never absence.
 
 No automatic alert/polling pause is introduced: owned alert definitions remain
@@ -332,20 +332,20 @@ why the companion SRE agent is parked first and woken last: an agent that is act
 during a Hibernate would receive this Sev2 as a live incident. Muting it while parked
 (an alert processing rule that suppresses the action group, created by Hibernate and
 removed by Activate; see [alert processing rules](https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-processing-rules))
-is an owner decision and is not implemented.
+is not implemented; whether to add it is your call.
 
-Before parking, preserve the confirmed target, exact skin/fleet files and their
-hashes, prefix/region, deployment-manifest identities and optional revision/fault
-state in a private operator handoff outside git. Hibernation needs no VM password
-or onboarding secret and does not rotate either. Keep the existing Key Vault and
-tenant onboarding identity for later approved deployment/reconciliation.
+Before parking, keep the target, exact skin/fleet files and their hashes,
+prefix/region, deployment-manifest identities and optional revision/fault state
+in your [private folder](private-config.md) outside git. Hibernation needs no VM
+password or onboarding secret and does not rotate either. Keep the existing Key
+Vault and tenant onboarding identity for later deployment or reconciliation.
 
-If the optional SRE layer is attached, finish its approved fault window and
-hibernate that layer first under its own procedure. Then preview and run Arc
-hibernation. Wake Arc/Monitor and verify Ready before resuming the dependent SRE
-layer. Readiness requires no active Container App revisions while parked; its
-fault flag remains unchanged. An intentionally retained fault will return on
-reactivation, so inspect it rather than silently resetting it.
+If the optional SRE layer is attached, finish its fault window and park that layer
+first with its own scripts. Then preview and run Arc hibernation. Wake Arc/Monitor
+and verify Ready before you resume the dependent SRE layer. Readiness requires no
+active Container App revisions while parked; its fault flag remains unchanged. An
+intentionally retained fault returns on reactivation, so check it after the wake;
+the scripts never reset it.
 
 AKS has additional timing/capacity constraints: allow 15-30 minutes between stop
 and start, and do not interleave operations. Stopped state is retained for up to
@@ -379,7 +379,7 @@ Review these exclusions/delayed billing separately; do not promise a zero bill.
 
 Observed on 5-6 November 2026 from read-only reads of an estate that stayed parked for
 about three hours. None of it is a lab fault and none of it needs action; it is listed
-so that nobody chases it in the activity log of a parked lab.
+so you don't chase it in the activity log of a parked lab.
 
 - **Arc status** reads `Disconnected` 11-16 minutes after the stop. Resource Health for a
   parked Arc machine flaps between `Available` and `Unavailable` and disagreed with the
@@ -437,9 +437,9 @@ reuse `vm-admin-password` from their existing Key Vault; if that secret was neve
 stored or the vault cannot be read from the workstation, supply the **current**
 password as `-AdminPassword` (SecureString) or as the file an earlier run saved
 with `-AdminPasswordPath` (below). Do not supply a new password as a convenience:
-credential rotation is a separate approved operation. Fresh deployments generate
-the password, save it to Key Vault through Azure Resource Manager and, when
-`-AdminPasswordPath` is given, to that file first.
+credential rotation is a separate operation, not part of redeployment. Fresh
+deployments generate the password, save it to Key Vault through Azure Resource
+Manager and, when `-AdminPasswordPath` is given, to that file first.
 For `Deploy-ArcDemo.ps1`, new Arc onboarding runs through
 `Initialize-DemoOnboardingIdentity` once the Arc resource group exists. An
 existing `sp-<prefix>-onboard` keeps its credentials: they are never read,
@@ -452,9 +452,9 @@ for that run only and then removed, by its exact key ID and only when it was abs
 before the creation and is named `rbac`, so no long-lived credential is left behind.
 An estate built by an older Deploy still carries that credential: parity reports it
 as `tenant/no-long-lived-credentials`, and deleting it
-(`az ad app credential delete --id <appId> --key-id <keyId>`) is the owner's decision;
+(`az ad app credential delete --id <appId> --key-id <keyId>`) is your decision;
 no script deletes an existing credential.
-`-OnboardingSecret` (SecureString) is an optional override for an operator who
+`-OnboardingSecret` (SecureString) is an optional override for when you
 cannot manage the application's credentials; it skips the one-day credential.
 Never commit or log either secret.
 
@@ -491,14 +491,14 @@ activation AMA wait permits the explicit `ARC_DEMO_PENDING` stdout marker;
 other guest operations cannot use it to bypass completion. Temporary
 credential-bearing files and jobs are removed even after failure. Deploy submits the
 Bicep deployment with `--no-wait` and polls it, so the parameters file (which holds the
-admin password in plain text in the user's temp folder) is deleted as soon as Azure accepts
+admin password in plain text in your temp folder) is deleted as soon as Azure accepts
 the request, seconds after it is written, not after the whole build.
 
 Routine deployment preserves an existing Container App's `SIMULATE_CRASH` value
 and does not re-bootstrap the sample workload on an existing AKS cluster.
 Repairing/replacing that sample is an explicit scenario operation, not an
 incidental infrastructure rerun. A retained intentional fault can therefore make
-Ready checks pending; disclose it instead of silently resetting it.
+Ready checks pending; the scripts leave it in place.
 
 ## Read-only readiness JSON v1
 
@@ -584,8 +584,8 @@ In this Azure-VM-backed `MSFT_ARC_TEST` lab, AMA and Linux Change Tracking use t
 **Azure VM extension path**, while DCRAs remain on the **Arc machine ID**. Windows
 uses Arc extensions. Both VM and Arc CT paths are documented, but ordinary Arc
 support is not evidence that this lab's failing guest-extension stack works.
-Read-only inspection found stuck Linux Arc extensions and missing CT; the approved
-VM-path CT reconciliation produced guest provisioning success and CT records for
+Read-only inspection found stuck Linux Arc extensions and missing CT; the VM-path
+CT reconciliation produced guest provisioning success and CT records for
 all three Linux hosts without restarts. Do not delete stuck Arc extensions or
 change paths incidentally. See the [CT support matrix and CLI examples](https://learn.microsoft.com/azure/azure-change-tracking-inventory/change-tracking-inventory-support-matrix).
 
@@ -606,11 +606,11 @@ optional database/worker health. A stopped/disabled worker remains disabled.
 
 ### Linux Defender is a separate diagnostic surface
 
-Approved guest diagnostics on the three Linux hosts found installed sensors
+Guest diagnostics on the three Linux hosts found installed sensors
 reporting `healthy=true`, `licensed=true`, no direct health issues and an active
 service, but `passive_mode_enabled=true`, `real_time_protection_enabled=false`
 and `engine_load_status="Engine not loaded"`. MDE extension models converged to
-Succeeded/onboarding Success after approved startup without a manual MDE repair.
+Succeeded/onboarding Success after startup without a manual MDE repair.
 Two extension payloads still recorded event-provider issues that differed from
 the newer direct sensor health. Do not label this active-antivirus or complete
 EDR/event-delivery validation, or change policy to make the story greener.
@@ -660,17 +660,17 @@ has the cause and the recovery. For the lifecycle this means:
 ## Validation boundaries
 
 Mocked Pester tests, script parsing, PSScriptAnalyzer, Bicep compile and live
-read-only readiness are separate evidence. Keep historical operational evidence
-privately and the working-path timings in the [nested SQL runbook](nested-sql-demo.md),
-not as extra review gates. They do not prove current health or validate new code.
+read-only readiness are separate evidence. Historical operational evidence does
+not prove current health or validate new code: keep it privately, and keep the
+working-path timings in the [nested SQL runbook](nested-sql-demo.md).
 Keep script completion, independent readiness, fresh telemetry and assessment
 completion separate; preserve per-host attempt results outside git.
 
 A fresh deployment, double-deploy idempotency, AKS park/start and delete/recreate
 remain separate validation exercises. Operational hibernation only proves the
 parked state actually observed, not future activation or fresh deployment.
-Run full/destructive smoke cycles only in an explicitly approved disposable lab,
-never incidentally against an in-use demo.
+Run full or destructive smoke cycles only in a disposable lab, never against a
+demo you are using.
 
 An earlier retained-estate wake on 2 November 2026 used the old Run Command host
 checks; all eight passed, but independent readiness still reported six Linux
@@ -679,13 +679,14 @@ The shared Heartbeat wait replaced those host checks afterwards.
 
 ### Default shared-wait park/wake proof: 2 November 2026
 
-An explicitly approved cycle used a clean checkout of merged main `3a70e96`,
-including the shared-wait, best-effort parking and nested-parent lifecycle changes.
+One cycle ran from a clean checkout of merged main `3a70e96`, including the
+shared-wait, best-effort parking and nested-parent lifecycle changes.
 Default Hibernate ran from 03:00:50 to 03:09:25 UTC: **8 minutes 35.2 seconds**.
-Direct post-park reads verified the eight fleet VMs (plus a since-deleted prototype VM) deallocated, the named NAT
-gateway and public IP absent, and all 35 retained Container App revisions inactive
-and `Stopped`. For independent revision reads, use
-`az containerapp revision list --all`: the default list hides inactive revisions.
+Direct post-park reads verified the eight fleet VMs (plus a since-deleted
+prototype VM) deallocated, the named NAT gateway and public IP absent, and all 35
+retained Container App revisions inactive and `Stopped`. For independent revision
+reads, use `az containerapp revision list --all`: the default list hides inactive
+revisions.
 
 Default Activate ran from 03:13:25 to 03:28:19 UTC: **14 minutes 54.1 seconds**
 wall-clock, exit 0 and result `pass`. No skip flags, host-check Run Commands, explicit
@@ -727,9 +728,9 @@ Heartbeats without the old explicit service restarts. Arc records still read
 `Disconnected` to `Connected` transition, long-park reconnection and guest service
 health were not proven. The
 [5-6 November proof](#park-wake-and-park-again-5-6-november-2026) later showed the
-`Disconnected` half; the reconnection is still open. Fresh deployment, double-deploy idempotency, AKS,
-assessment completion, full removal and rebuild remain outside this proof;
-drift, denial and partial-failure paths remain mocked. The estate was left awake.
+`Disconnected` half; the reconnection is still open. Fresh deployment, double-deploy
+idempotency, AKS, assessment completion, full removal and rebuild remain outside this
+proof; drift, denial and partial-failure paths remain mocked.
 
 The best-effort parking and shared-wait changes have local coverage for
 missing manifests, unlisted VMs, OS/skin drift, foreign NAT, partial deallocation,
@@ -739,15 +740,15 @@ ten-minute pending evidence, and
 telemetry-only pending versus real service/readiness failures. Native-process
 stderr and explicit-null JSON regressions remain. Mocks cannot prove Azure
 allocation, guest boot timing, RunCommand delivery/truncation, eventual ARM
-consistency or ingestion latency. Approve a disposable smoke cycle separately;
-see [cost.md](cost.md#proposed-disposable-smoke-cycle-not-executed).
+consistency or ingestion latency; a separate disposable smoke cycle would show
+those (see [cost.md](cost.md#proposed-disposable-smoke-cycle-not-executed)).
 
 ### Park, wake and park again: 5-6 November 2026
 
-An explicitly approved cycle on a rebuilt eight-host estate (nine Arc machines with the
-nested guest) ran Hibernate, Activate and Hibernate again. Durations are wall-clock from
-the scripts' own timing, not promises. The 2 November figures above came from a different
-estate and are kept as dated evidence.
+One cycle on a rebuilt eight-host estate (nine Arc machines with the nested guest)
+ran Hibernate, Activate and Hibernate again. Durations are wall-clock from the
+scripts' own timing, not promises. The 2 November figures above came from a
+different estate.
 
 | Phase | Result | Duration | 2 November figure |
 | --- | --- | --- | --- |
