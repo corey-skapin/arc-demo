@@ -67,7 +67,9 @@
     Optional existing onboarding SP secret as a SecureString. Normally omit it:
     when machines need onboarding, Deploy ensures the SP's Arc resource group role,
     mints a one-day credential on the existing SP through Graph and removes it
-    afterwards. Existing credentials are never read, reset or changed. Supply it
+    afterwards (a first creation of the SP removes the one-year credential that
+    creation adds, after it has been used). Existing credentials are never read,
+    reset or changed. Supply it
     only if the operator cannot manage the application's credentials.
 
 .PARAMETER Location

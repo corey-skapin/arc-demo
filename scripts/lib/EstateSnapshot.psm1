@@ -294,6 +294,15 @@ function Test-DemoEstateParity {
                     $start -and $end -and ($end - $start).TotalDays -le 2 })
                 & $add $id 'no credential that lives two days or less' @($residual | ForEach-Object { $_.displayName }) ($residual.Count -eq 0) 'A one-day build credential was not removed.'
             }
+            'noLongLivedCredentials' {
+                $state = Get-SnapshotSection $Snapshot 'onboardingApp'
+                if (-not $state.Ok) { & $unavailable $id 'no credential that lives longer than two days' $state; continue }
+                $long = @(@($state.Data.credentials) | Where-Object {
+                    $start = ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'startDateTime')
+                    $end = ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'endDateTime')
+                    $start -and $end -and ($end - $start).TotalDays -gt 2 })
+                & $add $id 'no credential that lives longer than two days' @($long | ForEach-Object { "$($_.displayName) until $((ConvertTo-SnapshotDate (Get-SnapshotValue $_ 'endDateTime')).ToString('yyyy-MM-dd'))" }) ($long.Count -eq 0) 'The build only ever mints one-day credentials. A longer one was left by the application''s creation (an older Deploy) or added by hand; deleting it is the owner''s decision (az ad app credential delete).'
+            }
             default {
                 $state = Get-SnapshotSection $Snapshot 'groups'
                 $label = "$($rule.type) $(Get-SnapshotValue $rule 'name')".Trim()

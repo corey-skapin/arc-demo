@@ -2244,6 +2244,48 @@ function Invoke-DemoOnboardingCredential {
     $result
 }
 
+function Remove-DemoCreationCredential {
+    <#
+    .SYNOPSIS
+        Removes the one-year credential that az ad sp create-for-rbac adds when it creates the onboarding service principal.
+    .DESCRIPTION
+        Only a credential that was absent before the creation and is named rbac is removed, by its exact key ID, and the
+        credentials that were there before are verified unchanged. A new credential with another name is left alone and
+        reported. Throws, naming the manual command, when a removal or the verification fails.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][guid]$ApplicationId, [string[]]$BaselineKeyId = @())
+    $appRoute = "applications%28appId%3D%27$ApplicationId%27%29"
+    $appUrl = "https://graph.microsoft.com/v1.0/$appRoute`?%24select=id,appId,passwordCredentials"
+    $baseline = @($BaselineKeyId | Where-Object { $_ } | ForEach-Object { "$_".ToLowerInvariant() } | Sort-Object -Unique)
+    $application = Get-DemoGraphApplication -Url $appUrl -ApplicationId $ApplicationId
+    $added = @($application.passwordCredentials | Where-Object { "$($_.keyId)".ToLowerInvariant() -notin $baseline })
+    $creation = @($added | Where-Object { $_.displayName -eq 'rbac' })
+    $others = @($added | Where-Object { $_.displayName -ne 'rbac' })
+    if ($others.Count) {
+        Write-Warn "The onboarding application has $($others.Count) credential(s) that were not there before and are not named rbac; they are left alone: $(($others | ForEach-Object { "$($_.displayName) ($($_.keyId))" }) -join ', ')."
+    }
+    foreach ($credential in $creation) {
+        $keyId = "$($credential.keyId)".ToLowerInvariant()
+        try {
+            $null = Invoke-DemoGraphRequest -Method POST -Url "https://graph.microsoft.com/v1.0/$appRoute/removePassword" -Body @{ keyId = $keyId }
+        } catch {
+            throw "The one-year credential added when the onboarding application was created could not be removed ($($_.Exception.Message)). Remove it with: az ad app credential delete --id $ApplicationId --key-id $keyId"
+        }
+    }
+    if (-not $creation.Count) { return }
+    $expected = @($baseline + @($others | ForEach-Object { "$($_.keyId)".ToLowerInvariant() }) | Sort-Object -Unique)
+    $deadline = [datetime]::UtcNow.AddSeconds(90)
+    do {
+        $remaining = @(Get-DemoCredentialKeyIdSet (Get-DemoGraphApplication -Url $appUrl -ApplicationId $ApplicationId))
+        if (Test-DemoCredentialSet -Expected $expected -Actual $remaining) { return }
+        if ([datetime]::UtcNow -ge $deadline) {
+            throw "Could not verify that the one-year credential was removed and the original credentials were kept. Check the application's credentials; remove the key with: az ad app credential delete --id $ApplicationId --key-id $(($creation | ForEach-Object { $_.keyId }) -join ',')"
+        }
+        Start-Sleep -Seconds 5
+    } while ($true)
+}
+
 function Initialize-DemoOnboardingIdentity {
     <#
     .SYNOPSIS
@@ -2254,8 +2296,8 @@ function Initialize-DemoOnboardingIdentity {
         (which must already exist: a rebuild deletes the old assignment with the group), a one-day credential is
         minted through Graph, handed to -Action as a SecureString and removed in a finally block, and the original
         key IDs are verified unchanged. -ExistingSecret skips minting and passes the supplied secret through.
-        No service principal: it is created with the role at the group, as before, and its initial secret is handed
-        to -Action; nothing is stored.
+        No service principal: it is created with the role at the group, as before, and the one-year credential that
+        creation adds is handed to -Action and then removed (only that credential, by key ID); nothing is stored.
         -Action receives the application ID (string) and the secret (SecureString).
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The secret returned by service principal creation is converted in memory before delivery.')]
@@ -2281,14 +2323,30 @@ function Initialize-DemoOnboardingIdentity {
         if ($found.Count -gt 1) { throw 'Ambiguous onboarding service principal name. Resolve duplicates before deployment.' }
         $principal = $found | Select-Object -First 1
         if (-not $principal) {
+            # create-for-rbac reuses an application of that name and adds a one-year credential either way. Note the keys that
+            # are already there so that only the credential it adds is removed once onboarding has used it.
+            $namedApps = @(Invoke-DemoAz -Arguments @('ad', 'app', 'list', '--display-name', $spName, '--query', "[?displayName=='$spName'].{appId:appId,keys:passwordCredentials[].keyId}", '-o', 'json') | ConvertFrom-Json)
+            if ($namedApps.Count -gt 1) { throw 'Ambiguous onboarding application name. Resolve duplicates before deployment.' }
+            $baselineKeys = @(if ($namedApps.Count) { @($namedApps[0].keys) | Where-Object { $_ } })
             $created = Invoke-DemoAz -Arguments @('ad', 'sp', 'create-for-rbac', '--name', $spName, '--role', $roleName, '--scopes', $scope, '--only-show-errors', '-o', 'json') | ConvertFrom-Json
             $createdAppId = [string]$created.appId
             $secret = ConvertTo-SecureString ([string]$created.password) -AsPlainText -Force
             $created = $null
-            Write-Ok "Onboarding service principal created ($createdAppId); its secret is not stored"
+            Write-Ok "Onboarding service principal created ($createdAppId); its secret is not stored and its one-year credential is removed after onboarding"
             Write-Step "Waiting $RolePropagationSeconds seconds for the new role assignment to propagate..."
             Start-Sleep -Seconds $RolePropagationSeconds
-            try { return (& $Action $createdAppId $secret) } finally { $secret.Dispose() }
+            $result = $null
+            $actionFailure = $null
+            try { $result = & $Action $createdAppId $secret } catch { $actionFailure = $_ } finally { $secret.Dispose() }
+            $cleanupFailure = $null
+            try { Remove-DemoCreationCredential -ApplicationId $createdAppId -BaselineKeyId $baselineKeys } catch { $cleanupFailure = $_ }
+            if ($cleanupFailure) {
+                $message = $cleanupFailure.Exception.Message
+                if ($actionFailure) { $message += " Failure: $($actionFailure.Exception.Message)" }
+                throw $message
+            }
+            if ($actionFailure) { throw $actionFailure }
+            return $result
         }
     } else {
         $principal = Invoke-DemoAz -Arguments @('ad', 'sp', 'show', '--id', "$ApplicationId", '--query', '{id:id,appId:appId}', '-o', 'json') | ConvertFrom-Json

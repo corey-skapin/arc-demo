@@ -57,7 +57,7 @@ BeforeAll {
                 subscription = & $ok ([ordered]@{
                     policyAssignments = @('mcsb-par-test', 'nist-par-test'); budgets = @('budget-par-test')
                     defender = @([ordered]@{ name = 'VirtualMachines'; tier = 'Standard'; subPlan = 'P2' }, [ordered]@{ name = 'Containers'; tier = 'Free'; subPlan = $null }) })
-                onboardingApp = & $ok ([ordered]@{ found = $true; credentials = @([ordered]@{ displayName = 'rbac'; keyId = 'k1'; startDateTime = '2026-10-09T00:00:00Z'; endDateTime = '2027-10-09T00:00:00Z' }) })
+                onboardingApp = & $ok ([ordered]@{ found = $true; credentials = @() })
                 sre = & $ok ([ordered]@{ exists = $true; identities = @([ordered]@{ name = 'sre-par-test-uami'; roleAssignments = @(
                     [ordered]@{ role = 'Contributor'; scope = "/subscriptions/$script:Sub/resourceGroups/rg-par-test" }
                     [ordered]@{ role = 'Monitoring Contributor'; scope = "/subscriptions/$script:Sub" }) }) })
@@ -80,7 +80,7 @@ Describe 'Expected-object list' {
         $ids | Should -HaveCount @($ids | Select-Object -Unique).Count
         foreach ($rule in $script:Expected.rules) {
             $kind = $rule.PSObject.Properties['kind']
-            if ($kind) { $kind.Value | Should -BeIn @('policy', 'budget', 'defender', 'identityRole', 'onboardingApp', 'noOneDayCredentials') }
+            if ($kind) { $kind.Value | Should -BeIn @('policy', 'budget', 'defender', 'identityRole', 'onboardingApp', 'noOneDayCredentials', 'noLongLivedCredentials') }
             else {
                 $rule.group | Should -BeIn @('arc', 'infra', 'sre')
                 $rule.type | Should -Match '^Microsoft\.[A-Za-z]+/[A-Za-z]+$'
@@ -126,6 +126,8 @@ Describe 'Parity evaluation' {
         @{ Name = 'the onboarding application is missing'; Expect = 'tenant/onboarding-app'; Change = { param($s) $s.sections.onboardingApp.data.found = $false } }
         @{ Name = 'a one-day build credential was left behind'; Expect = 'tenant/no-residual-credentials'
             Change = { param($s) $s.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'nested-guest-1'; keyId = 'k2'; startDateTime = '2026-11-02T00:00:00Z'; endDateTime = '2026-11-03T00:00:00Z' } } }
+        @{ Name = 'the application creation left a one-year credential behind'; Expect = 'tenant/no-long-lived-credentials'
+            Change = { param($s) $s.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'rbac'; keyId = 'k1'; startDateTime = '2026-10-09T00:00:00Z'; endDateTime = '2027-10-09T00:00:00Z' } } }
         @{ Name = 'the alert-access grant is missing'; Expect = 'subscription/alert-access-grant'; Change = { param($s) $s.sections.sre.data.identities[0].roleAssignments = @($s.sections.sre.data.identities[0].roleAssignments | Where-Object role -ne 'Monitoring Contributor') } }
         @{ Name = 'the alert-access grant is duplicated'; Expect = 'subscription/alert-access-grant'
             Change = { param($s) $s.sections.sre.data.identities[0].roleAssignments += [pscustomobject]@{ role = 'Monitoring Contributor'; scope = "/subscriptions/$($s.subscriptionId)" } } }
@@ -174,7 +176,7 @@ Describe 'Parity evaluation' {
         $snapshot = New-HealthySnapshot
         $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'nested-guest-1'; keyId = 'k2'; startDateTime = '2026-11-02T00:00:00Z'; endDateTime = '2026-11-03T00:00:00Z' }
         $snapshot = $snapshot | ConvertTo-Json -Depth 14 | ConvertFrom-Json
-        $snapshot.sections.onboardingApp.data.credentials[1].startDateTime | Should -BeOfType [datetime]
+        $snapshot.sections.onboardingApp.data.credentials[0].startDateTime | Should -BeOfType [datetime]
         $previous = [System.Threading.Thread]::CurrentThread.CurrentCulture
         try {
             [System.Threading.Thread]::CurrentThread.CurrentCulture = $info
@@ -222,6 +224,29 @@ Describe 'Parity evaluation' {
             foreach ($arc in $older.sections.arcMachines.data) { $arc | Add-Member -NotePropertyName tags -NotePropertyValue ([pscustomobject]@{ owner = 'demo' }) -Force }
             @((Invoke-Parity $older).checks | Where-Object id -like 'fleet/*/tags') | Should -HaveCount 0
         }
+    }
+
+    It 'tells a leftover one-day credential from a long-lived one by the length of its life, on a snapshot read back from JSON, in <Culture>' -TestCases @(
+        @{ Culture = 'en-US' }, @{ Culture = 'de-DE' }
+    ) {
+        param($Culture)
+        try { $info = [cultureinfo]::GetCultureInfo($Culture) } catch { Set-ItResult -Skipped -Because "culture $Culture is not available on this machine"; return }
+        $snapshot = New-HealthySnapshot
+        $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'rbac'; keyId = 'k1'; startDateTime = '2026-10-09T00:00:00Z'; endDateTime = '2027-10-09T00:00:00Z' }
+        $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'two-days'; keyId = 'k3'; startDateTime = '2026-11-02T00:00:00Z'; endDateTime = '2026-11-04T00:00:00Z' }
+        $snapshot.sections.onboardingApp.data.credentials += [pscustomobject]@{ displayName = 'no-dates'; keyId = 'k4' }
+        $snapshot = $snapshot | ConvertTo-Json -Depth 14 | ConvertFrom-Json
+        $previous = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $info
+            $result = Invoke-Parity $snapshot
+            Get-Failed $result | Should -Contain 'tenant/no-long-lived-credentials'
+            Get-Failed $result | Should -Contain 'tenant/no-residual-credentials'
+            ($result.checks | Where-Object id -eq 'tenant/no-long-lived-credentials').observed | Should -Be @('rbac until 2027-10-09')
+            ($result.checks | Where-Object id -eq 'tenant/no-residual-credentials').observed | Should -Be @('two-days')
+            ($result.checks | Where-Object id -eq 'tenant/no-long-lived-credentials').message | Should -Match 'owner''s decision'
+            Get-Failed (Invoke-Parity (New-HealthySnapshot)) | Should -Not -Contain 'tenant/no-long-lived-credentials'
+        } finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $previous }
     }
 
     It 'reports an unreadable snapshot section as failed checks with the exact error' {

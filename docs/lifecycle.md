@@ -327,7 +327,13 @@ reset or changed. Deploy re-grants its `Azure Connected Machine Onboarding` role
 at the Arc group (a deleted group takes the old assignment with it), adds a
 one-day credential through Graph, uses it only for onboarding and removes it in
 `finally`, then checks the original key IDs are unchanged. Without an SP, it is
-created with that role as before and its secret is used for that run only.
+created with that role as before; the one-year credential that creation adds is used
+for that run only and then removed, by its exact key ID and only when it was absent
+before the creation and is named `rbac`, so no long-lived credential is left behind.
+An estate built by an older Deploy still carries that credential: parity reports it
+as `tenant/no-long-lived-credentials`, and deleting it
+(`az ad app credential delete --id <appId> --key-id <keyId>`) is the owner's decision;
+no script deletes an existing credential.
 `-OnboardingSecret` (SecureString) is an optional override for an operator who
 cannot manage the application's credentials; it skips the one-day credential.
 Never commit or log either secret.

@@ -15,7 +15,10 @@ BeforeAll {
             assignments = @()
             baselineKey = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
             mintedKey = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+            createdKey = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
             keys = @('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+            keyNames = @{}
+            apps = @()
             mintedSecret = 'Synthetic-Onboarding-Secret-7419'
             createdSecret = 'Synthetic-Created-Secret-3306'
             mintDenied = $false; removeFails = $false; removeDeletesBaseline = $false; failGuestOn = ''
@@ -52,7 +55,15 @@ BeforeAll {
                 $fx.events.Add('sp-create')
                 $fx.created = $Arguments
                 $fx.sps = @(@{ id = '55555555-5555-5555-5555-555555555555'; appId = '44444444-4444-4444-4444-444444444444' })
+                $fx.keys += $fx.createdKey
+                $fx.keyNames[$fx.createdKey] = 'rbac'
                 return (@{ appId = $fx.sps[0].appId; displayName = $fx.spName; password = $fx.createdSecret; tenant = '22222222-2222-2222-2222-222222222222' } | ConvertTo-Json -Compress)
+            }
+        }
+        if ($verb -eq 'ad app') {
+            if ($Arguments[2] -eq 'list') {
+                $fx.events.Add('app-list')
+                return (ConvertTo-Json -InputObject @($fx.apps) -Depth 4)
             }
         }
         if ($verb -eq 'role assignment') {
@@ -78,16 +89,17 @@ BeforeAll {
             }
             if ($url -like '*/removePassword') {
                 $body = Get-Content -LiteralPath $Arguments[[array]::IndexOf($Arguments, '--body') + 1].Substring(1) -Raw | ConvertFrom-Json
-                if ($body.keyId -ne $fx.mintedKey -or $body.passwordCredential) { throw 'removePassword must receive the exact top-level keyId.' }
+                if ($body.keyId -notin @($fx.mintedKey, $fx.createdKey) -or $body.passwordCredential) { throw 'removePassword must receive the exact top-level keyId.' }
                 if ($fx.removeFails) { throw 'Azure CLI rest POST failed (exit 1): (ServiceUnavailable) The service is temporarily unavailable.' }
-                $fx.events.Add('cleanup')
-                $fx.keys = @($fx.keys | Where-Object { $_ -ne $fx.mintedKey -and -not ($fx.removeDeletesBaseline -and $_ -eq $fx.baselineKey) })
+                $fx.events.Add($(if ($body.keyId -eq $fx.createdKey) { 'creation-cleanup' } else { 'cleanup' }))
+                $removed = $body.keyId
+                $fx.keys = @($fx.keys | Where-Object { $_ -ne $removed -and -not ($fx.removeDeletesBaseline -and $_ -eq $fx.baselineKey) })
                 return ''
             }
             if ($url -like '*/applications%28*') {
                 $fx.graphGets++
                 $fx.events.Add('graph-get')
-                return (@{ appId = $fx.sps[0].appId; passwordCredentials = @($fx.keys | ForEach-Object { @{ keyId = $_ } }) } | ConvertTo-Json -Depth 5 -Compress)
+                return (@{ appId = $fx.sps[0].appId; passwordCredentials = @($fx.keys | ForEach-Object { @{ keyId = $_; displayName = $(if ($fx.keyNames.ContainsKey($_)) { $fx.keyNames[$_] } else { 'baseline' }) } }) } | ConvertTo-Json -Depth 5 -Compress)
             }
             throw "Unexpected Graph URL: $url"
         }
@@ -213,8 +225,8 @@ Describe 'Initialize-DemoOnboardingIdentity' {
     }
 
     Context 'there is no service principal yet' {
-        BeforeEach { $global:OnboardingFixture.sps = @() }
-        It 'creates it with the role at the Arc group, waits, delivers its secret and stores nothing' {
+        BeforeEach { $global:OnboardingFixture.sps = @(); $global:OnboardingFixture.keys = @() }
+        It 'creates it with the role at the Arc group, waits, delivers its secret, stores nothing and removes the one-year credential the creation added' {
             $fx = $global:OnboardingFixture
             $output = Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver *>&1 | Out-String
             $created = $fx.created -join ' '
@@ -227,7 +239,43 @@ Describe 'Initialize-DemoOnboardingIdentity' {
             $fx.delivered.Text | Should -Be $fx.createdSecret
             $fx.delivered.ApplicationId | Should -Be '44444444-4444-4444-4444-444444444444'
             $fx.sleeps | Should -Be @(90)
+            ($fx.events | Where-Object { $_ -in 'app-list', 'sp-create', 'deliver', 'creation-cleanup' }) -join ',' | Should -Be 'app-list,sp-create,deliver,creation-cleanup'
+            $fx.keys.Count | Should -Be 0
             ($output + ($fx.messages -join "`n")) | Should -Not -Match 'Synthetic-Created-Secret'
+        }
+        It 'keeps the credentials an existing application of that name already had and removes only the one it added' {
+            $fx = $global:OnboardingFixture
+            $fx.keys = @($fx.baselineKey)
+            $fx.apps = @(@{ appId = '44444444-4444-4444-4444-444444444444'; keys = @($fx.baselineKey) })
+            Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver | Out-Null
+            $fx.keys | Should -Be @($fx.baselineKey)
+            $fx.events | Should -Contain 'creation-cleanup'
+        }
+        It 'removes the credential the creation added, and rethrows the failure, when onboarding fails' {
+            $fx = $global:OnboardingFixture
+            $failing = { param([string]$ApplicationId, [securestring]$Secret) $global:OnboardingFixture.events.Add('deliver'); throw 'synthetic onboarding failure' }
+            { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $failing } | Should -Throw '*synthetic onboarding failure*'
+            $fx.events | Should -Contain 'creation-cleanup'
+            $fx.keys.Count | Should -Be 0
+        }
+        It 'names the manual command, with the key, when the creation credential cannot be removed' {
+            $fx = $global:OnboardingFixture
+            $fx.removeFails = $true
+            { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver } |
+                Should -Throw "*could not be removed*ServiceUnavailable*az ad app credential delete --id 44444444-4444-4444-4444-444444444444 --key-id $($fx.createdKey)*"
+        }
+        It 'leaves a new credential with another name alone and says so' {
+            $fx = $global:OnboardingFixture
+            $adds = { param([string]$ApplicationId, [securestring]$Secret) $global:OnboardingFixture.keys += 'dddddddd-dddd-dddd-dddd-dddddddddddd'; $global:OnboardingFixture.keyNames['dddddddd-dddd-dddd-dddd-dddddddddddd'] = 'added-by-hand' }
+            Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $adds | Out-Null
+            $fx.keys | Should -Be @('dddddddd-dddd-dddd-dddd-dddddddddddd')
+            ($fx.messages -join "`n") | Should -Match 'not named rbac; they are left alone: added-by-hand'
+        }
+        It 'refuses two applications with the name before it creates anything' {
+            $fx = $global:OnboardingFixture
+            $fx.apps = @(@{ appId = '44444444-4444-4444-4444-444444444444'; keys = @() }, @{ appId = '77777777-7777-7777-7777-777777777777'; keys = @() })
+            { Initialize-DemoOnboardingIdentity -NamePrefix fixture -ResourceGroup rg-fixture -Action $script:deliver } | Should -Throw '*Ambiguous onboarding application name*'
+            $fx.events | Should -Not -Contain 'sp-create'
         }
     }
 

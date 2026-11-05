@@ -32,6 +32,7 @@
     { "id": "subscription/defender-servers", "kind": "defender", "plan": "VirtualMachines", "tier": "Standard" },
     { "id": "subscription/alert-access-grant", "feature": "SreAlertGrant", "kind": "identityRole", "role": "Monitoring Contributor", "count": 1 },
     { "id": "tenant/onboarding-app", "kind": "onboardingApp" },
-    { "id": "tenant/no-residual-credentials", "kind": "noOneDayCredentials" }
+    { "id": "tenant/no-residual-credentials", "kind": "noOneDayCredentials" },
+    { "id": "tenant/no-long-lived-credentials", "kind": "noLongLivedCredentials" }
   ]
 }

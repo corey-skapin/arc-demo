@@ -497,6 +497,26 @@ group has lost the previous assignment; the helper re-grants it and waits 90
 seconds for propagation, so a retry after a failed first attempt needs no manual
 role work.
 
+## Parity reports a long-lived credential on the onboarding application
+
+**Symptom** — `Test-ArcDemoParity.ps1` fails `tenant/no-long-lived-credentials` and names a credential such as `rbac until
+<date>` on the `sp-<prefix>-onboard` application, while `tenant/no-residual-credentials` passes.
+
+**Cause** — an older Deploy created the onboarding application with `az ad sp create-for-rbac`, which also adds a
+one-year password credential that nothing removed. The build only ever mints one-day credentials; Deploy now removes the
+creation-time credential once onboarding has used it. Nothing holds the old secret.
+
+**What to do** — this is the owner's decision, not a repair step: no script deletes an existing credential, and
+`Remove-ArcDemo.ps1 -RemoveOnboardingIdentity` removes only the service principal. With the owner's approval, delete
+that one credential by its key ID from `az ad app credential list --id <appId>`:
+
+```powershell
+az ad app credential delete --id <appId> --key-id <keyId>
+```
+
+The next Deploy and nested build mint and remove their own one-day credentials as before. Until the owner decides, report the
+failed row as known rather than clearing it another way.
+
 ## Activate rejects an unused alternative parent as outside the manifest
 
 If a parked alternative SQL parent remains alongside the selected scratch parent,
