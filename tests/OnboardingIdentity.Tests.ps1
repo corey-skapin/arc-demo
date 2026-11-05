@@ -325,14 +325,20 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
         Mock Write-Step {}
         Mock Write-Warn {}
         Mock Wait-Until { $true }
+        Mock Wait-DemoJobs {}
         Mock az { $global:OnboardingFixture.events.Add("az $($args[0]) $($args[1])") }
         Mock Set-DemoResourceTags { $true }
         Mock Invoke-DemoGuestCommand {
             $fx = $global:OnboardingFixture
+            if ($null -ne $Job) {
+                $fx.events.Add('guest-result')
+                if ($Job.Fail) { throw "Guest command failed on $($Machine.Name)" }
+                return
+            }
             $fx.events.Add('guest-command')
             $path = $Script.Substring(1)
             $fx.guestScripts.Add(@{ Machine = $Machine.Name; OsType = $Machine.OsType; Path = $path; Text = (Get-Content -LiteralPath $path -Raw) })
-            if ($fx.failGuestOn -eq $Machine.Name) { throw "Guest command failed on $($Machine.Name)" }
+            [pscustomobject]@{ Name = "vm-run-command-$($Machine.Name)"; State = 'Completed'; Fail = ($fx.failGuestOn -split ',' -contains $Machine.Name) }
         }
         $NamePrefix = 'fixture'; $arcRg = 'rg-fixture'; $infraRg = 'rg-fixture-infra'
         $SubscriptionId = '11111111-1111-1111-1111-111111111111'; $TenantId = '22222222-2222-2222-2222-222222222222'
@@ -381,10 +387,25 @@ Describe 'Deploy phases 4 to 5.5 run inside the onboarding identity helper' {
     It 'removes the credential and the script files when a machine fails to onboard' {
         $fx = $global:OnboardingFixture
         $fx.failGuestOn = 'vm-lnx'
-        { & ([scriptblock]::Create($script:onboardPhases)) } | Should -Throw '*Guest command failed on vm-lnx*'
+        { & ([scriptblock]::Create($script:onboardPhases)) } | Should -Throw '*Arc onboarding failed on 1 of 2 VM(s): vm-lnx: Guest command failed on vm-lnx*'
         ($fx.events | Where-Object { $_ -in 'mint', 'guest-command', 'cleanup' }) -join ',' | Should -Be 'mint,guest-command,guest-command,cleanup'
         $fx.keys | Should -Be @($fx.baselineKey)
         $fx.guestScripts | ForEach-Object { Test-Path -LiteralPath $_.Path | Should -BeFalse }
+    }
+    It 'submits every machine before it waits for any, and receives each result' {
+        $fx = $global:OnboardingFixture
+        & ([scriptblock]::Create($script:onboardPhases))
+        ($fx.events | Where-Object { $_ -in 'guest-command', 'guest-result' }) -join ',' | Should -Be 'guest-command,guest-command,guest-result,guest-result'
+        Should -Invoke Wait-DemoJobs -Times 1 -Exactly -ParameterFilter { @($Jobs).Count -eq 2 -and $TimeoutSeconds -eq 900 }
+        Should -Invoke Invoke-DemoGuestCommand -Times 2 -Exactly -ParameterFilter { $AsJob }
+        Should -Invoke Invoke-DemoGuestCommand -Times 2 -Exactly -ParameterFilter { $Job -and $TimeoutSeconds -eq 30 }
+    }
+    It 'names every VM that failed to onboard, not only the first, and still receives the others' {
+        $fx = $global:OnboardingFixture
+        $fx.failGuestOn = 'vm-win,vm-lnx'
+        { & ([scriptblock]::Create($script:onboardPhases)) } | Should -Throw '*Arc onboarding failed on 2 of 2 VM(s): vm-win: Guest command failed on vm-win | vm-lnx: Guest command failed on vm-lnx*'
+        @($fx.events | Where-Object { $_ -eq 'guest-result' }).Count | Should -Be 2
+        $fx.keys | Should -Be @($fx.baselineKey)
     }
     It 'needs no identity when every machine is already Arc-onboarded' {
         $fx = $global:OnboardingFixture

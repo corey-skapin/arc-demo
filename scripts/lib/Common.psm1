@@ -1077,6 +1077,24 @@ function Receive-DemoJobs {
     }
 }
 
+function Wait-DemoJobs {
+    <#
+    .SYNOPSIS
+        Waits for already-submitted jobs until they finish or the deadline passes, naming every job still pending in each
+        progress line. It neither receives nor removes them: Invoke-DemoGuestCommand -Job and Receive-DemoJobs do that.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]]$Jobs, [ValidateRange(0, 7200)][int]$TimeoutSeconds = 900)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $pending = @($Jobs | Where-Object State -in @('NotStarted', 'Running'))
+        if (-not $pending.Count -or (Get-Date) -ge $deadline) { return }
+        $remaining = [Math]::Max(0, [int]($deadline - (Get-Date)).TotalSeconds)
+        Write-Step "Waiting for guest/extension jobs: $($pending.Name -join ', ') ($remaining s remaining)"
+        $pending | Wait-Job -Timeout ([Math]::Min(15, [Math]::Max(1, $remaining))) | Out-Null
+    }
+}
+
 function Start-DemoAzJob {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$Arguments)

@@ -142,6 +142,24 @@ function Get-GuestState {
     $state.Inspect
 }
 
+function Wait-GuestSettled {
+    # After the Azure restart the parent can restart a second time on its own (servicing finishing after the role install)
+    # while Arc already reads Connected, so the first Inspect lands in early boot or in that shutdown ("Cannot connect to
+    # CIM server. A system shutdown is in progress."). Inspect again, tolerating a guest that is not answering, until two
+    # inspections a minute apart both find Hyper-V ready. About 10 minutes at most; the caller judges the final state.
+    $ready = 0
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        $state.Inspect = $null
+        try { $ready = if (Test-HyperVReady (Get-GuestState)) { $ready + 1 } else { 0 } }
+        catch {
+            $ready = 0
+            Write-Step "The parent is not answering yet ($($_.Exception.Message)); checking again in 30 seconds."
+        }
+        if ($ready -ge 2) { return }
+        Start-Sleep -Seconds $(if ($ready) { 60 } else { 30 })
+    }
+}
+
 function Test-VolumeReady { param($Guest) $Guest.volume.present -and $Guest.volume.label -eq 'NestedSQL' -and $Guest.volume.fileSystem -eq 'NTFS' -and $Guest.volume.vmsFolder -and $Guest.volume.mediaFolder }
 function Test-HyperVReady { param($Guest) $Guest.hyperV.installed -and $Guest.hyperV.vmms -eq 'Running' -and $Guest.hyperV.hypervisorPresent -and $Guest.hyperV.vmHostOk }
 function Test-NetworkReady {
@@ -258,6 +276,7 @@ function Invoke-HyperVPhase {
     Invoke-DemoAz -Arguments @('vm', 'restart', '-g', $infraRg, '-n', $parentName, '--only-show-errors') | Out-Null
     Wait-ParentReady
     $state.Inspect = $null
+    Wait-GuestSettled
     if (-not (Test-HyperVReady (Get-GuestState))) { throw 'Hyper-V is not running after the restart. Check that the size supports nested virtualization and that security type is Standard.' }
     New-PhaseResult 'HyperV' 'changed' $detail
 }

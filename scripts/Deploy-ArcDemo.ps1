@@ -940,12 +940,32 @@ Write-Header 'Phase 5 — Arc onboarding (parallel)'
 if (-not $toOnboardFleet) {
     Write-Ok 'All VMs already Arc-onboarded — skipping'
 } else {
-    Write-Step "Onboarding $($toOnboardFleet.Count) of $($vmNames.Count) VMs..."
-    foreach ($machine in $toOnboardFleet) {
-        $vm = $machine.name
-        $isWin = $machine.osType -eq 'Windows'
-        $target = [pscustomobject]@{ Name = $vm; OsType = $machine.osType; Id = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$vm" }
-        Invoke-DemoGuestCommand -Machine $target -Script ($(if ($isWin) { "@$winFile" } else { "@$lnxFile" }))
+    Write-Step "Onboarding $($toOnboardFleet.Count) of $($vmNames.Count) VMs in parallel..."
+    # Submit every guest command first, then wait for all of them together: serial onboarding took 2-4 minutes per VM.
+    $submitted = [System.Collections.Generic.List[object]]::new()
+    try {
+        foreach ($machine in $toOnboardFleet) {
+            $vm = $machine.name
+            $isWin = $machine.osType -eq 'Windows'
+            $target = [pscustomobject]@{ Name = $vm; OsType = $machine.osType; Id = "/subscriptions/$SubscriptionId/resourceGroups/$infraRg/providers/Microsoft.Compute/virtualMachines/$vm" }
+            $submitted.Add([pscustomobject]@{ Machine = $target; Job = (Invoke-DemoGuestCommand -Machine $target -Script ($(if ($isWin) { "@$winFile" } else { "@$lnxFile" })) -AsJob) })
+        }
+        Wait-DemoJobs -Jobs @($submitted.Job) -TimeoutSeconds 900
+        $onboardFailures = @()
+        foreach ($entry in $submitted) {
+            # A job still running at the deadline gets one short extra wait inside the receive, then is stopped.
+            try { Invoke-DemoGuestCommand -Machine $entry.Machine -Job $entry.Job -TimeoutSeconds 30 }
+            catch { $onboardFailures += "$($entry.Machine.Name): $($_.Exception.Message)" }
+        }
+        if ($onboardFailures.Count) { throw "Arc onboarding failed on $($onboardFailures.Count) of $($submitted.Count) VM(s): $($onboardFailures -join ' | ')" }
+    } catch {
+        foreach ($entry in $submitted) {
+            if ($entry.Job -is [System.Management.Automation.Job]) {
+                Stop-Job -Job $entry.Job -ErrorAction SilentlyContinue
+                Remove-Job -Job $entry.Job -Force -ErrorAction SilentlyContinue
+            }
+        }
+        throw
     }
 }
 Write-Step 'Waiting for all Arc machines to report Connected...'
