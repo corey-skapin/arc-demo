@@ -629,7 +629,10 @@ foreach ($busyVm in @($existingVms | Where-Object { $_.provisioningState -and $_
 }
 # The password saved by an earlier run (-AdminPasswordPath) is the way back in when the vault cannot be read from here,
 # for example a vault that a tenant policy made private-only, or a build that stopped before the vault copy was written.
-$savedPassword = if ($AdminPasswordPath -and -not $AdminPassword) { Read-DemoSecretFile -Path $AdminPasswordPath }
+# A brand-new build (no vault and no VM) never reads it: nothing exists that an older password could still protect, so a
+# stale or unreadable file left by an earlier estate neither supplies the password nor blocks the build, and the new
+# password replaces the file below.
+$savedPassword = if ($AdminPasswordPath -and -not $AdminPassword -and (-not $freshVault -or $existingVms.Count)) { Read-DemoSecretFile -Path $AdminPasswordPath }
 if (-not $freshVault -and -not $existingVms.Count -and -not $AdminPassword -and -not $savedPassword -and -not $WhatIfPreference) {
     throw 'Retained vault without current compute: supply the retained CURRENT AdminPassword (or the saved -AdminPasswordPath file); do not generate or overwrite a retained administrator credential.'
 }

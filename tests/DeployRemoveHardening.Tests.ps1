@@ -900,6 +900,26 @@ Describe 'Deploy admin password, saved copy and resume of an unfinished build' {
         { Invoke-FixtureDeploy } | Should -Throw '*stop after the secret write*'
         Test-Path -LiteralPath $script:pwFile | Should -BeFalse
     }
+    It 'ignores a stale saved password on a brand-new build, generates a new one and replaces the file' {
+        Save-DemoSecretFile -Path $script:pwFile -Value 'Stale-Value-1' 3>$null
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword | Should -Not -Be 'Stale-Value-1'
+        $script:s.bicepPassword.Length | Should -Be 24
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $script:pwFile)).Password | Should -Be $script:s.bicepPassword
+        Should -Invoke Write-Step -ParameterFilter { $Message -eq 'VM admin password: generated' }
+    }
+    It 'is not blocked on a brand-new build by a saved file that cannot be read, and replaces it' {
+        Set-Content -LiteralPath $script:pwFile -Value 'not a protected export'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*stop after the secret write*'
+        $script:s.bicepPassword.Length | Should -Be 24
+        [System.Net.NetworkCredential]::new('', (Read-DemoSecretFile -Path $script:pwFile)).Password | Should -Be $script:s.bicepPassword
+    }
+    It 'still stops on a saved file that cannot be read when a retained estate needs it' {
+        Set-RetainedEstate -Access 'Disabled'
+        Set-Content -LiteralPath $script:pwFile -Value 'not a protected export'
+        { Invoke-FixtureDeploy -WithPath } | Should -Throw '*could not be read*'
+        $script:s.createCalls | Should -Be 0
+    }
     It 'refuses a password file inside the git worktree' {
         { Invoke-FixtureDeploy -WithPath -Path (Join-Path $repo '.local\vm-admin-credential.clixml') } | Should -Throw '*outside the git worktree*'
         Should -Invoke Invoke-DemoAz -Times 0
