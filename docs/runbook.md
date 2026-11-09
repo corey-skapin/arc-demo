@@ -208,7 +208,15 @@ command to remind you, so add the switch yourself.
   accept an argument the wrapper passes, or an input file is missing.
 - Nothing starts if any selected step is blocked, a switch it needs is missing,
   or the state records P2 as done while the infra group no longer exists (a
-  teardown happened; delete the state file to start a new build).
+  teardown happened; delete the state file to start a new build). A launch that stops
+  this way exits 1 and writes the reason to standard error, not to the state file: when
+  you redirect the output, read the error file as well as the log (a blocked step prints
+  the plan table first, a missing switch or file prints nothing to the log).
+- If the plan prints "Read-only checks stopped: ..." above the table, it could not read
+  Azure (usually the sign-in), so P0's notes and the shutdown-window warning are missing:
+  fix the cause and run the plan again. `-Offline` skips those reads on purpose and prints
+  only the order and the minutes. It is for looking at the order, never the go-ahead, and
+  `-Execute` refuses it.
 - Read-only steps (P0, P1, P5 `Status`, P7, P9 readiness, P11) run
   again on every `-Execute`. A failed or interrupted P4 or P9 deploy is not retried
   until you have inspected it and pass `-Force`; `-Force` also re-runs steps
