@@ -34,15 +34,23 @@ These screenshots come from a lab estate rebuilt from zero with this repo; each 
 
 ## Quick start
 
-Open the repo in your AI tool and ask for what you want, for example: "Read
-AGENTS.md, then build the whole demo in my subscription." You give the tool your tenant
-ID, your subscription ID and your acceptances. In its first message it asks once, in one
-list, whether you accept what the plan needs: starting billable resources (see
-[cost.md](docs/cost.md)), the SQL Server Developer licence terms, the paid SRE agent and
-the one subscription role assignment that lets the agent read Azure Monitor alerts. It
-also asks whether your subscription is registered for Azure SRE Agent (the only check is
-in the portal; [how](docs/runbook.md#build-everything-in-order-optional-wrapper)); if it
-isn't, the tool builds the Arc half and stops before the SRE steps.
+Open the repo in your AI tool and give it one prompt that carries everything, for example:
+
+> Read AGENTS.md, then build the whole demo in my subscription. Tenant ID `<TENANT_ID>`,
+> subscription ID `<SUBSCRIPTION_ID>`. I accept starting billable resources, the SQL Server
+> Developer licence terms, creating the paid SRE agent and the one subscription role
+> assignment it needs.
+
+Those are the four acceptances the whole demo needs: starting billable resources (see
+[cost.md](docs/cost.md)), the SQL Server Developer licence terms, the paid SRE agent and the
+one subscription role assignment that lets the agent read Azure Monitor alerts. A yes given up
+front by name counts; a vague "go ahead" doesn't. Whatever you leave out, the tool asks for
+once, in its first message, in one list.
+
+The tool checks for itself that your subscription is registered for Azure SRE Agent (one
+read-only command, [how](docs/runbook.md#sre-agent-registration)) and asks you only if that
+doesn't confirm it. If you confirm it isn't registered, the tool builds everything before the
+SRE steps and stops there; you continue after registration.
 
 Everything else has a default that the tool uses and reports in its final summary. The
 notification e-mail is your signed-in account's address (the tool asks only if that isn't

@@ -26,8 +26,8 @@ administrator). Deploy first uses that permission at phase 4, after the VMs exis
 check it before you start. PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell
 5.1), Azure CLI 2.60+ and
 Bicep are required, and Git to clone the SRE companion repo. No Az PowerShell module or
-production framework is required. The Arc half needs no SRE Agent; the SRE half needs a
-subscription registered for it ([how to check](#build-everything-in-order-optional-wrapper)).
+production framework is required. An Arc-only build needs no SRE Agent; the SRE half needs a
+subscription registered for it ([how to check](#sre-agent-registration)).
 
 Sign in yourself: `az login --tenant <TENANT>` opens a browser, so a tool cannot do it
 for you. If your AI tool is running these steps, it asks you to sign in and waits.
@@ -221,18 +221,9 @@ command to remind you, so add the switch yourself.
   the Arc skin's. They ship equal, so nothing else changes for the default scenarios, and
   `labels.agentName` follows the prefix. The
   [setup block](private-config.md#set-up-the-whole-demo) does all of this.
-- The subscription must also be registered for Azure SRE Agent, in a
-  [supported region](https://learn.microsoft.com/azure/sre-agent/supported-regions)
-  (Australia East is on the list). The only check is in the portal: open
-  [sre.azure.com](https://sre.azure.com), choose **Create agent**, pick the subscription and open
-  the **Region** dropdown. An empty dropdown means the subscription is not registered, and the
-  Learn page links the registration request. If it is not registered yet, build the Arc half now
-  with `-Execute -To P7` (P0 to P7: it stops before the SRE steps), ask for registration, and
-  continue later with `-Execute -From P8` (P8 to P11) and the SRE switches. The presenter
-  guide and inventory (P10, P11) run in that later pass; `-Only P10, P11` runs them earlier
-  for the Arc half alone. If the 19:00
-  shutdown has stopped the VMs by then, wake the lab first with `Activate-ArcDemo.ps1`: P8 runs
-  on a host and P9 readiness needs the lab Active.
+- The subscription must also be registered for Azure SRE Agent and offer the skin's region.
+  You [check that yourself](#sre-agent-registration) with one read-only command, and the user
+  is asked only if the check can't confirm it.
 - The SRE half also needs the Container App and the LOB app. The companion's
   `Deploy-SreAgent.ps1` requires the fault Container App `ca-<prefix>-fault` by default
   (`sre.requiredScenarios` defaults to T09, the Container App incident, and T11, the LOB app
@@ -267,6 +258,48 @@ command to remind you, so add the switch yourself.
   `Remove-ArcDemo.ps1` (and the companion's own scripts first); the opt-in
   `-ForceDeleteWorkspace` and `-PruneDeploymentHistory` switches for a same-prefix
   rebuild are described with Remove below and decided at teardown time.
+
+### SRE Agent registration
+
+The SRE half needs a subscription that is registered for Azure SRE Agent and offers the
+skin's region (Australia East is on the
+[supported-regions list](https://learn.microsoft.com/azure/sre-agent/supported-regions)).
+Once you are signed in you can check this yourself, read-only. It is the allow-list check in
+the [Azure SRE Agent troubleshooting FAQ](https://learn.microsoft.com/azure/sre-agent/faq-troubleshooting#deployment-issues):
+
+```powershell
+$location = '<azure.location from the Arc skin>'   # for example australiaeast
+$regions = az provider show -n Microsoft.App --subscription <SUB> --query "resourceTypes[?resourceType=='agents'] | [0].locations" -o tsv
+$offered = @($regions | Where-Object { ($_ -replace '\s') -eq $location }).Count -gt 0
+```
+
+The command prints one region per line as a display name, so the comparison ignores spaces
+and case (`Australia East` is `australiaeast`). Only the registered case has been verified: it
+lists the region. An unregistered subscription is expected to print nothing or to leave the
+region out, which is why the second case below says "probably".
+
+- **`$offered` is true:** the subscription is registered and offers the region. Carry on, and
+  say in your final summary that you checked.
+- **`$offered` is false:** the subscription probably isn't registered or doesn't offer the
+  region. The portal is the authority, so ask the user once to confirm it: open
+  [sre.azure.com](https://sre.azure.com), choose **Create agent**, pick the subscription and
+  open the **Region** dropdown. An empty dropdown means it isn't registered (the Learn page
+  links the registration request); a dropdown that lists the region means it is, so carry on.
+  This is the only time anyone is asked about registration.
+- **Not registered yet:** build everything before the SRE steps now with `-Execute -To P7`
+  (P0 to P7: about 116 minutes plus roughly 20 for the Container Apps environment, and it still
+  needs `-ApproveCostStart` and `-AcceptSqlDeveloperTerms`), ask for registration, and continue
+  later with `-Execute -From P8` (P8 to P11) and the SRE switches. P10 and P11 (presenter guide
+  and inventory) run in that later pass; `-Only P10, P11` runs them earlier. If the 19:00
+  shutdown has stopped the VMs by then, run `Activate-ArcDemo.ps1` first: P8 runs on a host and
+  P9 readiness needs the lab Active. An Arc-only build (no `sre` section, about 90 minutes, one
+  switch) is the separate variant.
+- **P9 fails later because the subscription isn't registered:** get it registered, and check that
+  `rg-<prefix>-sre` holds no agent: `az resource list -g rg-<prefix>-sre --subscription <SUB> --query "[?type=='Microsoft.App/agents'].name" -o tsv`
+  prints nothing (or the group does not exist). Then run `-Execute -From P9 -Force` with the SRE
+  switches. A rerun retries P9.1 (the preview) as it is, but a failed P9.2 (the paid create) is
+  not retried until you have inspected it and pass `-Force`; with `-From P9`, `-Force` does not
+  re-run the earlier steps.
 
 ### Snapshot and parity (read-only)
 
