@@ -505,8 +505,10 @@ then rerun the same Deploy command: it adopts the failed deployment's vault, reu
 admin password and submits the template again. If it fails again on `cae-<prefix>`, check
 Service Health, wait and retry; deleting only that environment is the next step
 (it holds nothing else and the fault app was never created). Do not
-Remove the estate for this. To keep a failure here from stranding the base estate, build
-the base first and add Container Apps as a second Deploy pass
+Remove the estate for this. The whole-demo build deploys the Container App in its first pass,
+because the SRE half needs it: rerun the same wrapper command, which resumes P2 and reuses the
+saved admin password. For an Arc-only build or an estate that already exists, add Container Apps
+as a second Deploy pass so a failure here cannot strand the base estate
 ([lifecycle](lifecycle.md#adding-an-optional-workload-to-a-running-estate)).
 
 ## Preflight or redeployment now refuses a previously tolerated state

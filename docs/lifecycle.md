@@ -414,11 +414,22 @@ The incremental path works: set the workload's flag (`workloads.deployContainerA
 same step as the Deploy that creates it**, then run the same Deploy again. It adds only the new
 resources (for Container Apps: the environment, the fault app, the restart alert and the Arc-path
 MDE extensions); no VM is restarted and no disk, the vault, the subnet, the NAT gateway or the
-Defender plan is touched. Do not set the flag earlier: lifecycle commands and read-only
-readiness compare the skin with the retained manifest, so with the flag already `true` and
-nothing deployed yet, readiness ends with exit 1 and one `readiness/error` row, "Skin requires
-deployContainerApps, but no retained workload manifest exists. Reconcile deployment before
-lifecycle operations." That is expected, not damage; deploy the workload, then run readiness.
+Defender plan is touched. On an existing estate, do not set the flag earlier: lifecycle commands
+and read-only readiness compare the skin with the retained manifest, so with the flag already
+`true` and nothing deployed yet, readiness ends with exit 1 and one `readiness/error` row, "Skin
+requires deployContainerApps, but no retained workload manifest exists. Reconcile deployment
+before lifecycle operations." That is expected, not damage; deploy the workload, then run
+readiness.
+
+The whole-demo build is the exception: the SRE half needs the Container App, so the
+[setup block](private-config.md#set-up-the-whole-demo) sets the flag before P2 and the first
+Deploy creates it. If P2 stops on the environment (`ManagedEnvironmentProvisioningError`, a
+transient platform error), rerun the same wrapper command: it resumes P2 and reuses the saved
+admin password; don't Remove. Readiness run after a P2 that failed with the flag already `true`
+shows the same kind of `readiness/error` row: "No successful deployment manifest for
+`rg-<prefix>`..." while no deployment has Succeeded yet, or the "Skin requires" row above when an
+earlier one did. Both are expected until a Deploy completes.
+
 Expect these side effects of any Deploy pass, not only this one:
 
 - The Container Apps environment alone takes 17-23 minutes and can sit in `Waiting` for 20 or

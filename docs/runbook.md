@@ -96,10 +96,16 @@ get the password when a tenant policy makes the vault private-only
 Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
 Arc-enabled with `MSFT_ARC_TEST=true` for this demo-only simulation. SQL-capable
 hosts do not imply SQL Server is installed. Optional flags are independent:
-`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. Add a slow
-optional workload (the Container Apps environment alone takes 17-23 minutes and can fail on its
-own) as a second pass once the base Deploy has Succeeded, so a failure there cannot strand the base:
-[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
+`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. On an existing
+estate or in an Arc-only build, add a slow optional workload (the Container Apps environment
+alone takes 17-23 minutes and can fail on its own) as a second pass once the base Deploy has
+Succeeded, so a failure there cannot strand the base:
+[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate). The whole-demo build is the
+exception: the SRE half needs the Container App, so the
+[setup block](private-config.md#set-up-the-whole-demo) sets the flag before P2 and the first
+Deploy creates it. If P2 stops on the environment (`ManagedEnvironmentProvisioningError`, a
+transient platform error), rerun the same wrapper command: it resumes P2 and reuses the saved
+admin password; don't Remove.
 For custom tiers, use `-OnPremFleetPath <fleet.json>`; see
 [legacy fleet support](legacy-os-fleet.md). Represented legacy hosts are not
 reported as deployed.

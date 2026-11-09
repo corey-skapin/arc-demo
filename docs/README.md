@@ -53,8 +53,9 @@ reset faults or run destructive rehearsals incidentally.
   event v2/alert routing and guarded emitter update; separate from nested Arc SQL.
 - [LOB sample](../samples/lob-arc-app/README.md): bounded warning and representative
   follow-up, original-worker restoration and automatic-investigation limitations.
-- [Container App](container-app-fault.md) and [AKS](aks-break-scenario.md):
-  separately prepared scenarios.
+- [Container App](container-app-fault.md): the app the SRE half investigates. The whole-demo
+  build deploys it; an Arc-only build leaves it out.
+- [AKS](aks-break-scenario.md): a separately prepared scenario.
 
 SRE is optional and covers its investigations in the companion repo
 [sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo), where you
