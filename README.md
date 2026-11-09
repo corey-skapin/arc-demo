@@ -76,11 +76,16 @@ as the Arc skin. The
 You need PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell 5.1), Azure
 CLI 2.60+ with Bicep, Git, Owner (or Contributor plus User Access Administrator) on the
 subscription, and the right to create an Entra app registration and secret for the Arc
-onboarding identity. If PowerShell, Azure CLI or Git is missing, the tool's first message
-offers to install it with winget and waits for your yes. Real builds were run only from a
-Windows PC (CI also runs the mocked tests on Linux); other systems are untested. Sign in
-yourself with `az login --tenant <TENANT>`: a tool can't do the browser sign-in, so it asks you
-to and waits. It then plans and builds.
+onboarding identity. The whole demo takes about 2 hours 45 minutes (about 90 minutes Arc only)
+and the PC must stay on, awake and online for it: set Sleep to Never while plugged in for the
+run (the tool never changes power settings itself). If it sleeps anyway, the run is suspended,
+the step in progress may fail on the dropped connection, and the same command resumes at the
+first step not recorded as done (a failed or interrupted SRE agent creation step, or nested
+guest step, stays blocked until the tool has inspected it). If PowerShell, Azure CLI or Git is
+missing, the tool's first message offers to install it with winget and waits for your yes. Real
+builds were run only from a Windows PC (CI also runs the mocked tests on Linux); other systems
+are untested. Sign in yourself with `az login --tenant <TENANT>`: a tool can't do the browser
+sign-in, so it asks you to and waits. It then plans and builds.
 
 To drive the scripts yourself, start with the
 [ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper)
