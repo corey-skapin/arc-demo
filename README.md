@@ -40,9 +40,10 @@ what it needs: tenant and subscription IDs, your e-mail, region, shutdown time a
 zone, and which optional parts you want (SQL, Container App, nested SQL, the SRE half).
 The shipped defaults are the author's (`australiaeast`, 19:00 Cen. Australia Standard
 Time, AUD figures in [cost.md](docs/cost.md)), so change them to yours. You need
-PowerShell 7.4+, Azure CLI 2.60+ with Bicep, Owner (or Contributor plus User Access
-Administrator) on the subscription, and the right to create an Entra app registration and
-secret for the Arc onboarding identity. Sign in yourself with
+PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell 5.1), Azure CLI
+2.60+ with Bicep, Owner (or Contributor plus User Access Administrator) on the
+subscription, and the right to create an Entra app registration and secret for the Arc
+onboarding identity. Sign in yourself with
 `az login --tenant <TENANT>`: a tool can't do the browser sign-in, so it asks you to and
 waits. It then plans and builds.
 

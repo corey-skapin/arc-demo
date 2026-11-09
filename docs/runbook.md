@@ -23,7 +23,8 @@ Contributor plus User Access Administrator, and permission to create an Entra ap
 registration and secret for the Arc onboarding identity (`sp-<prefix>-onboard`) if
 needed, or to add and remove a credential on the existing one (application owner or
 administrator). Deploy first uses that permission at phase 4, after the VMs exist, so
-check it before you start. PowerShell 7.4+, Azure CLI 2.60+ and
+check it before you start. PowerShell 7.4+ (run the scripts with `pwsh`, not Windows
+PowerShell 5.1), Azure CLI 2.60+ and
 Bicep are required. No Az PowerShell module, production framework or SRE Agent
 is required.
 
@@ -78,9 +79,14 @@ Review the [cost assumptions](cost.md) before you deploy.
 .\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -AdminPasswordPath <PRIVATE>\vm-admin-credential.clixml
 ```
 
-`-AdminPasswordPath` saves the generated VM admin password before any Azure write; the
-build wrapper always passes it. Keep it on every Deploy you run alone: without it, a
-tenant policy that makes the Key Vault private-only blocks reruns
+`-AdminPasswordPath` saves the generated VM admin password before any Azure write, and the
+build wrapper always passes it. Deploy writes the password to the Key Vault only after the
+Bicep deployment succeeds, so a first Deploy without the file that fails part way (a capacity,
+quota or policy error, for example) has kept the password only in memory and can't be resumed.
+The rerun stops with `Retained vault without current compute` or
+`Existing VMs found but no saved admin credential`. When you run Deploy alone, pass
+`-AdminPasswordPath` on the first run and on every run after it; the same file is how reruns
+get the password when a tenant policy makes the vault private-only
 ([details](#existing-estates-and-partial-failures)).
 
 Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
