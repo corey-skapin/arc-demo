@@ -1732,8 +1732,9 @@ function Get-DemoReadinessChecks {
         New-DemoCheck "group/$rg" "$root/$rg" 'Succeeded' $group.properties.provisioningState $(if ($group.properties.provisioningState -eq 'Succeeded') { 'pass' } else { 'pending' })
     }
     $workspaceId = "$root/$($Inventory.ArcRg)/providers/Microsoft.OperationalInsights/workspaces/law-$NamePrefix"
+    # dcrs.bicep creates the three rules with literal names, so the core rule carries no name prefix.
     $requiredIds = @($workspaceId,
-        "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/dataCollectionRules/dcr-$NamePrefix",
+        "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/dataCollectionRules/dcr-arc-demo",
         "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/dataCollectionRules/dcr-vminsights",
         "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/dataCollectionRules/dcr-changetracking",
         "$root/$($Inventory.ArcRg)/providers/Microsoft.Insights/actionGroups/ag-$NamePrefix",
@@ -1804,7 +1805,7 @@ function Get-DemoReadinessChecks {
         }
         if (-not $machine.Monitor -or -not $actual) { continue }
         $associationList = @(Invoke-DemoAz -Arguments @('monitor', 'data-collection', 'rule', 'association', 'list', '--resource', $scope, '-o', 'json') | ConvertFrom-Json)
-        $rules = @("dcr-$NamePrefix")
+        $rules = @('dcr-arc-demo')
         if ($machine.VmInsights) { $rules += 'dcr-vminsights' }
         if ($machine.ChangeTracking) { $rules += 'dcr-changetracking' }
         foreach ($rule in $rules) {
