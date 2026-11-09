@@ -110,7 +110,7 @@ fault scenarios, not healthy-heartbeat substitutes.
 ## How it is deployed
 
 Do not run this directly from the repo during the demo. Use the companion
-`sre-agent` repository's helper to deploy
+`sre-agent-demo` repository's helper to deploy
 it to an Arc-enabled Windows server:
 
 ```powershell
@@ -146,5 +146,5 @@ For the LOB-on-Arc demo:
 | Repo | Purpose |
 | --- | --- |
 | `arc-demo` | Deploys Arc + Azure Monitor spine. |
-| `sre-agent` | Deploys SRE Agent layer and T11 helper scripts. |
+| `sre-agent-demo` | Deploys SRE Agent layer and T11 helper scripts. |
 | `arc-demo/samples/lob-arc-app` | Provides LOB app source code context for SRE Agent RCA. |
