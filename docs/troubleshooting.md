@@ -107,6 +107,20 @@ verify the result shape. Guest commands use the documented
 `Invoke-DemoGuestCommand` retains its temporary UTF-8 script until the bounded job
 finishes and removes it on success/failure. Do not print credential-bearing scripts.
 
+## The wrapper rejects `-Only P6.2, P6.3` with "does not belong to the set"
+
+**Symptom** — A build started as `pwsh -File .\scripts\Invoke-ArcDemoBuild.ps1 ... -Only P6.2, P6.3`
+(for example from a tool's background process) stops with `Cannot validate argument on
+parameter 'Only'. The argument "P6.2,P6.3" does not belong to the set ...`. The same
+command typed at a PowerShell prompt works.
+
+**Cause** — `pwsh -File` hands every argument over as text, so the list arrives as the
+one string `P6.2,P6.3`, which is not a phase or step name.
+
+**Fix** — Use `-From` and `-To`, which take one value each, or start the command with
+`pwsh -Command "& '.\scripts\Invoke-ArcDemoBuild.ps1' ... -Only P6.2, P6.3"`, which parses
+the list as an array.
+
 ## Linux ARM Updating while monitoring guest handlers are healthy
 
 Inspect ARM model state, VM guest instance view, recent activity and exact-ID

@@ -23,10 +23,11 @@ Contributor plus User Access Administrator, and permission to create an Entra ap
 registration and secret for the Arc onboarding identity (`sp-<prefix>-onboard`) if
 needed, or to add and remove a credential on the existing one (application owner or
 administrator). Deploy first uses that permission at phase 4, after the VMs exist, so
-check it before you start. PowerShell 7.4+ (run the scripts with `pwsh`, not Windows
-PowerShell 5.1), Azure CLI 2.60+ and
-Bicep are required. No Az PowerShell module, production framework or SRE Agent
-is required.
+check it before you start. PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell
+5.1), Azure CLI 2.60+ and
+Bicep are required, and Git to clone the SRE companion repo. No Az PowerShell module or
+production framework is required. The Arc half needs no SRE Agent; the SRE half needs a
+subscription registered for it ([how to check](#build-everything-in-order-optional-wrapper)).
 
 Sign in yourself: `az login --tenant <TENANT>` opens a browser, so a tool cannot do it
 for you. If your AI tool is running these steps, it asks you to sign in and waits.
@@ -40,7 +41,10 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 Confirm those values; do not rely on default CLI context. Copy a bundled skin
 outside git for a new lab; edit that private copy's email, region, shutdown time and
 time zone, labels, prefix and workload toggles (the shipped region, `australiaeast`, and
-shutdown, 19:00 Cen. Australia Standard Time, are the author's). Preserve an existing
+shutdown, 19:00 Cen. Australia Standard Time, are the author's). The
+[setup block](private-config.md#set-up-the-whole-demo) makes that copy for a whole-demo
+build (your signed-in address as the e-mail, this PC's time zone for the 19:00 shutdown) and
+sets up the SRE half too. Preserve an existing
 lab's retained inputs instead.
 IDs and secrets stay out of source.
 `config\dummy-customer.demo-skin.json` illustrates portability. An explicit missing
@@ -178,7 +182,7 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 | P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status`. A fresh host often reports a routine pending file rename at `Install`: restart the SQL host once with a graceful `az vm restart` before P5, and see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename) | `-AcceptSqlDeveloperTerms` |
 | P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation). The alert (P6.1) watches the SQL engine, so it needs P5.4's saved proof (`.local/sql-engine-status.json` with status `pass`): run on its own before P5 it is blocked rather than deploying an alert for an engine that does not exist, and inside one selection it runs after P5.4 and stops the same way if the proof is not `pass`. Each workbook records the Arc roster and tags at publish time, so a from-zero build publishes them once, here, after the guest exists, and a rerun after P2 or P4 finished later publishes them again (the plan says so). To refresh just the two workbooks later, for example after a tag repair or a new host, run `-Only P6.2, P6.3 -Force`: it leaves the SQL alert (P6.1) alone | |
 | P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes. This is the gate that includes the nested guest's `nested/arc` row (Deploy's own validation leaves it out) | |
-| P8 | Companion repo: LOB alert rule and LOB app | |
+| P8 | Companion repo ([sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo), see below): LOB alert rule and LOB app | |
 | P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`, and `-ApproveSubscriptionGrant` on a first SRE build (see below) |
 | P10 | Presenter context (`.local/demo-context.json`) and runsheet for this repo (the SRE guide only if its context exists). It stamps the context with the time of the last passing P7 readiness evidence, not the time P10 ran. It adds every optional chapter it can verify (the data collection rule, the four original workbooks found by their tag, the nested guest, its SQL instance and its parent) and prints and records the chapters it had to leave out because their resource was not found; build them, then run P10 again | |
 | P11 | `Export-ArcDemoInventory.ps1`, then `Test-ArcDemoParity.ps1` | |
@@ -204,6 +208,31 @@ command to remind you, so add the switch yourself.
   until you have inspected it and pass `-Force`; `-Force` also re-runs steps
   recorded as done. A step that could not even start (for example a lookup failed
   or the credential prompt was cancelled) is recorded as `blocked` and stays retryable.
+- A build runs for hours, so a shell or session can stop partway. Run the same command
+  again: it resumes at the first step not recorded as done. If P2 was interrupted while
+  Deploy's own Azure deployment was still running, the rerun refuses to start and prints the
+  `az deployment sub show` command to wait on: rerun once it says `Succeeded` or `Failed`.
+  An interrupted or failed P4 or P9 needs the inspection and `-Force` above.
+- The SRE half comes from the companion repo
+  [sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo). Clone it next to this
+  repo or anywhere, set `sre.repoPath` in `build.json` to the clone, and copy the clone's
+  `config\demo-skin.json` to `sre-skin.json` in your private folder (a relative `sre.skinPath`
+  resolves against that folder). The skin's `azure.namePrefix` and `azure.location` must equal
+  the Arc skin's. They ship equal, so nothing else changes for the default scenarios, and
+  `labels.agentName` follows the prefix. The
+  [setup block](private-config.md#set-up-the-whole-demo) does all of this.
+- The subscription must also be registered for Azure SRE Agent, in a
+  [supported region](https://learn.microsoft.com/azure/sre-agent/supported-regions)
+  (Australia East is on the list). The only check is in the portal: open
+  [sre.azure.com](https://sre.azure.com), choose **Create agent**, pick the subscription and open
+  the **Region** dropdown. An empty dropdown means the subscription is not registered, and the
+  Learn page links the registration request. If it is not registered yet, build the Arc half now
+  with `-Execute -To P7` (P0 to P7: it stops before the SRE steps), ask for registration, and
+  continue later with `-Execute -From P8` (P8 to P11) and the SRE switches. The presenter
+  guide and inventory (P10, P11) run in that later pass; `-Only P10, P11` runs them earlier
+  for the Arc half alone. If the 19:00
+  shutdown has stopped the VMs by then, wake the lab first with `Activate-ArcDemo.ps1`: P8 runs
+  on a host and P9 readiness needs the lab Active.
 - The SRE half also needs the Container App and the LOB app. The companion's
   `Deploy-SreAgent.ps1` requires the fault Container App `ca-<prefix>-fault` by default
   (`sre.requiredScenarios` defaults to T09, the Container App incident, and T11, the LOB app
@@ -229,7 +258,10 @@ command to remind you, so add the switch yourself.
 - `-From` and `-To` take phase names; `-Only` takes phases or single steps (`-Only P6.2, P6.3`);
   `-WhatIf` is the same as the plan;
   pass `-Confirm:$false` for unattended runs. The plan's minutes are typical
-  timings (about 3.5 hours end to end), not a promise. Billable resources start
+  timings, not a promise: the whole demo (real SQL, the LOB app and the SRE half, without the
+  nested guest) is about 146 minutes plus the 17-23 the Container Apps environment adds, so
+  allow about 2 hours 45 minutes; an Arc-only build is about 90 minutes; the nested guest
+  (P3 and P4) adds about 65. Billable resources start
   at P2; reprice with [cost.md](cost.md).
 - The wrapper only builds. Teardown stays with `Hibernate-ArcDemo.ps1` and
   `Remove-ArcDemo.ps1` (and the companion's own scripts first); the opt-in

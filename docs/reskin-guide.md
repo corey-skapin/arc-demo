@@ -24,7 +24,7 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 Change per customer:
 
 - `customer`, `azure.namePrefix`, `azure.location` (the region), `notifications.email`, `operations.autoShutdownTime` and `operations.autoShutdownTimezone` (the shutdown time and its Windows time zone name), `labels`, and `tags.purpose`. The shipped defaults are the author's (`australiaeast`, 19:00 Cen. Australia Standard Time, AUD figures in [cost.md](cost.md), `Standard_B2as_v2`), so change them to yours.
-- The SRE half works only in an [SRE Agent supported region](https://learn.microsoft.com/azure/sre-agent/supported-regions) (Australia East is on it). The companion repo's README lists SRE registration and region availability as separate prerequisites.
+- The SRE half works only in an [SRE Agent supported region](https://learn.microsoft.com/azure/sre-agent/supported-regions) (Australia East is on it). The companion repo's README lists SRE registration and region availability as separate prerequisites. Its own skin, `sre-skin.json` in your private folder (a copy of the clone's `config\demo-skin.json`), must carry the same `azure.namePrefix` and `azure.location` as the Arc skin, and `labels.agentName` should follow the prefix (`sre-<prefix>`). The [setup block](private-config.md#set-up-the-whole-demo) writes both skins together.
 - `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. [Real SQL preparation](sql-engine-workload.md) is a separate operation, not a deployment flag.
 - `workloads.onPremFleetPath` for a custom OS mix.
 - Match `compute.osDiskStorageAccountType` to the existing OS disks for a
