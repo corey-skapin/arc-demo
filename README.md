@@ -54,8 +54,8 @@ your region (one read-only command, [how](docs/runbook.md#sre-agent-registration
 only if that doesn't confirm it: to confirm in the portal that the subscription isn't
 registered, or to pick another region from the list the subscription offers. If you are waiting
 for registration or for your region, the tool builds everything before the SRE steps and stops
-there. You file the request yourself (a public GitHub issue that asks for your subscription ID,
-so the tool never does), and the tool continues after it is granted.
+there. You file the request yourself: it is a public GitHub issue (a registration request asks
+for your subscription ID), so the tool never files one. The tool continues after it is granted.
 
 Everything else has a default that the tool uses and reports in its final summary. The
 notification e-mail is your signed-in account's address (the tool asks only if that isn't
