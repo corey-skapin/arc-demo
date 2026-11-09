@@ -195,6 +195,9 @@ the generated guest script, including Remove's stop-only `-AllowAbsent`.
 resume state, runner and presenter-context step (P10) with stub scripts;
 `tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded
 denials) and the parity rules (including the lab tags on the NAT gateway and public IP), both without Azure.
+`tests/ScriptRequires.Tests.ps1` checks that every top-level script declares `#Requires -Version 7.4`, except the
+seven that run on the Hyper-V parent or in the nested guest (they declare 5.1), so Windows PowerShell 5.1 stops at the
+version message.
 Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
 conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile

@@ -10,6 +10,7 @@
     their times, each VM's power state before parking, the revisions deactivated, the network outcome and the closing
     Hibernated readiness rows.
 #>
+#Requires -Version 7.4
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)][guid]$SubscriptionId,

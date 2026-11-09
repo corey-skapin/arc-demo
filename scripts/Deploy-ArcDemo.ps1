@@ -131,6 +131,7 @@
     .\Deploy-ArcDemo.ps1 -SubscriptionId <SUB> -TenantId <TENANT> `
         -AdminEmail demo@contoso.com
 #>
+#Requires -Version 7.4
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'AdminPasswordPath', Justification = 'It is a file path, not a password: the file holds a protected SecureString export.')]
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(

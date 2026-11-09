@@ -11,6 +11,7 @@
     "SRE step N" and its close replaced by a pointer) and then the single close, prepared answers and
     reference pages. The SRE guide is read, never changed.
 #>
+#Requires -Version 7.4
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$ContextPath = (Join-Path $PSScriptRoot '..\.local\demo-context.json'),

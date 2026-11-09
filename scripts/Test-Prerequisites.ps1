@@ -33,6 +33,7 @@
 .EXAMPLE
     .\Test-Prerequisites.ps1 -SubscriptionId <SUBSCRIPTION_ID> -TenantId <TENANT_ID>
 #>
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$SubscriptionId,
