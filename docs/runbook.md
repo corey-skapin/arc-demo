@@ -277,14 +277,18 @@ command to remind you, so add the switch yourself.
 ### SRE Agent registration
 
 The SRE half needs a subscription that is registered for Azure SRE Agent and offers the
-skin's region (Australia East is on the
+region you build in (Australia East is on the
 [supported-regions list](https://learn.microsoft.com/azure/sre-agent/supported-regions)).
-Once you are signed in you can check this yourself, read-only. It is the allow-list check in
-the [Azure SRE Agent troubleshooting FAQ](https://learn.microsoft.com/azure/sre-agent/faq-troubleshooting#deployment-issues):
+Once you are signed in you can check this yourself, read-only. Run the check before the
+[setup block](private-config.md#set-up-the-whole-demo), for the region the user asked for (the
+shipped `config\demo-skin.json` says `australiaeast`, which is the default if they named none);
+a different region is then set on `$arc.azure.location` in the block. It is the allow-list
+check in the
+[Azure SRE Agent troubleshooting FAQ](https://learn.microsoft.com/azure/sre-agent/faq-troubleshooting#deployment-issues):
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$location = '<azure.location from the Arc skin>'   # for example australiaeast
+$location = '<the region the user asked for, else australiaeast>'
 $regions = az provider show -n Microsoft.App --subscription <SUB> --query "resourceTypes[?resourceType=='agents'] | [0].locations" -o tsv
 if ($LASTEXITCODE) { throw 'az failed: fix the sign-in; this is not an unregistered subscription' }
 $listed = @($regions | Where-Object { $_ }).Count
@@ -306,7 +310,7 @@ prints, which is why they say "probably" and "appears".
   can be created*, below); a dropdown that lists the region means it is, so carry on. This is
   the only time anyone is asked about registration.
 - **`$listed` is above 0 but `$offered` is false:** the subscription appears registered but
-  doesn't offer the skin's region, so there is nothing to confirm in the portal. This is the one
+  doesn't offer that region, so there is nothing to confirm in the portal. This is the one
   registration ask: show the user the listed regions and let them pick one or keep theirs. For a
   listed region, set `$arc.azure.location` in the
   [setup block](private-config.md#set-up-the-whole-demo) before it writes the file (the canonical
