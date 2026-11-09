@@ -107,6 +107,22 @@ verify the result shape. Guest commands use the documented
 `Invoke-DemoGuestCommand` retains its temporary UTF-8 script until the bounded job
 finishes and removes it on success/failure. Do not print credential-bearing scripts.
 
+## The wrapper rejects `-Only P6.2, P6.3` with "does not belong to the set"
+
+**Symptom** — A build started as `pwsh -File .\scripts\Invoke-ArcDemoBuild.ps1 ... -Only P6.2, P6.3`
+(for example from a tool's background process) stops with `Cannot validate argument on
+parameter 'Only'. The argument "P6.2," does not belong to the set ...`. Written without the
+space (`-Only P6.2,P6.3`) it stops the same way but names `"P6.2,P6.3"`. The same command
+typed at a PowerShell prompt works.
+
+**Cause** — `pwsh -File` hands every argument over as text, so the list never arrives as an
+array: the first value the wrapper sees is `P6.2,` (with the space) or `P6.2,P6.3` (without),
+and neither is a phase or step name. A single name such as `-Only P6.2` is fine.
+
+**Fix** — Use `-From` and `-To`, which take one value each, or start the command with
+`pwsh -Command "& '.\scripts\Invoke-ArcDemoBuild.ps1' ... -Only P6.2, P6.3"`, which parses
+the list as an array.
+
 ## Linux ARM Updating while monitoring guest handlers are healthy
 
 Inspect ARM model state, VM guest instance view, recent activity and exact-ID
@@ -491,8 +507,10 @@ then rerun the same Deploy command: it adopts the failed deployment's vault, reu
 admin password and submits the template again. If it fails again on `cae-<prefix>`, check
 Service Health, wait and retry; deleting only that environment is the next step
 (it holds nothing else and the fault app was never created). Do not
-Remove the estate for this. To keep a failure here from stranding the base estate, build
-the base first and add Container Apps as a second Deploy pass
+Remove the estate for this. The whole-demo build deploys the Container App in its first pass,
+because the SRE half needs it: rerun the same wrapper command, which resumes P2 and reuses the
+saved admin password. For an Arc-only build or an estate that already exists, add Container Apps
+as a second Deploy pass so a failure here cannot strand the base estate
 ([lifecycle](lifecycle.md#adding-an-optional-workload-to-a-running-estate)).
 
 ## Preflight or redeployment now refuses a previously tolerated state

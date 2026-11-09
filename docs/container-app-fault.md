@@ -1,6 +1,6 @@
 # Container App fault scenario
 
-**Optional scenario, not part of the default demo path.**
+**Optional for an Arc-only build. The whole-demo build includes it: the SRE half investigates this app.**
 Start with [the docs index](README.md) and [runsheet.md](runsheet.md).
 Use the retained private skin and actual names.
 
@@ -20,15 +20,22 @@ either you reset the app or the SRE agent does.
 
 ## Deploy
 
-Add this workload as a **second Deploy pass**: build the base estate first, and once that
-deployment has Succeeded set `workloads.deployContainerApps` in the private skin (or pass
-`-DeployContainerApps $true`) and run the same Deploy again; see
+In an Arc-only build, or on an estate that already exists, add this workload as a **second
+Deploy pass**: build the base estate first, and once that deployment has Succeeded set
+`workloads.deployContainerApps` in the private skin (or pass `-DeployContainerApps $true`) and
+run the same Deploy again; see
 [adding an optional workload](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
 The environment is the slowest single resource in the estate: it normally takes 17-23 minutes, sits in
 `Waiting` for 20 minutes or more and can fail on its own with a transient platform error
 ([troubleshooting](troubleshooting.md#the-container-apps-environment-is-slow-or-fails-with-managedenvironmentprovisioningerror)).
-Built in the first pass, such a failure leaves the whole base estate unfinished; built as a second
-pass it affects only this optional workload, and the base estate stays complete.
+Built in the first pass, such a failure leaves the base estate unfinished until a rerun succeeds; built
+as a second pass it affects only this optional workload, and the base estate stays complete.
+
+The whole-demo build is the exception: the SRE half needs this app, so the
+[setup block](private-config.md#set-up-the-whole-demo) sets the flag before P2 and the first Deploy
+creates it. If P2 stops on the environment (`ManagedEnvironmentProvisioningError`, a transient
+platform error), rerun the same wrapper command: it resumes P2 and reuses the saved admin password.
+Don't Remove.
 
 ```powershell
 .\scripts\Deploy-ArcDemo.ps1 `

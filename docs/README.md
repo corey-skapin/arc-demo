@@ -32,7 +32,7 @@ only runs the maintained scripts and plans only until you pass `-Execute`.
 | Reference | Use |
 | --- | --- |
 | [Arc runbook](runbook.md) | Base infrastructure, ordered build, optional workbooks and presenter context |
-| [Private build folder](private-config.md) | The one private folder: build config, state and evidence |
+| [Private build folder](private-config.md) | The one private folder, and the [setup block](private-config.md#set-up-the-whole-demo) that creates it with the skins and build config for the whole demo |
 | [Nested SQL demo runbook](nested-sql-demo.md) | Parent preparation, guest ownership tags, proven scratch build, park, wake and remove; Jumpstart alternative |
 | [Lifecycle](lifecycle.md) | Explicit targets, retained data, config-driven nested guest, readiness and measured shared-wait park/wake limits |
 | [Troubleshooting](troubleshooting.md) | Practical build/wake failures and fixes |
@@ -53,10 +53,12 @@ reset faults or run destructive rehearsals incidentally.
   event v2/alert routing and guarded emitter update; separate from nested Arc SQL.
 - [LOB sample](../samples/lob-arc-app/README.md): bounded warning and representative
   follow-up, original-worker restoration and automatic-investigation limitations.
-- [Container App](container-app-fault.md) and [AKS](aks-break-scenario.md):
-  separately prepared scenarios.
+- [Container App](container-app-fault.md): the app the SRE half investigates. The whole-demo
+  build deploys it; an Arc-only build leaves it out.
+- [AKS](aks-break-scenario.md): a separately prepared scenario.
 
-SRE is optional and covers its investigations in the companion repo, where you
+SRE is optional and covers its investigations in the companion repo
+[sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo), where you
 click Approve on the Review card in the SRE portal. Do not deploy its alerts or
 rehearse faults as part of SQL setup.
 

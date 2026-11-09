@@ -23,10 +23,11 @@ Contributor plus User Access Administrator, and permission to create an Entra ap
 registration and secret for the Arc onboarding identity (`sp-<prefix>-onboard`) if
 needed, or to add and remove a credential on the existing one (application owner or
 administrator). Deploy first uses that permission at phase 4, after the VMs exist, so
-check it before you start. PowerShell 7.4+ (run the scripts with `pwsh`, not Windows
-PowerShell 5.1), Azure CLI 2.60+ and
-Bicep are required. No Az PowerShell module, production framework or SRE Agent
-is required.
+check it before you start. PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell
+5.1), Azure CLI 2.60+ and
+Bicep are required, and Git to clone the SRE companion repo. No Az PowerShell module or
+production framework is required. An Arc-only build needs no SRE Agent; the SRE half needs a
+subscription registered for it ([how to check](#sre-agent-registration)).
 
 Sign in yourself: `az login --tenant <TENANT>` opens a browser, so a tool cannot do it
 for you. If your AI tool is running these steps, it asks you to sign in and waits.
@@ -40,7 +41,10 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 Confirm those values; do not rely on default CLI context. Copy a bundled skin
 outside git for a new lab; edit that private copy's email, region, shutdown time and
 time zone, labels, prefix and workload toggles (the shipped region, `australiaeast`, and
-shutdown, 19:00 Cen. Australia Standard Time, are the author's). Preserve an existing
+shutdown, 19:00 Cen. Australia Standard Time, are the author's). The
+[setup block](private-config.md#set-up-the-whole-demo) makes that copy for a whole-demo
+build (your signed-in address as the e-mail, this PC's time zone for the 19:00 shutdown) and
+sets up the SRE half too. Preserve an existing
 lab's retained inputs instead.
 IDs and secrets stay out of source.
 `config\dummy-customer.demo-skin.json` illustrates portability. An explicit missing
@@ -92,10 +96,16 @@ get the password when a tenant policy makes the vault private-only
 Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
 Arc-enabled with `MSFT_ARC_TEST=true` for this demo-only simulation. SQL-capable
 hosts do not imply SQL Server is installed. Optional flags are independent:
-`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. Add a slow
-optional workload (the Container Apps environment alone takes 17-23 minutes and can fail on its
-own) as a second pass once the base Deploy has Succeeded, so a failure there cannot strand the base:
-[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate).
+`-DeployAzureVMs $true`, `-DeployContainerApps $true`, `-DeployAks $true`. On an existing
+estate or in an Arc-only build, add a slow optional workload (the Container Apps environment
+alone takes 17-23 minutes and can fail on its own) as a second pass once the base Deploy has
+Succeeded, so a failure there cannot strand the base:
+[how](lifecycle.md#adding-an-optional-workload-to-a-running-estate). The whole-demo build is the
+exception: the SRE half needs the Container App, so the
+[setup block](private-config.md#set-up-the-whole-demo) sets the flag before P2 and the first
+Deploy creates it. If P2 stops on the environment (`ManagedEnvironmentProvisioningError`, a
+transient platform error), rerun the same wrapper command: it resumes P2 and reuses the saved
+admin password; don't Remove.
 For custom tiers, use `-OnPremFleetPath <fleet.json>`; see
 [legacy fleet support](legacy-os-fleet.md). Represented legacy hosts are not
 reported as deployed.
@@ -165,7 +175,8 @@ build resumes where it stopped. Keep the config, state and evidence in the
 ```powershell
 $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '<PRIVATE>\build.json' }
 .\scripts\Invoke-ArcDemoBuild.ps1 @build        # plan: order, status, switches needed, blockers, time
-.\scripts\Invoke-ArcDemoBuild.ps1 @build -Execute -From P2 -To P4 `
+# An example selection, P2 to P4 (nested guest on); -Confirm:$false is for a shell that can't answer the prompt
+.\scripts\Invoke-ArcDemoBuild.ps1 @build -Execute -From P2 -To P4 -Confirm:$false `
     -ApproveCostStart -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms
 ```
 
@@ -178,7 +189,7 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 | P5 | Real SQL on the SQL host: `Stage-DemoMedia.ps1` stages the hash-pinned ISO from `config/demo-media.json` (or the config's `mediaManifestPath`), then `ProtectArcSql`, `Install`, `Status`. A fresh host often reports a routine pending file rename at `Install`: restart the SQL host once with a graceful `az vm restart` before P5, and see [the recipe](troubleshooting.md#sql-preparation-reports-a-pending-file-rename) | `-AcceptSqlDeveloperTerms` |
 | P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation). The alert (P6.1) watches the SQL engine, so it needs P5.4's saved proof (`.local/sql-engine-status.json` with status `pass`): run on its own before P5 it is blocked rather than deploying an alert for an engine that does not exist, and inside one selection it runs after P5.4 and stops the same way if the proof is not `pass`. Each workbook records the Arc roster and tags at publish time, so a from-zero build publishes them once, here, after the guest exists, and a rerun after P2 or P4 finished later publishes them again (the plan says so). To refresh just the two workbooks later, for example after a tag repair or a new host, run `-Only P6.2, P6.3 -Force`: it leaves the SQL alert (P6.1) alone | |
 | P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes. This is the gate that includes the nested guest's `nested/arc` row (Deploy's own validation leaves it out) | |
-| P8 | Companion repo: LOB alert rule and LOB app | |
+| P8 | Companion repo ([sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo), see below): LOB alert rule and LOB app | |
 | P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`, and `-ApproveSubscriptionGrant` on a first SRE build (see below) |
 | P10 | Presenter context (`.local/demo-context.json`) and runsheet for this repo (the SRE guide only if its context exists). It stamps the context with the time of the last passing P7 readiness evidence, not the time P10 ran. It adds every optional chapter it can verify (the data collection rule, the four original workbooks found by their tag, the nested guest, its SQL instance and its parent) and prints and records the chapters it had to leave out because their resource was not found; build them, then run P10 again | |
 | P11 | `Export-ArcDemoInventory.ps1`, then `Test-ArcDemoParity.ps1` | |
@@ -198,12 +209,36 @@ command to remind you, so add the switch yourself.
   accept an argument the wrapper passes, or an input file is missing.
 - Nothing starts if any selected step is blocked, a switch it needs is missing,
   or the state records P2 as done while the infra group no longer exists (a
-  teardown happened; delete the state file to start a new build).
+  teardown happened; delete the state file to start a new build). A launch that stops
+  this way exits 1 and writes the reason to standard error, not to the state file: when
+  you redirect the output, read the error file as well as the log (a blocked step prints
+  the plan table first, a missing switch or file prints nothing to the log).
+- If the plan prints "Read-only checks stopped: ..." above the table, it could not read
+  Azure (usually the sign-in), so P0's notes and the shutdown-window warning are missing:
+  fix the cause and run the plan again. `-Offline` skips those reads on purpose and prints
+  only the order and the minutes. It is for looking at the order, never the go-ahead, and
+  `-Execute` refuses it.
 - Read-only steps (P0, P1, P5 `Status`, P7, P9 readiness, P11) run
   again on every `-Execute`. A failed or interrupted P4 or P9 deploy is not retried
   until you have inspected it and pass `-Force`; `-Force` also re-runs steps
   recorded as done. A step that could not even start (for example a lookup failed
   or the credential prompt was cancelled) is recorded as `blocked` and stays retryable.
+- A build runs for hours, so a shell or session can stop partway. Run the same command
+  again: it resumes at the first step not recorded as done. If P2 was interrupted while
+  Deploy's own Azure deployment was still running, the rerun refuses to start and prints the
+  `az deployment sub show` command to wait on: rerun once it says `Succeeded` or `Failed`.
+  An interrupted or failed P4 or P9 needs the inspection and `-Force` above.
+- The SRE half comes from the companion repo
+  [sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo). Clone it next to this
+  repo or anywhere, set `sre.repoPath` in `build.json` to the clone, and copy the clone's
+  `config\demo-skin.json` to `sre-skin.json` in your private folder (a relative `sre.skinPath`
+  resolves against that folder). The skin's `azure.namePrefix` and `azure.location` must equal
+  the Arc skin's. They ship equal, so nothing else changes for the default scenarios, and
+  `labels.agentName` follows the prefix. The
+  [setup block](private-config.md#set-up-the-whole-demo) does all of this.
+- The subscription must also be registered for Azure SRE Agent and offer the skin's region.
+  You [check that yourself](#sre-agent-registration) with one read-only command, and the user
+  is asked only if the check can't confirm it.
 - The SRE half also needs the Container App and the LOB app. The companion's
   `Deploy-SreAgent.ps1` requires the fault Container App `ca-<prefix>-fault` by default
   (`sre.requiredScenarios` defaults to T09, the Container App incident, and T11, the LOB app
@@ -229,12 +264,77 @@ command to remind you, so add the switch yourself.
 - `-From` and `-To` take phase names; `-Only` takes phases or single steps (`-Only P6.2, P6.3`);
   `-WhatIf` is the same as the plan;
   pass `-Confirm:$false` for unattended runs. The plan's minutes are typical
-  timings (about 3.5 hours end to end), not a promise. Billable resources start
+  timings, not a promise: the whole demo (real SQL, the LOB app and the SRE half, without the
+  nested guest) is about 146 minutes plus the 17-23 the Container Apps environment adds, so
+  allow about 2 hours 45 minutes; an Arc-only build is about 90 minutes; the nested guest
+  (P3 and P4) adds about 65. Billable resources start
   at P2; reprice with [cost.md](cost.md).
 - The wrapper only builds. Teardown stays with `Hibernate-ArcDemo.ps1` and
   `Remove-ArcDemo.ps1` (and the companion's own scripts first); the opt-in
   `-ForceDeleteWorkspace` and `-PruneDeploymentHistory` switches for a same-prefix
   rebuild are described with Remove below and decided at teardown time.
+
+### SRE Agent registration
+
+The SRE half needs a subscription that is registered for Azure SRE Agent and offers the
+skin's region (Australia East is on the
+[supported-regions list](https://learn.microsoft.com/azure/sre-agent/supported-regions)).
+Once you are signed in you can check this yourself, read-only. It is the allow-list check in
+the [Azure SRE Agent troubleshooting FAQ](https://learn.microsoft.com/azure/sre-agent/faq-troubleshooting#deployment-issues):
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$location = '<azure.location from the Arc skin>'   # for example australiaeast
+$regions = az provider show -n Microsoft.App --subscription <SUB> --query "resourceTypes[?resourceType=='agents'] | [0].locations" -o tsv
+if ($LASTEXITCODE) { throw 'az failed: fix the sign-in; this is not an unregistered subscription' }
+$listed = @($regions | Where-Object { $_ }).Count
+$offered = @($regions | Where-Object { ($_ -replace '\s') -eq $location }).Count -gt 0
+```
+
+If the command itself fails, that is a sign-in or permission problem, not a registration answer:
+fix it and run the check again. Otherwise it prints one region per line as a display name, so the
+comparison ignores spaces and case (`Australia East` is `australiaeast`). Only the registered case
+that lists the region has been verified. The other two outcomes are read from what the command
+prints, which is why they say "probably" and "appears".
+
+- **`$offered` is true:** the subscription is registered and offers the region. Carry on, and
+  say in your final summary that you checked.
+- **`$listed` is 0:** the subscription probably isn't registered. The portal is the authority,
+  so ask the user once to confirm it: open [sre.azure.com](https://sre.azure.com), choose
+  **Create agent**, pick the subscription and open the **Region** dropdown. An empty dropdown
+  means it isn't registered, so the user asks for registration (see *Building before the agent
+  can be created*, below); a dropdown that lists the region means it is, so carry on. This is
+  the only time anyone is asked about registration.
+- **`$listed` is above 0 but `$offered` is false:** the subscription appears registered but
+  doesn't offer the skin's region, so there is nothing to confirm in the portal. This is the one
+  registration ask: show the user the listed regions and let them pick one or keep theirs. For a
+  listed region, set `$arc.azure.location` in the
+  [setup block](private-config.md#set-up-the-whole-demo) before it writes the file (the canonical
+  name is the display name without spaces, in lower case: `East US 2` is `eastus2`); the SRE skin
+  follows, and Deploy's own capacity check still applies in that region. For their own region,
+  build everything before the SRE steps and ask for the region (see *Building before the agent
+  can be created*, below). Never switch the region on your own.
+- **Building before the agent can be created** (registration or the region is still to come):
+  build everything before the SRE steps now with `-Execute -To P7` (P0 to P7: about 116 minutes
+  plus roughly 20 for the Container Apps environment, and it still needs `-ApproveCostStart` and
+  `-AcceptSqlDeveloperTerms`) and tell the user how to ask. The supported-regions page links a
+  [subscription registration request](https://github.com/microsoft/sre-agent/issues/new?labels=registration&title=Subscription+registration+request)
+  and a
+  [new region request](https://github.com/microsoft/sre-agent/issues/new?labels=region-request&title=New+region+request).
+  Both are public GitHub issues (the registration one asks for the subscription ID, the region
+  one for the region and the use case), so the user files it themselves; you never file one for
+  them. Continue later with `-Execute -From P8` (P8 to P11) and the SRE switches. P10 and P11
+  (presenter guide and inventory) run in that later pass; `-Only P10, P11` runs them earlier.
+  If the 19:00 shutdown has stopped the VMs by then, run `Activate-ArcDemo.ps1` first: P8 runs
+  on a host and P9 readiness needs the lab Active. In a shell that can't answer the confirmation
+  prompt, add `-Confirm:$false` to every `-Execute` in this section. An Arc-only build (no `sre`
+  section, about 90 minutes, one switch) is the separate variant.
+- **P9 fails later because the subscription isn't registered:** get it registered, and check that
+  `rg-<prefix>-sre` holds no agent: `az resource list -g rg-<prefix>-sre --subscription <SUB> --query "[?type=='Microsoft.App/agents'].name" -o tsv`
+  prints nothing (or the group does not exist). Then run `-Execute -From P9 -Force` with the SRE
+  switches. A rerun retries P9.1 (the preview) as it is, but a failed P9.2 (the paid create) is
+  not retried until you have inspected it and pass `-Force`; with `-From P9`, `-Force` does not
+  re-run the earlier steps.
 
 ### Snapshot and parity (read-only)
 

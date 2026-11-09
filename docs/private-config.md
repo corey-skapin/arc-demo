@@ -1,8 +1,10 @@
 # Private build folder
 
 Everything private to one lab lives in **one folder outside git, outside every
-worktree and outside your AI tool's session folders**. A worktree or session can be
-deleted; this folder is what lets a rebuild start from zero. Passwords, client
+worktree and outside your AI tool's session folders**. By default that is
+`$HOME\arc-demo-private`, under your profile (a normal Windows profile limits it to you,
+SYSTEM and administrators). A worktree or session can be deleted; this folder is what lets
+a rebuild start from zero. Passwords, client
 secrets and tokens are never written in plain text: the onboarding credential is
 minted for one day and removed, and the passwords the estate cannot do without, the
 generated VM admin password and (for the optional nested guest) the guest Administrator
@@ -18,33 +20,93 @@ limits it to you, SYSTEM and administrators). Deploy submits with `--no-wait`, d
 accepts the request and again in a `finally` on any failure, and never writes it into the
 private folder.
 
-## Create the folder
+## Set up the whole demo
 
-Only `build.json` and `arc-skin.json` must exist before the first run; the wrapper
-creates the rest when a step needs it (the last column says when).
+Run this from the repo root in `pwsh`, after `az login --tenant <TENANT_ID>`. It creates the
+private folder, clones the companion repo that holds the SRE half, writes the two private
+skins and the build config, and checks the SRE skin offline. Put your IDs in the `$sub` line.
+It stops at the first error (no git, a failed clone, a signed-out `az`), so rerun it after
+you fix the cause.
+Only `build.json` and `arc-skin.json` must exist before the first run (and `sre-skin.json`
+for the SRE half); the wrapper creates the rest when a step needs it (the last column of the
+table below says when).
 
 ```powershell
-$private = '<PRIVATE>'   # outside git, outside every worktree, readable only by you
+$ErrorActionPreference = 'Stop'
+$sub = '<SUBSCRIPTION_ID>'; $tenant = '<TENANT_ID>'
+$private = Join-Path $HOME 'arc-demo-private'   # outside git, every worktree and every AI-tool session folder
+$sreRepo = Join-Path $HOME 'sre-agent-demo'     # a clone of the companion repo; any folder works
 New-Item -ItemType Directory -Force -Path $private | Out-Null
-Copy-Item .\config\demo-skin.json "$private\arc-skin.json"          # then set prefix, region, e-mail, workload flags
-Copy-Item .\config\build-plan.example.json "$private\build.json"    # the FULL build: set arcSkinPath, delete the sections you won't build
+if (-not (Test-Path $sreRepo)) { git clone https://github.com/corey-skapin/sre-agent-demo $sreRepo; if ($LASTEXITCODE) { throw 'git clone failed' } }
+
+# Arc skin: your alert e-mail, this PC's time zone for the 19:00 shutdown, and the Container App the SRE half needs
+$email = [string](az account show --subscription $sub --query user.name -o tsv)   # the signed-in account; if it is not an address, replace this line with $email = '<the address you were given>'
+if ($email -notmatch '@' -or $email -match '#EXT#') { throw 'Sign in first (az login), or set $email to a real e-mail address.' }
+$arc = Get-Content .\config\demo-skin.json -Raw | ConvertFrom-Json
+$arc.notifications.email = $email
+$arc.operations.autoShutdownTimezone = (Get-TimeZone).Id
+$arc.workloads.deployContainerApps = $true
+$arc | ConvertTo-Json -Depth 10 | Set-Content "$private\arc-skin.json" -Encoding utf8
+
+# SRE skin: the clone's example, matched to the Arc skin
+$sre = Get-Content "$sreRepo\config\demo-skin.json" -Raw | ConvertFrom-Json
+$sre.azure.namePrefix = $arc.azure.namePrefix
+$sre.azure.location = $arc.azure.location
+$sre.labels.agentName = "sre-$($arc.azure.namePrefix)"
+$sre | ConvertTo-Json -Depth 10 | Set-Content "$private\sre-skin.json" -Encoding utf8
+
+# Build config: the full-build example, pointed at the clone
+$build = Get-Content .\config\build-plan.example.json -Raw | ConvertFrom-Json
+$build.sre.repoPath = $sreRepo
+$build | ConvertTo-Json -Depth 10 | Set-Content "$private\build.json" -Encoding utf8
+
+# Check the SRE skin offline (no Azure call; it stops with an error if the skin is invalid)
+& "$sreRepo\scripts\Initialize-SreConfiguration.ps1" -SubscriptionId $sub -TenantId $tenant -SkinPath "$private\sre-skin.json" | Out-Null
 ```
 
-The example `build.json` is the **full build**: real SQL, the SRE half and a LOB host. As
-shipped, its plan also needs `-AcceptSqlDeveloperTerms` and `-ApproveSreCreation`, and the
-placeholder `sre.repoPath` blocks P8 and P9, so `-Execute` refuses to start. For an
-**Arc-only build**, delete the `realSql` and `sre` sections and clear
-`presenter.lobMachineName`: nothing is blocked, the plan is about 90 minutes and needs only
-`-ApproveCostStart`. To keep the SRE half, set `sre.repoPath` to your clone of the companion repo
-sre-agent-demo and follow the SRE prerequisites in the
-[runbook](runbook.md#build-everything-in-order-optional-wrapper).
+Then run the plan: `.\scripts\Invoke-ArcDemoBuild.ps1 -SubscriptionId $sub -TenantId $tenant -BuildConfigPath "$private\build.json"`.
+Nothing should be blocked. What the block decides, and what it leaves alone:
+
+- **Arc skin.** Every value keeps the shipped default (region `australiaeast`, name prefix
+  `arc-demo`, shutdown `1900`, VM size `Standard_B2as_v2`) except three. The alert e-mail is
+  the signed-in account's address. The shutdown time zone is this PC's: the shipped Cen.
+  Australia Standard Time is the author's, and 19:00 there is morning in Europe, which would
+  stop the VMs in the middle of a working day. (On Windows, `(Get-TimeZone).Id` is the
+  Windows time zone name the schedule expects; elsewhere it is an IANA name, and real builds
+  are untested there, so use the Windows name.) And `workloads.deployContainerApps` is `true`:
+  the SRE half needs the Container App `ca-<prefix>-fault`, or P9 stops after hours of build.
+  The Container Apps environment adds roughly 17-23 minutes. To use another region, shutdown
+  time, prefix or VM size, set it on `$arc` before the file is written; the SRE skin follows
+  the prefix and region. The SRE half works only in an
+  [SRE Agent supported region](https://learn.microsoft.com/azure/sre-agent/supported-regions).
+- **SRE skin.** The clone's `config\demo-skin.json` with `azure.namePrefix`, `azure.location`
+  and `labels.agentName` matched to the Arc skin, as the companion repo's reskin guide asks.
+  Its other values suit the default scenarios.
+- **SRE Agent registration.** The block doesn't check it. The tool runs the read-only
+  [check in the runbook](runbook.md#sre-agent-registration) and asks you only if that can't
+  confirm the registration and your region.
+- **`build.json`.** The full-build example (real SQL, the SRE half and a LOB host) with
+  `sre.repoPath` set to the clone. `sre.skinPath` is `sre-skin.json`, which resolves against
+  this folder like every relative path in the file. As shipped, the plan needs
+  `-ApproveCostStart`, `-AcceptSqlDeveloperTerms` and `-ApproveSreCreation`. A first SRE build
+  also needs `-ApproveSubscriptionGrant`, which the plan reminds you of under the command
+  instead of listing. The placeholder `sre.repoPath` would block P8 and P9 and stop `-Execute`
+  from starting, which is why the block replaces it.
+- **Arc only.** Skip the clone, the SRE skin and the last line, leave `deployContainerApps` at
+  its shipped `false`, and in `build.json` delete the `realSql` and `sre` sections and clear
+  `presenter.lobMachineName`: replace the `$build.sre.repoPath` line with
+  `$build.PSObject.Properties.Remove('realSql'); $build.PSObject.Properties.Remove('sre'); $build.presenter.lobMachineName = ''`.
+  Nothing is blocked, the plan is about 90 minutes and needs only `-ApproveCostStart`.
+- **Nested guest.** Off. To build it, set the skin's `nestedSqlGuest` block as
+  [nested-sql-demo.md](nested-sql-demo.md) shows and [save its credential](#saving-the-nested-guest-credential);
+  the recipe generates the password, so nobody types one.
 
 | File or folder | What it is | Written by, and when |
 | --- | --- | --- |
-| `build.json` | Wrapper config, copied from [`config/build-plan.example.json`](../config/build-plan.example.json) | you, before the first run |
-| `arc-skin.json` | Private Arc skin: prefix, region, notification e-mail, workload flags, `nestedSqlGuest`, optional fleet path | you, from `config/demo-skin.json`, before the first run |
+| `build.json` | Wrapper config, copied from [`config/build-plan.example.json`](../config/build-plan.example.json) | you, before the first run ([setup block](#set-up-the-whole-demo)) |
+| `arc-skin.json` | Private Arc skin: prefix, region, notification e-mail, workload flags, `nestedSqlGuest`, optional fleet path | you, from `config/demo-skin.json`, before the first run ([setup block](#set-up-the-whole-demo)) |
 | `arc-fleet.json` | Optional private fleet named by the skin's `workloads.onPremFleetPath` | you, only if the skin names it |
-| `sre-skin.json` | Private skin for the companion SRE repo | you, only with the companion repo |
+| `sre-skin.json` | Private skin for the companion SRE repo: a copy of its `config\demo-skin.json` with `azure.namePrefix`, `azure.location` and `labels.agentName` matched to the Arc skin | you, only with the companion repo ([setup block](#set-up-the-whole-demo)) |
 | `nested-sql-build.json` | Nonsecret inputs of the nested guest build (see [nested-sql-demo.md](nested-sql-demo.md)) | the parent preparation step (P3) when it passes, so it does not exist before then (the plan still lists P4); or you, by hand, for a parent prepared another way |
 | `vm-admin-credential.clixml` | The generated VM admin password (DPAPI-protected SecureString), for reruns of P2 when the Key Vault cannot be read from this PC or a build failed part way | `Deploy-ArcDemo.ps1` at P2, before any Azure write |
 | `nested-guest-credential.clixml` | Optional: the nested guest's Administrator credential (DPAPI-protected PSCredential) so P4 runs unattended. Without it P4 prompts, and a session that cannot prompt stops before anything starts | you, once ([recipe](#saving-the-nested-guest-credential)); the wrapper only reads it |
@@ -68,7 +130,7 @@ prefix.
 | `mediaManifestPath` | Optional override of the tracked `config/demo-media.json` (installer URLs, sizes and SHA-256 pins; nothing in it is secret). Leave it out to use the tracked manifest |
 | `realSql` | Optional, and in the example: delete it for an Arc-only build, because it adds the SQL steps and needs `-AcceptSqlDeveloperTerms`. SQL host `machineName`, the full guest-local `isoPath` in a folder (for example `C:\DemoMedia\SQLServer2022-x64-ENU-Dev.iso`) and `stageMedia` (`false` when the ISO is already on the guest). When the wrapper stages the ISO the file name must match the manifest's `fileName` for `sql-server-2022-developer`, and the install is pinned to its `sha256` |
 | `operationalWorkbooks` | Publish the capacity and optimisation workbooks (default `true`) |
-| `sre` | Optional, and in the example: delete it for an Arc-only build. `repoPath` of your local clone of the companion repo sre-agent-demo (the example's placeholder is not a folder, so P8 and P9 stay blocked until you set it), its `skinPath`, and `grantSwitch`, the parameter of the SRE deploy script that performs the alert-access grant (the wrapper passes it only when you pass `-ApproveSubscriptionGrant`, which a first SRE build needs). The SRE half also needs `workloads.deployContainerApps` set to `true` in the Arc skin before P2 |
+| `sre` | Optional, and in the example: delete it for an Arc-only build. `repoPath` is your local clone of the companion repo [sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo) (clone it anywhere; the example's placeholder is not a folder, so P8 and P9 stay blocked until you set it). `skinPath` is your private SRE skin, `sre-skin.json` in this folder (see the [setup block](#set-up-the-whole-demo)). `grantSwitch` is the parameter of the SRE deploy script that performs the alert-access grant (the wrapper passes it only when you pass `-ApproveSubscriptionGrant`, which a first SRE build needs). The SRE half also needs `workloads.deployContainerApps` set to `true` in the Arc skin before P2, and a subscription registered for Azure SRE Agent that offers the skin's region ([check it](runbook.md#sre-agent-registration)) |
 | `presenter` | Optional: the Windows and Linux Arc machines for the tour, and the LOB host (`lobMachineName`; clear it when you build no LOB app, or the runsheet says a LOB host was prepared) |
 
 Leaving a section out skips its steps, with the reason shown in the plan.
