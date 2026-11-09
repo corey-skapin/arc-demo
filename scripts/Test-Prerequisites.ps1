@@ -56,4 +56,4 @@ $prerequisites = Get-DemoPrerequisiteSet -ContainerApps:$DeployContainerApps -Ak
 
 $null = Test-Prerequisites -SubscriptionId $SubscriptionId -TenantId $TenantId -DeployerPrincipalId $DeployerPrincipalId -Providers $prerequisites.Providers -RequiredExtensions $prerequisites.Extensions -Features $prerequisites.Features
 Write-Host ''
-Write-Ok 'All prerequisites satisfied. You can now run Deploy-ArcDemo.ps1.'
+Write-Ok 'All prerequisites satisfied. Next: run the plan (Invoke-ArcDemoBuild.ps1 with your build config).'
