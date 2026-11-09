@@ -24,21 +24,24 @@ private folder.
 
 Run this from the repo root in `pwsh`, after `az login --tenant <TENANT_ID>`. It creates the
 private folder, clones the companion repo that holds the SRE half, writes the two private
-skins and the build config, and checks the SRE skin offline. Put your IDs in the first line.
+skins and the build config, and checks the SRE skin offline. Put your IDs in the `$sub` line.
+It stops at the first error (no git, a failed clone, a signed-out `az`), so rerun it after
+you fix the cause.
 Only `build.json` and `arc-skin.json` must exist before the first run (and `sre-skin.json`
 for the SRE half); the wrapper creates the rest when a step needs it (the last column of the
 table below says when).
 
 ```powershell
+$ErrorActionPreference = 'Stop'
 $sub = '<SUBSCRIPTION_ID>'; $tenant = '<TENANT_ID>'
 $private = Join-Path $HOME 'arc-demo-private'   # outside git, every worktree and every AI-tool session folder
 $sreRepo = Join-Path $HOME 'sre-agent-demo'     # a clone of the companion repo; any folder works
 New-Item -ItemType Directory -Force -Path $private | Out-Null
-if (-not (Test-Path $sreRepo)) { git clone https://github.com/corey-skapin/sre-agent-demo $sreRepo }
+if (-not (Test-Path $sreRepo)) { git clone https://github.com/corey-skapin/sre-agent-demo $sreRepo; if ($LASTEXITCODE) { throw 'git clone failed' } }
 
 # Arc skin: your alert e-mail, this PC's time zone for the 19:00 shutdown, and the Container App the SRE half needs
-$email = az account show --query user.name -o tsv   # the signed-in account; if it is not an address, replace this line with $email = '<the address you were given>'
-if ($email -notmatch '@' -or $email -match '#EXT#') { throw 'Set $email to a real e-mail address first.' }
+$email = [string](az account show --subscription $sub --query user.name -o tsv)   # the signed-in account; if it is not an address, replace this line with $email = '<the address you were given>'
+if ($email -notmatch '@' -or $email -match '#EXT#') { throw 'Sign in first (az login), or set $email to a real e-mail address.' }
 $arc = Get-Content .\config\demo-skin.json -Raw | ConvertFrom-Json
 $arc.notifications.email = $email
 $arc.operations.autoShutdownTimezone = (Get-TimeZone).Id
