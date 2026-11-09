@@ -1075,6 +1075,19 @@ Describe 'Invoke-ArcDemoBuild.ps1' {
         @($printed | Where-Object { $_ -like '*To run it:*' }) | Should -BeLike '*-Execute -ApproveCostStart -Confirm:$false'
     }
 
+    It 'adds a first-SRE-build hint about -ApproveSubscriptionGrant after To run it, only when the SRE parent step is in the plan' {
+        $withSre = New-BuildFixture -Without 'realSql', 'presenter' -NoNested
+        $printed = @(& $script:Wrapper -SubscriptionId $script:Sub -TenantId $script:Ten -BuildConfigPath $withSre.ConfigPath -Offline 6>&1 | ForEach-Object { "$_" })
+        $lines = @($printed | Where-Object { $_ -like '*To run it:*' -or $_ -like '*First SRE build?*' })
+        $lines.Count | Should -Be 2
+        $lines[0] | Should -BeLike '*To run it:*-ApproveSreCreation -Confirm:$false'
+        $lines[0] | Should -Not -BeLike '*-ApproveSubscriptionGrant*'
+        $lines[1] | Should -BeLike '*First SRE build? Also pass -ApproveSubscriptionGrant*'
+        $arcOnly = New-BuildFixture -Without 'realSql', 'sre', 'presenter' -NoNested
+        $printed = @(& $script:Wrapper -SubscriptionId $script:Sub -TenantId $script:Ten -BuildConfigPath $arcOnly.ConfigPath -Offline 6>&1 | ForEach-Object { "$_" })
+        @($printed | Where-Object { $_ -like '*ApproveSubscriptionGrant*' -or $_ -like '*First SRE build?*' }).Count | Should -Be 0
+    }
+
     It 'refuses to execute offline or without the explicit confirmation switches, before starting anything' {
         $f = New-BuildFixture -Without 'realSql', 'sre', 'presenter' -NoNested
         { & $script:Wrapper -SubscriptionId $script:Sub -TenantId $script:Ten -BuildConfigPath $f.ConfigPath -Execute -Offline } | Should -Throw '*-Offline only applies*'

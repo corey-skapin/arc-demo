@@ -95,6 +95,9 @@ if (-not $run) {
     $needed = @($plan | Where-Object { $_.Status -in @('ready', 'blocked') } | ForEach-Object { $_.Needs })
     $switches = @((Get-ArcDemoApprovalSwitch).GetEnumerator() | Where-Object { $_.Key -in $needed } | ForEach-Object { "-$($_.Value)" })
     Write-Step ('To run it: .\scripts\Invoke-ArcDemoBuild.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -BuildConfigPath <CONFIG> -Execute ' + (($switches + '-Confirm:$false') -join ' '))
+    if (@($plan | Where-Object { $_.Step -eq 'P9.2' -and $_.Status -in @('ready', 'blocked') }).Count) {
+        Write-Step "First SRE build? Also pass -ApproveSubscriptionGrant (the SRE agent can't read Azure Monitor alerts without the one subscription grant); leave it out only if its identity already has it."
+    }
     if ($PassThru) { $plan | Select-Object -ExcludeProperty Definition -Property * }
     return
 }

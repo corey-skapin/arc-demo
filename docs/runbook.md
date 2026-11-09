@@ -184,7 +184,8 @@ parent. `-ApproveSubscriptionGrant` adds the one subscription-scope Monitoring
 Contributor grant that the SRE agent needs to read Azure Monitor alerts: pass it on a
 first SRE build, unless the agent's identity already holds the grant, because the SRE
 readiness row `azure-monitor-alert-access` fails without it. The plan lists the
-switches your selection still needs, but not this one, so add it yourself.
+switches your selection still needs, but not this one: it prints a hint line under the
+command to remind you, so add the switch yourself.
 
 - The plan shows each step as `ready`, `done`, `skipped` (with the reason) or
   `blocked`. Blocked means the script is not in the checkout yet, it does not
