@@ -19,11 +19,17 @@ replay old ad-hoc portal/CLI builds against a running demo. Start with
 ## 1. Choose the target and skin
 
 Use a demo subscription where you have effective subscription Owner or
-Contributor plus User Access Administrator, and permission to create an Arc
-onboarding identity if needed, or to add and remove a credential on the existing
-one (application owner or administrator). PowerShell 7.4+, Azure CLI 2.60+ and
+Contributor plus User Access Administrator, and permission to create an Entra app
+registration and secret for the Arc onboarding identity (`sp-<prefix>-onboard`) if
+needed, or to add and remove a credential on the existing one (application owner or
+administrator). Deploy first uses that permission at phase 4, after the VMs exist, so
+check it before you start. PowerShell 7.4+ (run the scripts with `pwsh`, not Windows
+PowerShell 5.1), Azure CLI 2.60+ and
 Bicep are required. No Az PowerShell module, production framework or SRE Agent
 is required.
+
+Sign in yourself: `az login --tenant <TENANT>` opens a browser, so a tool cannot do it
+for you. If your AI tool is running these steps, it asks you to sign in and waits.
 
 ```powershell
 az login --tenant <TENANT>
@@ -32,8 +38,10 @@ $target = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; SkinPath = '<PRIVA
 ```
 
 Confirm those values; do not rely on default CLI context. Copy a bundled skin
-outside git for a new lab; edit that private copy's email, labels, prefix and
-workload toggles. Preserve an existing lab's retained inputs instead.
+outside git for a new lab; edit that private copy's email, region, shutdown time and
+time zone, labels, prefix and workload toggles (the shipped region, `australiaeast`, and
+shutdown, 19:00 Cen. Australia Standard Time, are the author's). Preserve an existing
+lab's retained inputs instead.
 IDs and secrets stay out of source.
 `config\dummy-customer.demo-skin.json` illustrates portability. An explicit missing
 skin, malformed boolean, invalid prefix or fleet is an error, never a fallback.
@@ -68,8 +76,18 @@ Review the [cost assumptions](cost.md) before you deploy.
 ## 3. Deploy
 
 ```powershell
-.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL>
+.\scripts\Deploy-ArcDemo.ps1 @target -AdminEmail <EMAIL> -AdminPasswordPath <PRIVATE>\vm-admin-credential.clixml
 ```
+
+`-AdminPasswordPath` saves the generated VM admin password before any Azure write, and the
+build wrapper always passes it. Deploy writes the password to the Key Vault only after the
+Bicep deployment succeeds, so a first Deploy without the file that fails part way (a capacity,
+quota or policy error, for example) has kept the password only in memory and can't be resumed.
+The rerun stops with `Retained vault without current compute` or
+`Existing VMs found but no saved admin credential`. When you run Deploy alone, pass
+`-AdminPasswordPath` on the first run and on every run after it; the same file is how reruns
+get the password when a tenant policy makes the vault private-only
+([details](#existing-estates-and-partial-failures)).
 
 Default: 5 Windows Server hosts across 2016/2019/2022 and 3 Ubuntu 22.04 hosts,
 Arc-enabled with `MSFT_ARC_TEST=true` for this demo-only simulation. SQL-capable
@@ -161,15 +179,19 @@ $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '
 | P6 | `Set-SqlIncidentAlert.ps1` and `Set-OperationalWorkbook.ps1` (capacity, optimisation). The alert (P6.1) watches the SQL engine, so it needs P5.4's saved proof (`.local/sql-engine-status.json` with status `pass`): run on its own before P5 it is blocked rather than deploying an alert for an engine that does not exist, and inside one selection it runs after P5.4 and stops the same way if the proof is not `pass`. Each workbook records the Arc roster and tags at publish time, so a from-zero build publishes them once, here, after the guest exists, and a rerun after P2 or P4 finished later publishes them again (the plan says so). To refresh just the two workbooks later, for example after a tag repair or a new host, run `-Only P6.2, P6.3 -Force`: it leaves the SQL alert (P6.1) alone | |
 | P7 | `Test-ArcDemoReadiness.ps1 -DesiredState Active`, re-checked for up to 20 minutes. This is the gate that includes the nested guest's `nested/arc` row (Deploy's own validation leaves it out) | |
 | P8 | Companion repo: LOB alert rule and LOB app | |
-| P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`; optionally `-ApproveSubscriptionGrant` |
+| P9 | Companion repo: `Deploy-SreAgent.ps1` preview, create, then readiness. The agent bills from creation; the create step passes the script's own `-ApproveParentCreation`. Preview and create are skipped when the parent already exists (see below) | `-ApproveSreCreation`, and `-ApproveSubscriptionGrant` on a first SRE build (see below) |
 | P10 | Presenter context (`.local/demo-context.json`) and runsheet for this repo (the SRE guide only if its context exists). It stamps the context with the time of the last passing P7 readiness evidence, not the time P10 ran. It adds every optional chapter it can verify (the data collection rule, the four original workbooks found by their tag, the nested guest, its SQL instance and its parent) and prints and records the chapters it had to leave out because their resource was not found; build them, then run P10 again | |
 | P11 | `Export-ArcDemoInventory.ps1`, then `Test-ArcDemoParity.ps1` | |
 
 Pass `-ApproveCostStart` to confirm you want to start billable resources.
 `-AcceptWindowsEvaluationTerms` and `-AcceptSqlDeveloperTerms` accept the Windows
 evaluation and SQL Developer licence terms. `-ApproveSreCreation` creates the paid SRE
-parent, and `-ApproveSubscriptionGrant` adds the opt-in subscription-scope alert-access
-grant for the SRE identity. The plan lists the switches your selection still needs.
+parent. `-ApproveSubscriptionGrant` adds the one subscription-scope Monitoring
+Contributor grant that the SRE agent needs to read Azure Monitor alerts: pass it on a
+first SRE build, unless the agent's identity already holds the grant, because the SRE
+readiness row `azure-monitor-alert-access` fails without it. The plan lists the
+switches your selection still needs, but not this one: it prints a hint line under the
+command to remind you, so add the switch yourself.
 
 - The plan shows each step as `ready`, `done`, `skipped` (with the reason) or
   `blocked`. Blocked means the script is not in the checkout yet, it does not
@@ -182,12 +204,28 @@ grant for the SRE identity. The plan lists the switches your selection still nee
   until you have inspected it and pass `-Force`; `-Force` also re-runs steps
   recorded as done. A step that could not even start (for example a lookup failed
   or the credential prompt was cancelled) is recorded as `blocked` and stays retryable.
+- The SRE half also needs the Container App and the LOB app. The companion's
+  `Deploy-SreAgent.ps1` requires the fault Container App `ca-<prefix>-fault` by default
+  (`sre.requiredScenarios` defaults to T09, the Container App incident, and T11, the LOB app
+  on Arc) and stops at P9 without it: after hours
+  of build, though before it creates the paid parent. So set `workloads.deployContainerApps`
+  to `true` in the private skin **before P2**; the Container Apps environment adds roughly
+  17-23 minutes. P8 builds the LOB alert rule and app. On an existing estate, add the
+  Container App as a second pass: set the flag in the same step as the Deploy that creates
+  it, then run the same Deploy again
+  ([how](lifecycle.md#adding-an-optional-workload-to-a-running-estate)).
 - `Deploy-SreAgent.ps1` refuses an existing SRE parent, even with `-WhatIf`. So a
   read-only check of `rg-<prefix>-sre` (the agent name comes from the SRE skin)
   runs first: when the parent exists, P9 preview and create are **skipped**, not
   failed, and do not need `-ApproveSreCreation`; when the check cannot be read, they are `blocked`
   with the exact error. P9 therefore belongs after a confirmed removal; use
   `Initialize-SreConfiguration` for configuration-only changes to a running agent.
+- If the parent exists but you forgot `-ApproveSubscriptionGrant`, grant it with the
+  companion's `scripts\Grant-SreAzureMonitorAlertAccess.ps1` instead: run it with `-WhatIf`
+  first, read the principal, role and scope it would assign, then run it again with
+  `-GrantAzureMonitorAlertAccess`. It also takes `-PrincipalId` (the principal ID of the
+  agent's managed identity, `<agent>-uami` in `rg-<prefix>-sre`) and the same `-SkinPath`.
+  Then run the SRE readiness gate again with `-Only P9.3`.
 - `-From` and `-To` take phase names; `-Only` takes phases or single steps (`-Only P6.2, P6.3`);
   `-WhatIf` is the same as the plan;
   pass `-Confirm:$false` for unattended runs. The plan's minutes are typical

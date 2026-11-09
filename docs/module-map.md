@@ -56,7 +56,7 @@ the customer-facing Arc records and observability plane are in the other group.
 | `scripts/Set-SqlIncidentAlert.ps1`, `bicep/modules/sql-incident-alert.bicep` | Optional exact-host Sev2 real lock-timeout alert on existing LAW/Action Group; v2 actual error/wait/session evidence, bounded rollback and independently gated recovery, not synthetic proof or SRE remediation |
 | `scripts/Set-ArcWorkloadAlertDescription.ps1` | Narrow existing-canonical SQL/LOB description-only PATCH/readback; preserves titles, queries, settings, scopes, routes and tags; no DCR, guest or receiver changes |
 | `scripts/Set-OperationalWorkbook.ps1`, `scripts/lib/OperationalWorkbooks.psm1`, `workbooks/operational-layout.json` | Default read-only preview, scoped publication, separate draft copies and draft-only removal; exact bounded Arc roster, config-driven nested guest from the skin plus optional declared topology, ownership/draft guards, shared-query composer, the portal layout pass (grid widths and formats, sizes, column charts, tiles) driven by the layout file, and offline scenario reference; no lifecycle/collection actions |
-| `scripts/Invoke-ArcDemoBuild.ps1`, `scripts/lib/BuildPlan.psm1`, `config/build-plan.example.json` | Thin ordered wrapper (P0-P11) over the maintained scripts: plan only by default, a switch for each of first spend (`-ApproveCostStart`), licence terms (`-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms`), SRE parent creation (`-ApproveSreCreation`) and the opt-in alert-access grant (`-ApproveSubscriptionGrant`), per-step resume state and evidence in the private folder, no deployment logic of its own |
+| `scripts/Invoke-ArcDemoBuild.ps1`, `scripts/lib/BuildPlan.psm1`, `config/build-plan.example.json` | Thin ordered wrapper (P0-P11) over the maintained scripts: plan only by default, a switch for each of first spend (`-ApproveCostStart`), licence terms (`-AcceptWindowsEvaluationTerms`, `-AcceptSqlDeveloperTerms`), SRE parent creation (`-ApproveSreCreation`) and the alert-access grant (`-ApproveSubscriptionGrant`, needed on a first SRE build), per-step resume state and evidence in the private folder, no deployment logic of its own |
 | `scripts/Export-ArcDemoInventory.ps1`, `scripts/Test-ArcDemoParity.ps1`, `scripts/lib/EstateSnapshot.psm1`, `config/expected-inventory.json` | Read-only JSON snapshot (denied reads recorded, no secrets) and a parity check of the expected objects and the manifest fleet; exit 0/1 |
 
 All four lifecycle/deployment scripts require explicit subscription/tenant and
@@ -195,6 +195,9 @@ the generated guest script, including Remove's stop-only `-AllowAbsent`.
 resume state, runner and presenter-context step (P10) with stub scripts;
 `tests/EstateParity.Tests.ps1` covers snapshot collection (read-only calls, recorded
 denials) and the parity rules (including the lab tags on the NAT gateway and public IP), both without Azure.
+`tests/ScriptRequires.Tests.ps1` checks that every top-level script declares `#Requires -Version 7.4`, except the
+seven that run on the Hyper-V parent or in the nested guest (they declare 5.1), so Windows PowerShell 5.1 stops at the
+version message.
 Skin JSON uses PowerShell's native `-AsHashtable`; the redundant recursive
 conversion helper is removed rather than adding another abstraction.
 `.github/workflows/lint.yml` runs PSScriptAnalyzer, parsing/Pester, Bicep compile

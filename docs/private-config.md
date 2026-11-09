@@ -27,8 +27,17 @@ creates the rest when a step needs it (the last column says when).
 $private = '<PRIVATE>'   # outside git, outside every worktree, readable only by you
 New-Item -ItemType Directory -Force -Path $private | Out-Null
 Copy-Item .\config\demo-skin.json "$private\arc-skin.json"          # then set prefix, region, e-mail, workload flags
-Copy-Item .\config\build-plan.example.json "$private\build.json"    # then set arcSkinPath and the optional sections
+Copy-Item .\config\build-plan.example.json "$private\build.json"    # the FULL build: set arcSkinPath, delete the sections you won't build
 ```
+
+The example `build.json` is the **full build**: real SQL, the SRE half and a LOB host. As
+shipped, its plan also needs `-AcceptSqlDeveloperTerms` and `-ApproveSreCreation`, and the
+placeholder `sre.repoPath` blocks P8 and P9, so `-Execute` refuses to start. For an
+**Arc-only build**, delete the `realSql` and `sre` sections and clear
+`presenter.lobMachineName`: nothing is blocked, the plan is about 90 minutes and needs only
+`-ApproveCostStart`. To keep the SRE half, set `sre.repoPath` to your clone of the companion repo
+sre-agent-demo and follow the SRE prerequisites in the
+[runbook](runbook.md#build-everything-in-order-optional-wrapper).
 
 | File or folder | What it is | Written by, and when |
 | --- | --- | --- |
@@ -57,10 +66,10 @@ prefix.
 | `autoShutdownTime` | Optional `HHmm` override of the VM auto-shutdown time. Deploy owns this schedule and sets it again on every run, so a time changed by hand is reverted (per VM, as each VM module finishes). To keep a later shutdown, set it here or as `operations.autoShutdownTime` in the skin **before** the Deploy. Leave it empty unless the build would cross the default 19:00: the plan warns when the typical minutes plus a 50% allowance would |
 | `nestedSqlBuildInputPath` | The nested guest's build inputs file listed above |
 | `mediaManifestPath` | Optional override of the tracked `config/demo-media.json` (installer URLs, sizes and SHA-256 pins; nothing in it is secret). Leave it out to use the tracked manifest |
-| `realSql` | Optional: SQL host `machineName`, the full guest-local `isoPath` in a folder (for example `C:\DemoMedia\SQLServer2022-x64-ENU-Dev.iso`) and `stageMedia` (`false` when the ISO is already on the guest). When the wrapper stages the ISO the file name must match the manifest's `fileName` for `sql-server-2022-developer`, and the install is pinned to its `sha256` |
+| `realSql` | Optional, and in the example: delete it for an Arc-only build, because it adds the SQL steps and needs `-AcceptSqlDeveloperTerms`. SQL host `machineName`, the full guest-local `isoPath` in a folder (for example `C:\DemoMedia\SQLServer2022-x64-ENU-Dev.iso`) and `stageMedia` (`false` when the ISO is already on the guest). When the wrapper stages the ISO the file name must match the manifest's `fileName` for `sql-server-2022-developer`, and the install is pinned to its `sha256` |
 | `operationalWorkbooks` | Publish the capacity and optimisation workbooks (default `true`) |
-| `sre` | Optional: `repoPath` of the local companion clone, its `skinPath`, and `grantSwitch`, the parameter of the SRE deploy script that performs the opt-in alert-access grant |
-| `presenter` | Optional: the Windows and Linux Arc machines for the tour, and the LOB host |
+| `sre` | Optional, and in the example: delete it for an Arc-only build. `repoPath` of your local clone of the companion repo sre-agent-demo (the example's placeholder is not a folder, so P8 and P9 stay blocked until you set it), its `skinPath`, and `grantSwitch`, the parameter of the SRE deploy script that performs the alert-access grant (the wrapper passes it only when you pass `-ApproveSubscriptionGrant`, which a first SRE build needs). The SRE half also needs `workloads.deployContainerApps` set to `true` in the Arc skin before P2 |
+| `presenter` | Optional: the Windows and Linux Arc machines for the tour, and the LOB host (`lobMachineName`; clear it when you build no LOB app, or the runsheet says a LOB host was prepared) |
 
 Leaving a section out skips its steps, with the reason shown in the plan.
 Nested SQL steps follow the skin's `nestedSqlGuest`, not the build config.

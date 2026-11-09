@@ -24,6 +24,7 @@
     Retained tenant identities, soft-deleted vaults and shared/subscription services
     are not deleted by this command and may still incur costs.
 #>
+#Requires -Version 7.4
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory)][guid]$SubscriptionId,

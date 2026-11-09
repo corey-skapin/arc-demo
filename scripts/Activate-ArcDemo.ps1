@@ -15,6 +15,7 @@
     retries. Submission is not completion.
     -WhatIf is read-only. Optional ResultPath preserves per-host outcomes.
 #>
+#Requires -Version 7.4
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)][guid]$SubscriptionId,

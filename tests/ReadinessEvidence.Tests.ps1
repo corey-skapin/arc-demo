@@ -135,3 +135,69 @@ Describe 'Readiness evidence for Heartbeat age, VM provisioning state and MDE' {
         @($checks | Where-Object { $_.id -match '^(provisioning|extension)/' -and $_.required }).Count | Should -Be 0
     }
 }
+
+Describe 'Readiness expects the core data collection rule the Bicep creates, whatever the name prefix' {
+    BeforeEach {
+        InModuleScope Common { $script:DemoSubscription = '11111111-1111-1111-1111-111111111111' }
+        $script:arcRg = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture'
+        $script:arcRoot = "$($script:arcRg)/providers/Microsoft.HybridCompute/machines"
+        $script:infraRoot = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-fixture-infra/providers/Microsoft.Compute/virtualMachines'
+        $script:dcrRoot = "$($script:arcRg)/providers/Microsoft.Insights/dataCollectionRules"
+        $script:resourceIds = @()
+        $script:associatedRules = @('dcr-arc-demo', 'dcr-vminsights', 'dcr-changetracking')
+        Mock Get-DemoNetworkState { [pscustomobject]@{ NatId = '/nat'; PublicIpId = '/pip'; Nat = $null; PublicIp = $null; Subnet = @{ id = '/subnet' } } } -ModuleName Common
+        Mock Get-DemoHeartbeatIds { @() } -ModuleName Common
+        Mock Invoke-DemoAz {
+            param($Arguments)
+            if ($Arguments[0] -eq 'group') { return '{"properties":{"provisioningState":"Succeeded"}}' }
+            if (($Arguments[0..1] -join ' ') -eq 'resource list') {
+                return (ConvertTo-Json -InputObject @($script:resourceIds | ForEach-Object { @{ id = $_; type = 'Microsoft.Insights/fixture' } }) -Depth 4)
+            }
+            if (($Arguments[0..2] -join ' ') -eq 'connectedmachine list -g') {
+                return (ConvertTo-Json -InputObject @(@{ id = "$($script:arcRoot)/win-app-01"; status = 'Connected' }))
+            }
+            if ($Arguments[0] -eq 'monitor' -and $Arguments[1] -eq 'log-analytics') { return '{"customerId":"workspace"}' }
+            if (($Arguments[0..4] -join ' ') -eq 'monitor data-collection rule association list') {
+                return (ConvertTo-Json -InputObject @($script:associatedRules | ForEach-Object { @{ dataCollectionRuleId = "$($script:dcrRoot)/$_" } }) -Depth 4)
+            }
+            return '[]'
+        } -ModuleName Common
+        # bicep/modules/dcrs.bicep names the three rules with literals, so the core rule never carries the prefix.
+        function Set-LabResources {
+            param([string]$Prefix)
+            $script:resourceIds = @(
+                "$($script:arcRg)/providers/Microsoft.OperationalInsights/workspaces/law-$Prefix"
+                "$($script:dcrRoot)/dcr-arc-demo"
+                "$($script:dcrRoot)/dcr-vminsights"
+                "$($script:dcrRoot)/dcr-changetracking"
+                "$($script:arcRg)/providers/Microsoft.Insights/actionGroups/ag-$Prefix"
+                "$($script:arcRg)/providers/Microsoft.Insights/scheduledQueryRules/alert-$Prefix-host-missing-heartbeat")
+        }
+        function New-DcrInventory {
+            [pscustomobject]@{ ArcRg = 'rg-fixture'; InfraRg = 'rg-fixture-infra'; Resources = @(); AksClusterIds = @(); ContainerAppIds = @()
+                Machines = @([pscustomobject]@{ Name = 'win-app-01'; Id = "$($script:infraRoot)/win-app-01"; ArcId = "$($script:arcRoot)/win-app-01"; Native = $false; Monitor = $true
+                    VmInsights = $true; ChangeTracking = $true; OsType = 'Windows'; Actual = @{ powerState = 'VM running' } }) }
+        }
+    }
+
+    It 'fails no resource or association row for the prefix <Prefix> when the estate holds the rules the Bicep creates' -TestCases @(
+        @{ Prefix = 'example-arc' }
+        @{ Prefix = 'arc-demo' }
+    ) {
+        param($Prefix)
+        Set-LabResources $Prefix
+        $checks = @(Get-DemoReadinessChecks -Inventory (New-DcrInventory) -NamePrefix $Prefix -DesiredState Active)
+        @($checks | Where-Object { $_.id -match '^(resource|dcra)/' -and $_.status -ne 'pass' } | ForEach-Object id) | Should -BeNullOrEmpty
+        @($checks | Where-Object id -like 'resource/dcr-*' | ForEach-Object id) | Should -Be @('resource/dcr-arc-demo', 'resource/dcr-vminsights', 'resource/dcr-changetracking')
+        ($checks | Where-Object id -eq 'dcra/win-app-01/dcr-arc-demo').status | Should -Be 'pass'
+    }
+
+    It 'still fails the core rule row when the estate lacks the rule the Bicep creates' {
+        Set-LabResources 'example-arc'
+        $script:resourceIds = @($script:resourceIds | Where-Object { $_ -notlike '*/dcr-arc-demo' })
+        $script:associatedRules = @('dcr-vminsights', 'dcr-changetracking')
+        $checks = @(Get-DemoReadinessChecks -Inventory (New-DcrInventory) -NamePrefix example-arc -DesiredState Active)
+        ($checks | Where-Object id -eq 'resource/dcr-arc-demo').status | Should -Be 'fail'
+        ($checks | Where-Object id -eq 'dcra/win-app-01/dcr-arc-demo').status | Should -Be 'fail'
+    }
+}

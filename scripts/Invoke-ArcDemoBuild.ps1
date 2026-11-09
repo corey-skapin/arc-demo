@@ -15,8 +15,9 @@
     after a tag repair. Billable resources, licence terms and IAM changes each need an explicit switch, never implied.
     Pass -ApproveCostStart (P2) to confirm you want to start billable resources, -AcceptWindowsEvaluationTerms
     and -AcceptSqlDeveloperTerms (P3, P5) to accept those licence terms, -ApproveSreCreation (P9) to create the
-    SRE parent and -ApproveSubscriptionGrant for the opt-in subscription-scope Azure Monitor alert-access grant
-    for the SRE identity. The plan lists the switches it needs.
+    SRE parent and -ApproveSubscriptionGrant for the subscription-scope Azure Monitor alert-access grant that the
+    SRE agent needs to read alerts (pass it on a first SRE build). The plan lists the other switches it needs.
+    -Execute asks for confirmation: add -Confirm:$false in a shell that cannot answer a prompt.
 
     When the nested guest (P4) will run, the Administrator credential is resolved at
     the start, not about an hour in: -GuestCredential, else a DPAPI-protected export
@@ -93,7 +94,10 @@ if (-not $run) {
     Write-ArcDemoBuildPlan -Plan $plan -Warnings $warnings
     $needed = @($plan | Where-Object { $_.Status -in @('ready', 'blocked') } | ForEach-Object { $_.Needs })
     $switches = @((Get-ArcDemoApprovalSwitch).GetEnumerator() | Where-Object { $_.Key -in $needed } | ForEach-Object { "-$($_.Value)" })
-    Write-Step ("To run it: .\scripts\Invoke-ArcDemoBuild.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -BuildConfigPath <CONFIG> -Execute " + ($switches -join ' ')).TrimEnd()
+    Write-Step ('To run it: .\scripts\Invoke-ArcDemoBuild.ps1 -SubscriptionId <SUB> -TenantId <TENANT> -BuildConfigPath <CONFIG> -Execute ' + (($switches + '-Confirm:$false') -join ' '))
+    if (@($plan | Where-Object { $_.Step -eq 'P9.2' -and $_.Status -in @('ready', 'blocked') }).Count) {
+        Write-Step "First SRE build? Also pass -ApproveSubscriptionGrant (the SRE agent can't read Azure Monitor alerts without the one subscription grant); leave it out only if its identity already has it."
+    }
     if ($PassThru) { $plan | Select-Object -ExcludeProperty Definition -Property * }
     return
 }

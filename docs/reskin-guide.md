@@ -23,7 +23,8 @@ The repo has a stable **spine** (Bicep, DCRs, workbooks, alerts, scripts) and a 
 
 Change per customer:
 
-- `customer`, `azure.namePrefix`, `notifications.email`, `labels`, and `tags.purpose`.
+- `customer`, `azure.namePrefix`, `azure.location` (the region), `notifications.email`, `operations.autoShutdownTime` and `operations.autoShutdownTimezone` (the shutdown time and its Windows time zone name), `labels`, and `tags.purpose`. The shipped defaults are the author's (`australiaeast`, 19:00 Cen. Australia Standard Time, AUD figures in [cost.md](cost.md), `Standard_B2as_v2`), so change them to yours.
+- The SRE half works only in an [SRE Agent supported region](https://learn.microsoft.com/azure/sre-agent/supported-regions) (Australia East is on it). The companion repo's README lists SRE registration and region availability as separate prerequisites.
 - `workloads` to match the story: core Arc only, native comparison, Container App fault, AKS fault, or all implemented workloads. Validate the chosen estate separately; flags are not live validation. [Real SQL preparation](sql-engine-workload.md) is a separate operation, not a deployment flag.
 - `workloads.onPremFleetPath` for a custom OS mix.
 - Match `compute.osDiskStorageAccountType` to the existing OS disks for a
@@ -36,7 +37,7 @@ Change per customer:
 Keep constant unless the lab requirement changes:
 
 - Bicep modules, DCR streams, workbook templates, alert mechanics, Defender/Policy choices, hibernate/activate flow.
-- The repo separation: `arc-demo` remains standalone and does not require `sre-agent`.
+- The repo separation: `arc-demo` remains standalone and does not require `sre-agent-demo`.
 
 ## Retarget steps
 
@@ -89,4 +90,4 @@ Fictitious alternative: `config\dummy-customer.demo-skin.json` changes the prefi
 
 ## Remaining constants
 
-The following strings intentionally remain in code/docs because they identify the reusable spine, not a customer skin: repo names (`arc-demo`, `sre-agent`), feature flags (`SIMULATE_CRASH`, `CRASH_LOOP`), built-in workbook names from the vendored Nic Seilaz library and sample host names (`win-app-01`). Substitute the chosen names in examples; maintained lifecycle scripts use retained IDs and customer-facing defaults from the skin.
+The following strings intentionally remain in code/docs because they identify the reusable spine, not a customer skin: repo names (`arc-demo`, `sre-agent-demo`), feature flags (`SIMULATE_CRASH`, `CRASH_LOOP`), built-in workbook names from the vendored Nic Seilaz library and sample host names (`win-app-01`). Substitute the chosen names in examples; maintained lifecycle scripts use retained IDs and customer-facing defaults from the skin.

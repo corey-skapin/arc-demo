@@ -11,6 +11,7 @@
     "SRE step N" and its close replaced by a pointer) and then the single close, prepared answers and
     reference pages. The SRE guide is read, never changed.
 #>
+#Requires -Version 7.4
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$ContextPath = (Join-Path $PSScriptRoot '..\.local\demo-context.json'),
@@ -58,6 +59,13 @@ function ConvertTo-HeadingAnchor {
     param([Parameter(Mandatory)][string]$Heading)
     '#' + (($Heading.ToLowerInvariant() -replace '[^\p{L}\p{N}\s_-]', '') -replace '\s', '-')
 }
+function ConvertTo-IsoTimestampText {
+    # PowerShell 7.4 has no ConvertFrom-Json -DateKind and returns an ISO timestamp as a [datetime]: Utc for Z, Local for an
+    # offset. This turns it back into the string it was. With no offset it is Unspecified and comes back unchanged, so the checks reject it.
+    param($Value)
+    if ($Value -is [datetime] -and $Value.Kind -ne [DateTimeKind]::Unspecified) { return $Value.ToUniversalTime().ToString('o') }
+    $Value
+}
 $contextFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ContextPath)
 $directory = Split-Path $contextFile
 if ((Split-Path $directory -Leaf) -ne '.local' -or (Split-Path $contextFile -Leaf) -ne 'demo-context.json') {
@@ -101,6 +109,7 @@ foreach ($field in @('tenantId', 'subscriptionId')) {
     $context[$field] = $id.ToString()
 }
 $recorded = [DateTimeOffset]::MinValue
+$context.recordedAtUtc = ConvertTo-IsoTimestampText $context.recordedAtUtc
 if ($context.recordedAtUtc -isnot [string] -or
     $context.recordedAtUtc -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$' -or
     -not [DateTimeOffset]::TryParse($context.recordedAtUtc, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$recorded)) {
@@ -234,8 +243,8 @@ if ($context.Contains('sqlMachineResourceId')) {
         $data.instance -ne 'ARCDEMO' -or $data.database -ne 'ArcDemoOrders' -or
         $data.edition -notmatch '^Developer Edition(?: \(64-bit\))?$' -or $data.version -notmatch '^16\.\d+\.\d+\.\d+$' -or
         $data.orderCount -isnot [long] -or $data.orderCount -lt 1 -or $data.orderCount -gt 1000 -or
-        -not [DateTimeOffset]::TryParse([string]$data.checkedAtUtc, [ref]$checked) -or
-        -not [DateTimeOffset]::TryParse([string]$data.lastCommitUtc, [ref]$committed) -or
+        -not [DateTimeOffset]::TryParse([string](ConvertTo-IsoTimestampText $data.checkedAtUtc), [ref]$checked) -or
+        -not [DateTimeOffset]::TryParse([string](ConvertTo-IsoTimestampText $data.lastCommitUtc), [ref]$committed) -or
         $committed -gt $checked -or ($checked - $committed).TotalSeconds -gt 120) {
         throw 'Saved SQL evidence is incomplete, unverified or belongs to a different host; no SQL presentation claim.'
     }

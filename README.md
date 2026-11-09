@@ -35,11 +35,24 @@ These screenshots come from a lab estate rebuilt from zero with this repo; each 
 ## Quick start
 
 Open the repo in your AI tool and ask for what you want, for example: "Read
-AGENTS.md, then build the Arc demo in my subscription." The tool confirms your
-tenant and subscription with you once, then plans and builds it. To drive the
-scripts yourself, start with the
+AGENTS.md, then build the Arc demo in my subscription." The tool asks you once for
+what it needs: tenant and subscription IDs, your e-mail, region, shutdown time and time
+zone, and which optional parts you want (SQL, Container App, nested SQL, the SRE half).
+The shipped defaults are the author's (`australiaeast`, 19:00 Cen. Australia Standard
+Time, AUD figures in [cost.md](docs/cost.md)), so change them to yours. You need
+PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell 5.1), Azure CLI
+2.60+ with Bicep, Owner (or Contributor plus User Access Administrator) on the
+subscription, and the right to create an Entra app registration and secret for the Arc
+onboarding identity. Sign in yourself with
+`az login --tenant <TENANT>`: a tool can't do the browser sign-in, so it asks you to and
+waits. It then plans and builds.
+
+To drive the scripts yourself, start with the
 [ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper)
 (it plans first, then builds with `-Execute`) and the [runbook](docs/runbook.md).
+`-Execute` and `Remove-ArcDemo.ps1` prompt before they act, which a tool's
+non-interactive shell can't answer: add `-Confirm:$false` (to Remove only after you have
+seen its `-WhatIf` preview).
 The flow is: build, present, park and wake, remove.
 
 ## Present
@@ -110,8 +123,10 @@ You do not need to reskin or redeploy anything to present.
 
 AI tools read [AGENTS.md](AGENTS.md) first. Use
 [CONTRIBUTING.md](CONTRIBUTING.md) and [the module map](docs/module-map.md).
-Private context and generated guides belong only in the gitignored `.local/`
-folder; never store credentials or tokens there.
+Generated context and runsheets go in the gitignored `.local/` folder; the build config,
+skins and credentials go in a private folder outside the repo
+([private-config.md](docs/private-config.md)), because the wrapper rejects a build config
+inside it. Never store credentials or tokens in `.local/`.
 
 ## Credits and licence
 

@@ -13,6 +13,7 @@
     gives both the dated evidence and the exit code. The JSON names the subscription and tenant: keep it outside git.
     Never repairs, induces faults, changes context defaults or registers providers.
 #>
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][guid]$SubscriptionId,
