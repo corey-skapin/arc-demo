@@ -35,17 +35,37 @@ These screenshots come from a lab estate rebuilt from zero with this repo; each 
 ## Quick start
 
 Open the repo in your AI tool and ask for what you want, for example: "Read
-AGENTS.md, then build the Arc demo in my subscription." The tool asks you once for
-what it needs: tenant and subscription IDs, your e-mail, region, shutdown time and time
-zone, and which optional parts you want (SQL, Container App, nested SQL, the SRE half).
-The shipped defaults are the author's (`australiaeast`, 19:00 Cen. Australia Standard
-Time, AUD figures in [cost.md](docs/cost.md)), so change them to yours. You need
-PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell 5.1), Azure CLI
-2.60+ with Bicep, Owner (or Contributor plus User Access Administrator) on the
+AGENTS.md, then build the whole demo in my subscription." You give the tool your tenant
+ID, your subscription ID and your acceptances. In its first message it asks once, in one
+list, whether you accept what the plan needs: starting billable resources (see
+[cost.md](docs/cost.md)), the SQL Server Developer licence terms, the paid SRE agent and
+the one subscription role assignment that lets the agent read Azure Monitor alerts. It
+also asks whether your subscription is registered for Azure SRE Agent (the only check is
+in the portal; [how](docs/runbook.md#build-everything-in-order-optional-wrapper)); if it
+isn't, the tool builds the Arc half and stops before the SRE steps.
+
+Everything else has a default that the tool uses and reports in its final summary. The
+notification e-mail is your signed-in account's address (the tool asks only if that isn't
+an address), the region is `australiaeast`, the VMs shut down at 19:00 in your PC's time
+zone, and "the demo" means all of it: Arc, real SQL, the LOB app, a Container App and the
+SRE half, about 2 hours 45 minutes. Say so if you want something else, such as another
+region, another shutdown time or an Arc-only build; your own choices win over the
+defaults.
+
+The SRE half lives in a second, public repo,
+[sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo). The tool clones it next
+to this repo or anywhere, sets `sre.repoPath` in your private `build.json` to the clone,
+and copies the clone's `config\demo-skin.json` to `sre-skin.json` in the private folder
+(`$HOME\arc-demo-private` by default) with the same `azure.namePrefix` and `azure.location`
+as the Arc skin. The
+[setup block](docs/private-config.md#set-up-the-whole-demo) does all of that.
+
+You need PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell 5.1), Azure
+CLI 2.60+ with Bicep, Git, Owner (or Contributor plus User Access Administrator) on the
 subscription, and the right to create an Entra app registration and secret for the Arc
-onboarding identity. Sign in yourself with
-`az login --tenant <TENANT>`: a tool can't do the browser sign-in, so it asks you to and
-waits. It then plans and builds.
+onboarding identity. Real builds were run only from a Windows PC (CI also runs the mocked
+tests on Linux); other systems are untested. Sign in yourself with `az login --tenant <TENANT>`: a tool can't do the browser
+sign-in, so it asks you to and waits. It then plans and builds.
 
 To drive the scripts yourself, start with the
 [ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper)
