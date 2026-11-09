@@ -1069,6 +1069,12 @@ Describe 'Invoke-ArcDemoBuild.ps1' {
         Test-Path (Join-Path $f.Private 'evidence') | Should -BeFalse
     }
 
+    It 'prints a To run it line that ends with the literal -Confirm:$false' {
+        $f = New-BuildFixture -Without 'realSql', 'sre', 'presenter' -NoNested
+        $printed = @(& $script:Wrapper -SubscriptionId $script:Sub -TenantId $script:Ten -BuildConfigPath $f.ConfigPath -Offline 6>&1 | ForEach-Object { "$_" })
+        @($printed | Where-Object { $_ -like '*To run it:*' }) | Should -BeLike '*-Execute -ApproveCostStart -Confirm:$false'
+    }
+
     It 'refuses to execute offline or without the explicit confirmation switches, before starting anything' {
         $f = New-BuildFixture -Without 'realSql', 'sre', 'presenter' -NoNested
         { & $script:Wrapper -SubscriptionId $script:Sub -TenantId $script:Ten -BuildConfigPath $f.ConfigPath -Execute -Offline } | Should -Throw '*-Offline only applies*'
