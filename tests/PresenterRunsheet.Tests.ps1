@@ -377,12 +377,81 @@ Describe 'Offline private presenter guide' {
         @{ Field = 'subscriptionId'; Value = '00000000-0000-0000-0000-000000000000' }
         @{ Field = 'recordedAtUtc'; Value = 'yesterday' }
         @{ Field = 'recordedAtUtc'; Value = 'October 20, 2026 01:02:03Z' }
+        @{ Field = 'recordedAtUtc'; Value = '2026-10-20T01:02:03' }
         @{ Field = 'schemaVersion'; Value = '1' }
     ) {
         $context[$Field] = $Value
         $context | ConvertTo-Json | Set-Content $path
         { & $generator -ContextPath $path } | Should -Throw
         Test-Path $output | Should -BeFalse
+    }
+
+    Context 'when ConvertFrom-Json returns an ISO timestamp as a [datetime], as PowerShell 7.4 does' {
+        BeforeEach {
+            # Stands in for 7.4 on any runtime: no -DateKind parameter, so the generator cannot ask for a string.
+            function ConvertFrom-Json {
+                [CmdletBinding()]
+                param([Parameter(Mandatory, ValueFromPipeline)][string]$InputObject, [switch]$AsHashtable)
+                process { Microsoft.PowerShell.Utility\ConvertFrom-Json -InputObject $InputObject -AsHashtable:$AsHashtable }
+            }
+        }
+
+        It 'is the case under test: a [datetime] for a Z timestamp and no -DateKind to avoid it' {
+            ('{"at":"2026-10-20T01:02:03Z"}' | ConvertFrom-Json -AsHashtable)['at'] | Should -BeOfType [datetime]
+            (Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind') | Should -BeFalse
+        }
+
+        It 'accepts a timestamp with Z and records the same UTC moment' {
+            $context | ConvertTo-Json | Set-Content $path
+            & $generator -ContextPath $path | Out-Null
+            (Get-Content $output -Raw) | Should -Match '2026-10-20T01:02:03'
+        }
+
+        It 'accepts a timestamp with an offset and records the same UTC moment' {
+            $context.recordedAtUtc = '2026-10-20T10:32:03+09:30'
+            $context | ConvertTo-Json | Set-Content $path
+            & $generator -ContextPath $path | Out-Null
+            (Get-Content $output -Raw) | Should -Match '2026-10-20T01:02:03'
+        }
+
+        It 'still rejects a timestamp with no offset' {
+            $context.recordedAtUtc = '2026-10-20T01:02:03'
+            $context | ConvertTo-Json | Set-Content $path
+            { & $generator -ContextPath $path } | Should -Throw '*explicit UTC offset*'
+            Test-Path $output | Should -BeFalse
+        }
+
+        It 'reads the times of the saved SQL evidence too, in <Culture>' -TestCases @(
+            @{ Culture = 'en-US' }, @{ Culture = 'en-AU' }, @{ Culture = 'en-GB' }, @{ Culture = 'de-DE' }
+        ) {
+            param($Culture)
+            try { $info = [cultureinfo]::GetCultureInfo($Culture) } catch { Set-ItResult -Skipped -Because "culture $Culture is not available on this machine"; return }
+            $context.sqlMachineResourceId = "$scope/providers/Microsoft.HybridCompute/machines/sql-fixture"
+            $context | ConvertTo-Json | Set-Content $path
+            @{
+                schemaVersion = 1; workload = 'arc-sql-engine'; action = 'Status'; resourceId = $context.sqlMachineResourceId
+                evidence = @{
+                    status = 'pass'; instance = 'ARCDEMO'; database = 'ArcDemoOrders'; edition = 'Developer Edition (64-bit)'
+                    version = '16.0.1000.6'; orderCount = 7; checkedAtUtc = '2026-10-20T01:02:03Z'; lastCommitUtc = '2026-10-20T01:01:53Z'
+                }
+            } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $local 'sql-engine-status.json')
+            $previous = [System.Threading.Thread]::CurrentThread.CurrentCulture
+            try {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = $info
+                & $generator -ContextPath $path | Out-Null
+            } finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $previous }
+            (Get-Content $output -Raw) | Should -Match 'last commit 2026-10-20T01:01:53\.0000000Z, checked 2026-10-20T01:02:03\.0000000Z'
+        }
+
+        It 'still rejects text that is not an ISO timestamp' -ForEach @(
+            @{ Value = 'yesterday' }
+            @{ Value = 'October 20, 2026 01:02:03Z' }
+        ) {
+            $context.recordedAtUtc = $Value
+            $context | ConvertTo-Json | Set-Content $path
+            { & $generator -ContextPath $path } | Should -Throw '*explicit UTC offset*'
+            Test-Path $output | Should -BeFalse
+        }
     }
 
     It 'rejects wrong subscription, group, resource type or Markdown injection' -ForEach @(
