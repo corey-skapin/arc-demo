@@ -47,10 +47,13 @@ one subscription role assignment that lets the agent read Azure Monitor alerts. 
 front by name counts; a vague "go ahead" doesn't. Whatever you leave out, the tool asks for
 once, in its first message, in one list.
 
-The tool checks for itself that your subscription is registered for Azure SRE Agent (one
-read-only command, [how](docs/runbook.md#sre-agent-registration)) and asks you only if that
-doesn't confirm it. If you confirm it isn't registered, the tool builds everything before the
-SRE steps and stops there; you continue after registration.
+The tool checks for itself that your subscription is registered for Azure SRE Agent and offers
+your region (one read-only command, [how](docs/runbook.md#sre-agent-registration)). It asks you
+only if that doesn't confirm it: to confirm in the portal that the subscription isn't
+registered, or to pick another region from the list the subscription offers. If you are waiting
+for registration or for your region, the tool builds everything before the SRE steps and stops
+there. You file the request yourself (a public GitHub issue that asks for your subscription ID,
+so the tool never does), and the tool continues after it is granted.
 
 Everything else has a default that the tool uses and reports in its final summary. The
 notification e-mail is your signed-in account's address (the tool asks only if that isn't

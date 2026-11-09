@@ -84,7 +84,7 @@ Nothing should be blocked. What the block decides, and what it leaves alone:
   Its other values suit the default scenarios.
 - **SRE Agent registration.** The block doesn't check it. The tool runs the read-only
   [check in the runbook](runbook.md#sre-agent-registration) and asks you only if that can't
-  confirm the registration.
+  confirm the registration and your region.
 - **`build.json`.** The full-build example (real SQL, the SRE half and a LOB host) with
   `sre.repoPath` set to the clone. `sre.skinPath` is `sre-skin.json`, which resolves against
   this folder like every relative path in the file. As shipped, the plan needs
@@ -130,7 +130,7 @@ prefix.
 | `mediaManifestPath` | Optional override of the tracked `config/demo-media.json` (installer URLs, sizes and SHA-256 pins; nothing in it is secret). Leave it out to use the tracked manifest |
 | `realSql` | Optional, and in the example: delete it for an Arc-only build, because it adds the SQL steps and needs `-AcceptSqlDeveloperTerms`. SQL host `machineName`, the full guest-local `isoPath` in a folder (for example `C:\DemoMedia\SQLServer2022-x64-ENU-Dev.iso`) and `stageMedia` (`false` when the ISO is already on the guest). When the wrapper stages the ISO the file name must match the manifest's `fileName` for `sql-server-2022-developer`, and the install is pinned to its `sha256` |
 | `operationalWorkbooks` | Publish the capacity and optimisation workbooks (default `true`) |
-| `sre` | Optional, and in the example: delete it for an Arc-only build. `repoPath` is your local clone of the companion repo [sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo) (clone it anywhere; the example's placeholder is not a folder, so P8 and P9 stay blocked until you set it). `skinPath` is your private SRE skin, `sre-skin.json` in this folder (see the [setup block](#set-up-the-whole-demo)). `grantSwitch` is the parameter of the SRE deploy script that performs the alert-access grant (the wrapper passes it only when you pass `-ApproveSubscriptionGrant`, which a first SRE build needs). The SRE half also needs `workloads.deployContainerApps` set to `true` in the Arc skin before P2, and a subscription registered for Azure SRE Agent ([check it](runbook.md#sre-agent-registration)) |
+| `sre` | Optional, and in the example: delete it for an Arc-only build. `repoPath` is your local clone of the companion repo [sre-agent-demo](https://github.com/corey-skapin/sre-agent-demo) (clone it anywhere; the example's placeholder is not a folder, so P8 and P9 stay blocked until you set it). `skinPath` is your private SRE skin, `sre-skin.json` in this folder (see the [setup block](#set-up-the-whole-demo)). `grantSwitch` is the parameter of the SRE deploy script that performs the alert-access grant (the wrapper passes it only when you pass `-ApproveSubscriptionGrant`, which a first SRE build needs). The SRE half also needs `workloads.deployContainerApps` set to `true` in the Arc skin before P2, and a subscription registered for Azure SRE Agent that offers the skin's region ([check it](runbook.md#sre-agent-registration)) |
 | `presenter` | Optional: the Windows and Linux Arc machines for the tour, and the LOB host (`lobMachineName`; clear it when you build no LOB app, or the runsheet says a LOB host was prepared) |
 
 Leaving a section out skips its steps, with the reason shown in the plan.

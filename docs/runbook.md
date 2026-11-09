@@ -282,32 +282,51 @@ Once you are signed in you can check this yourself, read-only. It is the allow-l
 the [Azure SRE Agent troubleshooting FAQ](https://learn.microsoft.com/azure/sre-agent/faq-troubleshooting#deployment-issues):
 
 ```powershell
+$ErrorActionPreference = 'Stop'
 $location = '<azure.location from the Arc skin>'   # for example australiaeast
 $regions = az provider show -n Microsoft.App --subscription <SUB> --query "resourceTypes[?resourceType=='agents'] | [0].locations" -o tsv
+if ($LASTEXITCODE) { throw 'az failed: fix the sign-in; this is not an unregistered subscription' }
+$listed = @($regions | Where-Object { $_ }).Count
 $offered = @($regions | Where-Object { ($_ -replace '\s') -eq $location }).Count -gt 0
 ```
 
-The command prints one region per line as a display name, so the comparison ignores spaces
-and case (`Australia East` is `australiaeast`). Only the registered case has been verified: it
-lists the region. An unregistered subscription is expected to print nothing or to leave the
-region out, which is why the second case below says "probably".
+If the command itself fails, that is a sign-in or permission problem, not a registration answer:
+fix it and run the check again. Otherwise it prints one region per line as a display name, so the
+comparison ignores spaces and case (`Australia East` is `australiaeast`). Only the registered case
+that lists the region has been verified. The other two outcomes are read from what the command
+prints, which is why they say "probably" and "appears".
 
 - **`$offered` is true:** the subscription is registered and offers the region. Carry on, and
   say in your final summary that you checked.
-- **`$offered` is false:** the subscription probably isn't registered or doesn't offer the
-  region. The portal is the authority, so ask the user once to confirm it: open
-  [sre.azure.com](https://sre.azure.com), choose **Create agent**, pick the subscription and
-  open the **Region** dropdown. An empty dropdown means it isn't registered (the Learn page
-  links the registration request); a dropdown that lists the region means it is, so carry on.
-  This is the only time anyone is asked about registration.
-- **Not registered yet:** build everything before the SRE steps now with `-Execute -To P7`
-  (P0 to P7: about 116 minutes plus roughly 20 for the Container Apps environment, and it still
-  needs `-ApproveCostStart` and `-AcceptSqlDeveloperTerms`), ask for registration, and continue
-  later with `-Execute -From P8` (P8 to P11) and the SRE switches. P10 and P11 (presenter guide
-  and inventory) run in that later pass; `-Only P10, P11` runs them earlier. If the 19:00
-  shutdown has stopped the VMs by then, run `Activate-ArcDemo.ps1` first: P8 runs on a host and
-  P9 readiness needs the lab Active. An Arc-only build (no `sre` section, about 90 minutes, one
-  switch) is the separate variant.
+- **`$listed` is 0:** the subscription probably isn't registered. The portal is the authority,
+  so ask the user once to confirm it: open [sre.azure.com](https://sre.azure.com), choose
+  **Create agent**, pick the subscription and open the **Region** dropdown. An empty dropdown
+  means it isn't registered, so the user asks for registration (see *Building before the agent
+  can be created*, below); a dropdown that lists the region means it is, so carry on. This is
+  the only time anyone is asked about registration.
+- **`$listed` is above 0 but `$offered` is false:** the subscription appears registered but
+  doesn't offer the skin's region, so there is nothing to confirm in the portal. This is the one
+  registration ask: show the user the listed regions and let them pick one or keep theirs. For a
+  listed region, set `$arc.azure.location` in the
+  [setup block](private-config.md#set-up-the-whole-demo) before it writes the file (the canonical
+  name is the display name without spaces, in lower case: `East US 2` is `eastus2`); the SRE skin
+  follows, and Deploy's own capacity check still applies in that region. For their own region,
+  build everything before the SRE steps and ask for the region (see *Building before the agent
+  can be created*, below). Never switch the region on your own.
+- **Building before the agent can be created** (registration or the region is still to come):
+  build everything before the SRE steps now with `-Execute -To P7` (P0 to P7: about 116 minutes
+  plus roughly 20 for the Container Apps environment, and it still needs `-ApproveCostStart` and
+  `-AcceptSqlDeveloperTerms`) and tell the user how to ask. The supported-regions page links a
+  [subscription registration request](https://github.com/microsoft/sre-agent/issues/new?labels=registration&title=Subscription+registration+request)
+  and a
+  [new region request](https://github.com/microsoft/sre-agent/issues/new?labels=region-request&title=New+region+request).
+  Both are public GitHub issues (the registration one asks for the subscription ID, the region
+  one for the region and the use case), so the user files it themselves; you never file one for
+  them. Continue later with `-Execute -From P8`
+  (P8 to P11) and the SRE switches. P10 and P11 (presenter guide and inventory) run in that later
+  pass; `-Only P10, P11` runs them earlier. If the 19:00 shutdown has stopped the VMs by then, run
+  `Activate-ArcDemo.ps1` first: P8 runs on a host and P9 readiness needs the lab Active. An
+  Arc-only build (no `sre` section, about 90 minutes, one switch) is the separate variant.
 - **P9 fails later because the subscription isn't registered:** get it registered, and check that
   `rg-<prefix>-sre` holds no agent: `az resource list -g rg-<prefix>-sre --subscription <SUB> --query "[?type=='Microsoft.App/agents'].name" -o tsv`
   prints nothing (or the group does not exist). Then run `-Execute -From P9 -Force` with the SRE
