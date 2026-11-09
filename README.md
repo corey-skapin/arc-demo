@@ -74,9 +74,11 @@ as the Arc skin. The
 You need PowerShell 7.4+ (run the scripts with `pwsh`, not Windows PowerShell 5.1), Azure
 CLI 2.60+ with Bicep, Git, Owner (or Contributor plus User Access Administrator) on the
 subscription, and the right to create an Entra app registration and secret for the Arc
-onboarding identity. Real builds were run only from a Windows PC (CI also runs the mocked
-tests on Linux); other systems are untested. Sign in yourself with `az login --tenant <TENANT>`: a tool can't do the browser
-sign-in, so it asks you to and waits. It then plans and builds.
+onboarding identity. If PowerShell, Azure CLI or Git is missing, the tool's first message
+offers to install it with winget and waits for your yes. Real builds were run only from a
+Windows PC (CI also runs the mocked tests on Linux); other systems are untested. Sign in
+yourself with `az login --tenant <TENANT>`: a tool can't do the browser sign-in, so it asks you
+to and waits. It then plans and builds.
 
 To drive the scripts yourself, start with the
 [ordered build wrapper](docs/runbook.md#build-everything-in-order-optional-wrapper)
