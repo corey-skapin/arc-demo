@@ -44,8 +44,10 @@ Open the repo in your AI tool and give it one prompt that carries everything, fo
 Those are the four acceptances the whole demo needs: starting billable resources (see
 [cost.md](docs/cost.md)), the SQL Server Developer licence terms, the paid SRE agent and the
 one subscription role assignment that lets the agent read Azure Monitor alerts. A yes given up
-front by name counts; a vague "go ahead" doesn't. Whatever you leave out, the tool asks for
-once, in its first message, in one list.
+front by name counts; a vague "go ahead" doesn't. The tool's first message carries one list of
+whatever you left out. After that it asks only when a step needs it: an e-mail address (if your
+sign-in name isn't one), a switch the plan lists that you haven't accepted, or the SRE
+registration question below.
 
 The tool checks for itself that your subscription is registered for Azure SRE Agent and offers
 your region (one read-only command, [how](docs/runbook.md#sre-agent-registration)). It asks you

@@ -175,7 +175,8 @@ build resumes where it stopped. Keep the config, state and evidence in the
 ```powershell
 $build = @{ SubscriptionId = '<SUB>'; TenantId = '<TENANT>'; BuildConfigPath = '<PRIVATE>\build.json' }
 .\scripts\Invoke-ArcDemoBuild.ps1 @build        # plan: order, status, switches needed, blockers, time
-.\scripts\Invoke-ArcDemoBuild.ps1 @build -Execute -From P2 -To P4 `
+# An example selection, P2 to P4 (nested guest on); -Confirm:$false is for a shell that can't answer the prompt
+.\scripts\Invoke-ArcDemoBuild.ps1 @build -Execute -From P2 -To P4 -Confirm:$false `
     -ApproveCostStart -AcceptWindowsEvaluationTerms -AcceptSqlDeveloperTerms
 ```
 
@@ -322,11 +323,12 @@ prints, which is why they say "probably" and "appears".
   [new region request](https://github.com/microsoft/sre-agent/issues/new?labels=region-request&title=New+region+request).
   Both are public GitHub issues (the registration one asks for the subscription ID, the region
   one for the region and the use case), so the user files it themselves; you never file one for
-  them. Continue later with `-Execute -From P8`
-  (P8 to P11) and the SRE switches. P10 and P11 (presenter guide and inventory) run in that later
-  pass; `-Only P10, P11` runs them earlier. If the 19:00 shutdown has stopped the VMs by then, run
-  `Activate-ArcDemo.ps1` first: P8 runs on a host and P9 readiness needs the lab Active. An
-  Arc-only build (no `sre` section, about 90 minutes, one switch) is the separate variant.
+  them. Continue later with `-Execute -From P8` (P8 to P11) and the SRE switches. P10 and P11
+  (presenter guide and inventory) run in that later pass; `-Only P10, P11` runs them earlier.
+  If the 19:00 shutdown has stopped the VMs by then, run `Activate-ArcDemo.ps1` first: P8 runs
+  on a host and P9 readiness needs the lab Active. In a shell that can't answer the confirmation
+  prompt, add `-Confirm:$false` to every `-Execute` in this section. An Arc-only build (no `sre`
+  section, about 90 minutes, one switch) is the separate variant.
 - **P9 fails later because the subscription isn't registered:** get it registered, and check that
   `rg-<prefix>-sre` holds no agent: `az resource list -g rg-<prefix>-sre --subscription <SUB> --query "[?type=='Microsoft.App/agents'].name" -o tsv`
   prints nothing (or the group does not exist). Then run `-Execute -From P9 -Force` with the SRE
