@@ -111,11 +111,13 @@ finishes and removes it on success/failure. Do not print credential-bearing scri
 
 **Symptom** — A build started as `pwsh -File .\scripts\Invoke-ArcDemoBuild.ps1 ... -Only P6.2, P6.3`
 (for example from a tool's background process) stops with `Cannot validate argument on
-parameter 'Only'. The argument "P6.2,P6.3" does not belong to the set ...`. The same
-command typed at a PowerShell prompt works.
+parameter 'Only'. The argument "P6.2," does not belong to the set ...`. Written without the
+space (`-Only P6.2,P6.3`) it stops the same way but names `"P6.2,P6.3"`. The same command
+typed at a PowerShell prompt works.
 
-**Cause** — `pwsh -File` hands every argument over as text, so the list arrives as the
-one string `P6.2,P6.3`, which is not a phase or step name.
+**Cause** — `pwsh -File` hands every argument over as text, so the list never arrives as an
+array: the first value the wrapper sees is `P6.2,` (with the space) or `P6.2,P6.3` (without),
+and neither is a phase or step name. A single name such as `-Only P6.2` is fine.
 
 **Fix** — Use `-From` and `-To`, which take one value each, or start the command with
 `pwsh -Command "& '.\scripts\Invoke-ArcDemoBuild.ps1' ... -Only P6.2, P6.3"`, which parses

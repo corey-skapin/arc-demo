@@ -164,6 +164,15 @@ distinguishes Azure deallocated and Arc offline/disconnected servers from online
 coverage; retaining the subscription plan does not itself prove every parked
 record is billed. Actual entitlement, onboarding model and usage matter.
 
+The SRE agent, when you build the SRE half, bills on its own meter and is not in the
+estimates above. Its always-on charge is 4 Azure Agent Units (AAUs) per hour from creation
+until the agent is deleted, whether or not it is working, plus a variable charge for the
+work it does. Stopping the agent keeps the always-on charge; only deleting it stops all
+billing. [Pricing and billing for Azure SRE Agent](https://learn.microsoft.com/azure/sre-agent/pricing-billing)
+explains how it bills and the [Azure pricing page](https://azure.microsoft.com/pricing/details/sre-agent/)
+has the price per AAU; the companion repo's `docs/sre-cost-and-demo-fidelity.md` shows what each
+state of its agent costs. No price is quoted here.
+
 VM definitions, basic NIC/VNet metadata, Arc inventory and managed identities
 need not be deleted to stop pay-as-you-go compute charges. Retaining disks still
 costs money; deleting VM definitions adds identity/restoration risk with no extra
