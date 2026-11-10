@@ -183,8 +183,11 @@ with no Heartbeat at the deadline is `pending` for that host only. A VM that is 
 longer running, an Arc identity that never connects, or no Heartbeat together with
 a `Failed` AMA extension fails. Observed wake: 11 min 55 s (5 November 2026, Linux hosts
 ready about 3 minutes after their start, Windows hosts about 7.5) and 14 min 54 s
-(2 November); expect about 12-15 minutes (VM start 3-4, NAT 1-2, Windows Heartbeat up
-to about 9) rather than 30-45+.
+(2 November); expect about 12-15 minutes after a short park (VM start 3-4, NAT 1-2,
+Windows Heartbeat up to about 9) rather than 30-45+. After a long park the Windows
+Heartbeats were late and the wake ended `pending`: Activate took 20 min 19 s and the last
+Windows host reported 27 min 27 s after the launch
+([10 November 2026](#wake-after-a-long-park-10-november-2026)).
 
 The Arc `status` is the slowest signal to move, in both directions. After a
 deallocation the Arc machines kept reading `Connected` for 11-16 minutes (observed;
@@ -193,8 +196,9 @@ minutes" of the last one, see [agent status](https://learn.microsoft.com/azure/a
 so an Arc row that reads `Connected` just after a start proves nothing. Trust the
 Heartbeat that was generated after the start; it is the condition that decides the wait.
 After a park longer than that, the next wake meets machines that read `Disconnected`.
-Learn says the status changes back to `Connected` on the next heartbeat; this lab has
-not yet shown that reverse transition (see [validation boundaries](#validation-boundaries)).
+Learn says the status changes back to `Connected` on the next heartbeat, and it did: after
+about four and a half days parked every machine reconnected by itself
+([10 November 2026](#wake-after-a-long-park-10-november-2026)).
 
 **No Run Command is used for host checks by default.** Run Command queues behind VM
 extension updates (Defender MDE, AMA, Change Tracking), so N blocked Linux VMs used
@@ -385,7 +389,8 @@ so you don't chase it in the activity log of a parked lab.
   parked Arc machine flaps between `Available` and `Unavailable` and disagreed with the
   `status` field for 16-20 minutes, so read `status`, not Resource Health. Hibernated
   readiness has no Arc row, so the delayed flip cannot fail it. The reverse reconnection
-  at the next wake is not yet proven.
+  at the next wake happened by itself after a longer park
+  ([10 November 2026](#wake-after-a-long-park-10-november-2026)).
 - **No Defender push** arrives while the VMs are deallocated: three hourly slots passed
   with no event. That says nothing about the push after a wake
   ([below](#linux-vms-and-the-defender-mdelinux-install-lock)).
@@ -739,7 +744,8 @@ Heartbeats without the old explicit service restarts. Arc records still read
 `Disconnected` to `Connected` transition, long-park reconnection and guest service
 health were not proven. The
 [5-6 November proof](#park-wake-and-park-again-5-6-november-2026) later showed the
-`Disconnected` half; the reconnection is still open. Fresh deployment, double-deploy
+`Disconnected` half and the [10 November proof](#wake-after-a-long-park-10-november-2026)
+the reconnection. Fresh deployment, double-deploy
 idempotency, AKS, assessment completion, full removal and rebuild remain outside this
 proof; drift, denial and partial-failure paths remain mocked.
 
@@ -789,14 +795,77 @@ What this proves, for this estate and these dates:
   nothing pushed to the estate while it was deallocated
   ([what still happens to a parked estate](#what-still-happens-to-a-parked-estate)).
 
+The reverse transition was listed here as not proven: this cycle's Activate began about three
+minutes after the first Hibernate ended, before any machine read `Disconnected`, and the
+machines were not woken after the second park. The
+[10 November wake](#wake-after-a-long-park-10-november-2026) closed it: after about four and a
+half days parked, every Arc machine reconnected by itself.
+
 Still not proven:
 
-- The reverse transition. The Activate in this cycle began about three minutes after the
-  first Hibernate ended, before any machine read `Disconnected`, and the machines were not
-  woken after the second park. Only an Activate after a long park shows whether the Arc
-  machines reconnect without help; the wake wait's Arc `Connected` and Heartbeat-after-start
-  conditions decide it.
 - Whether the ARM `Updating` state that the Linux VM extensions kept after the deallocate
   matters at the next Activate, and whether a platform patch write that is still pending
   when an Activate starts overlaps the boot-time `MDE.Linux` lock.
 - Delivery of the heartbeat alert e-mail.
+
+### Wake after a long park: 10 November 2026
+
+One Activate on the retained estate after it had been parked since 6 November, about four
+and a half days, from a clean checkout of merged main `371a10a` with the private skin the
+estate was built with (eight hosts and the nested guest `sql-guest`). Times are ACDT
+(UTC+10:30) on 10 November; durations are wall-clock. It is one measurement on one estate.
+
+- **Before:** all eight VMs deallocated, no NAT gateway or public IP, all nine Arc machines
+  `Disconnected`. `Activate-ArcDemo.ps1 -WhatIf` exited 0 in 60 seconds and listed the NAT
+  gateway and public IP to create, the eight VM starts, the nested guest start and the
+  Container App revision to activate.
+- **Activate:** launched at 10:40:20 and ended at 11:00:39 (**20 min 19 s**) with result
+  `pending`, not `fail`. It exits 0 in that case: the script records `pending`, throws
+  nothing and ends with `exit 0`. About 50 seconds of inventory reads, 47 seconds for the
+  NAT gateway and public IP, the eight VM starts requested over 34 seconds, all eight VMs
+  running by 10:44. Default options: no `-GuestChecks`, no `-RepairStalledAgents`, nothing
+  restarted by hand.
+- **Arc reconnected by itself, with no manual step.** First `Connected` read: the three
+  Linux hosts at 10:42:55 to 10:43:00, `win-sql-02` and the three `win-app-*` hosts at
+  10:45:01 to 10:45:16, `win-sql-01` at 10:47:52 and the nested guest at 10:48:51 (its Run
+  Command start passed). These come from `az connectedmachine list` polled every one to two
+  minutes. In later polls `lastStatusChange` had moved on by about five minutes with the
+  status unchanged, so it is not a connection time once a machine has been `Connected` for
+  a while.
+- **Linux Heartbeats** were generated from 10:43:17 and were queryable within seconds.
+- **Windows Heartbeats were late.** The five Windows hosts generated their first Heartbeats
+  between 10:48:09 and 10:52:37, 6 to 11 minutes after their start was requested, but each
+  host's first batch reached Log Analytics only between 11:03:14 and 11:07:47, 15 to 16
+  minutes after it was generated (`ingestion_time()` against `TimeGenerated`). This run
+  does not show whether the delay was in the agent or in ingestion.
+- **Why it ended `pending`:** the 12-minute host wait ran out at about 10:57 with only those
+  five Windows Heartbeats missing (the hosts were pending, not failed; the Linux hosts and
+  the nested guest had passed). Activate then submitted the eight patch assessments and took
+  its final readiness snapshot, where only `heartbeat/*` rows were pending.
+- **Readiness:**
+  `Test-ArcDemoReadiness.ps1 -DesiredState Ready -OutputFormat Json -TimeoutSeconds 900`
+  started at 11:01:40 and exited 0 at 11:10:46, 9 min 6 s later:
+  104 rows, all 67 required rows passed, 13 soft rows still pending (Linux AMA, Change
+  Tracking and `MDE.Linux` extension states `Updating`, and `MDE.Windows` on one SQL host).
+  The last Windows host's first Heartbeat was queryable 27 min 27 s after the launch; the
+  readiness run confirmed everything at **30 min 26 s** in all.
+
+What this shows: after a long park the Arc machines reconnected without help, and Activate's
+12-minute host wait ended `pending` with only the Windows Heartbeats missing. It does not show
+why they were late, whether a short park behaves the same (on 5 November the Windows hosts
+were ready about 7.5 minutes after their start), or whether 30 minutes is enough every time.
+
+If Activate ends `pending` with only `heartbeat/*` rows missing, it has not failed. Keep
+polling until the read-only check exits 0:
+
+```powershell
+.\scripts\Test-ArcDemoReadiness.ps1 @target -DesiredState Ready -OutputFormat Json -TimeoutSeconds 900
+```
+
+The script accepts up to 1800 seconds. Exit 2 means the deadline passed with rows still
+pending, so run it again; exit 1 means a required row failed, so read the rows. Do not
+restart agents, reinstall extensions or use `-RepairStalledAgents` to hurry it. If a long
+poll still ends pending, follow
+[Arc reconnects after startup, but Windows Heartbeat is still pending](troubleshooting.md#arc-reconnects-after-startup-but-windows-heartbeat-is-still-pending).
+For presenting, allow about 30 minutes from the launch of a long-park wake until every
+Windows machine reports; that is one measurement.
