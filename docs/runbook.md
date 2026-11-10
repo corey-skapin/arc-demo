@@ -646,8 +646,9 @@ one shared wait with a 12-minute global deadline (`-GuestCheckMinutes`) passes a
 when its VM is running, Arc is `Connected` and, for a monitored host, a Heartbeat was
 generated after the VM start. No Run Command is used for host checks by default, so a
 VM extension update that is still `Updating` (a warning, never a gate) cannot stall the
-wake; expect about 12-15 minutes (observed 11 min 55 s). The Arc status itself lags: Arc
-machines keep reading `Connected` for 11-16 minutes after a stop and then read
+wake; expect about 12-15 minutes after a short park (observed 11 min 55 s) and about 20
+minutes after a long one (20 min 19 s after four and a half days). The Arc status itself
+lags: Arc machines keep reading `Connected` for 11-16 minutes after a stop and then read
 `Disconnected`, so only the Heartbeat after the start decides a host. A host with no
 Heartbeat at the deadline is pending
 for that host only; a stopped VM or an Arc identity that never connects fails. Opt in
@@ -656,8 +657,15 @@ to Run Command guest checks with `-GuestChecks WhenStalled|Always` (Windows Arc
 `-RepairStalledAgents`; both share the same deadline. The nested SQL guest start keeps
 its Run Command concurrently with a five-minute budget. Per-host evidence records
 `method`, `startedAtUtc`, `lastHeartbeatUtc` and `extensionStates`.
-Telemetry-only pending does not fail activation, but recheck it through
-readiness before you present or start the dependent SRE flow.
+Telemetry-only pending does not fail activation: Activate exits 0 with a warning. After a
+long park it did exactly that for the five Windows hosts, whose Heartbeats became queryable
+15 to 16 minutes after the agents generated them
+([evidence](lifecycle.md#wake-after-a-long-park-10-november-2026)). Keep polling the bounded
+check from [section 4](#4-validate-then-rehearse), with `-TimeoutSeconds 900`, until it
+exits 0 (exit 2 means run it again) before you present or start the dependent SRE flow, and
+do not restart agents to hurry it. Allow about 30 minutes from the launch of a long-park wake
+until every Windows machine reports (one measurement: 27 min 27 s to the last Windows host's
+first Heartbeat, 30 min 26 s to a passing readiness).
 Default assessment submissions cover newly started/waking Arc hosts only;
 already-active retries do not resubmit. `-AssessPatches` explicitly requests
 all-host assessments (including assessment-phase retries). Use optional `-ResultPath`
